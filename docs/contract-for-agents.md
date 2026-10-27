@@ -2694,6 +2694,11 @@ be absent. Animations that do not set `box-shadow` remain on the section. On
 iPad, pointer hover over a grouped section does not activate its `:hover` shadow;
 forwarding from UIKit’s visible cells, header and footer is not implemented yet.
 
+`-exact-background-extension="auto"` on an `image` that meets the safe area (a
+sidebar, an inspector, the iPhone Duo's side strip) fills that area with the
+image's mirrored, blurred edges, as SwiftUI's `backgroundExtensionEffect()`
+does (iOS 26; LLP 1123 D11). The image keeps its laid-out frame.
+
 On macOS, date, time and datetime-local controls are default Tab stops whatever
 the system's Keyboard navigation setting, as `NSDatePicker` is; a select is one
 only with the setting on, as `NSPopUpButton` is. `tabindex=0` makes any of them a

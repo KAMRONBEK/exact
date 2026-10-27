@@ -139,6 +139,7 @@ extension NodeView {
     /// canvas's capture (`render(in:)`) drops masks and would show the tint's
     /// whole rectangle, so the template is `draw(_:)`'s, from the same pixels.
     package func applyImageLayer() {
+        defer { syncBackgroundExtension() }
         if ImageLink.pixelated?.apply(self) == true { return }
         if ImageLink.pixelated?.owns(imageLayer) == true { imageLayer?.removeFromSuperlayer(); imageLayer = nil }
         guard !cssVisibilityHidden, style["image_rendering"]?.string != "pixelated", kind == "image", symbolView == nil, style["tint_color"] == nil, let bitmap = raster?.image ?? flightLook?.stand?.image else {

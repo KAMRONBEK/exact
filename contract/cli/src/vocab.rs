@@ -501,6 +501,9 @@ fn one_text(name: &str, shown: &mut Shown) -> bool {
         if name == "navigationBar" {
             println!("  on a route (LLP 1115.000 D5.2). \"none\": the screen has no navigation bar on iOS, a full-bleed screen that draws its own chrome and way back (a photo viewer, a header laid out by hand); its `header` paints as written and the edge swipe still goes back. \"auto\", the default, is the platform's bar: the route's `header` when it is one (`contract vocab header`), else the system Back button alone on a pushed route, and no bar on a stack's first route. A `navigationBack` control drawn in a pushed route's page without it is a second Back (warning `lower-back-twice`). On the navigation root or off a route it is refused. docs/recipes/navigation-stack.md");
         }
+        if name == "-exact-background-extension" {
+            println!("  on an `image`, `none` (the default) or `auto`: where the image meets the safe area (a split's sidebar or inspector, the iPhone Duo's side strip), iOS 26 fills that area with the image's mirrored, blurred edges, as SwiftUI's `backgroundExtensionEffect()` does; the image keeps the place and size it was laid out at, so give it a width and height. Other hosts draw nothing more (LLP 1123 D11)");
+        }
         if name == "navigationInspector" {
             println!("  on a sheet route (`navigationPresentation=\"modal\"`): the sheet is an inspector, details beside the content they describe (SwiftUI's `inspector(isPresented:)`). Where iOS shows the stack as an expanded split (an iPad, the iPhone Duo open), the route is the split's inspector column at the trailing edge, beside the detail, which stays live; UIKit decides its width and whether the list stays beside it. A compact width and every other host keep the sheet. It opens with a push and closes with a Back, as the sheet does. iOS 26 and later (LLP 1127 D14)");
         }

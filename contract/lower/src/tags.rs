@@ -637,6 +637,7 @@ pub fn attr(name: &str) -> Option<AttrTarget> {
         // @ref LLP 1115.000 D5.2 — a route's say over the platform's bar:
         // `none` for a full-bleed screen.
         "navigationBar" => AttrTarget::Prop(p("navigationBar")),
+        "-exact-background-extension" => AttrTarget::Prop(p("backgroundExtension")),
         // @ref LLP 1127 — a sheet that an expanded split shows as its inspector.
         "navigationInspector" => AttrTarget::Prop(p(name)),
         "navigationSource" | "sharedElement" => AttrTarget::Prop(p(name)),

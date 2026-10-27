@@ -158,6 +158,8 @@ extension NavigationHost {
     /// whole view — and the header a bar replaces, reported when they change,
     /// after the batch being applied.
     func reportCovers() {
+        // An image's extension grows with the safe areas it meets.
+        defer { for image in presenter.carrying("backgroundExtension") { image.syncBackgroundExtension() } }
         clearBesideRoutes()
         var changes: [(UInt32, HostCover?)] = []
         var wanted: [UInt32: HostCover] = [:]
