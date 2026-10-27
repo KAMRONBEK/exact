@@ -57,6 +57,10 @@ extension NavigationHost: NavigationHosting {
     func padsTop(_ route: any RouteSurface) -> Bool {
         (route as? RouteController).map { padsTop($0) } ?? false
     }
+    var splitShownSurfaces: (beside: [any RouteSurface], under: [any RouteSurface]) {
+        let shown = splitShown
+        return (shown.beside, shown.under)
+    }
     func routeShowsBar(_ route: any RouteSurface, in nav: UINavigationController) -> Bool {
         (route as? RouteController).map { routeShowsBar($0, in: nav) } ?? false
     }

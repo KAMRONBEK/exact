@@ -499,8 +499,8 @@ export async function open({
             await s.find(target, true, true, nodes),
           );
     },
-    /** The node for a target: a testId (first in preorder on a selected route; a covered screen's copy only when no
-     * active one carries it), a view id, else the one view whose label or text it is (`nodeNamed`). */
+    /** The node for a target: a testId (the first live node in preorder, a split's list column included; a covered
+     * screen's copy only when no live one carries it), a view id, else the one view whose label or text it is (`nodeNamed`). */
     async find(target, required = true, named = true, tree = null) {
       if (target == null) throw new MalformedOperation(`no view matches ${target}`);
       const byId = typeof target === 'number' || /^\d+$/.test(String(target));

@@ -613,8 +613,9 @@ extension NavigationHost {
     /// Project each route of a stack into its navigation item when its
     /// authored source changed, then run the route hatch — before UIKit lays
     /// the stack out (LLP 1075.003 §3.2, §3.5 "projected defaults"). A plain
-    /// tab (PlainTabIOS) has no bar: its route's header is its content.
-    func prepareRoutes(_ routes: [RouteController], in stack: UIViewController) {
+    /// tab (PlainTabIOS) has no bar: its route's header is its content. A
+    /// split's detail counts as pushed from its first route (`firstPushed`).
+    func prepareRoutes(_ routes: [RouteController], in stack: UIViewController, firstPushed: Bool = false) {
         let nav = stack as? UINavigationController
         if let nav {
             hatchNavigation(nav)
@@ -632,7 +633,8 @@ extension NavigationHost {
             // the system Back alone on a pushed route with none of its own
             // (no header, a hidden one, one that is not a bar's), or no bar
             // where the route says so or has nothing to go back to.
-            c.pushed = index + front > 0
+            // A split's detail counts as pushed, its first route included (LLP 1127 D7).
+            c.pushed = index + front > 0 || firstPushed
             let transparent = RouteGeometry.transparentBar(c.node)
             let (shape, bar) = barShape(of: c, in: nav)
             let shows = bar != .hidden
@@ -644,7 +646,7 @@ extension NavigationHost {
                 }
             }
             // Let a root under More go back: UIKit's Back returns to More's list
-            let canGoBack = (index > 0 ? canInvokeBack : front > 0) && shape?.authoredBack != true
+            let canGoBack = (index > 0 || firstPushed ? canInvokeBack : front > 0) && shape?.authoredBack != true
             let scroller = contentScroller(of: c), scroll = contentScrollView(of: c)
             let dataset = c.node.props["dataset"]
             func barSource(_ key: (HeaderShape.Item) -> String) -> BarSource {
@@ -966,6 +968,8 @@ extension NavigationHost {
             c.search = search
             c.navigationItem.searchController = search.controller
             c.definesPresentationContext = true
+            // A split may place the field beyond its column, as SwiftUI's `searchable` lets it.
+            if #available(iOS 26.0, *) { c.navigationItem.searchBarPlacementAllowsExternalIntegration = true }
         }
         search.field = field
         // The search tab's root field says how the tab presents (TabsIOS.swift)

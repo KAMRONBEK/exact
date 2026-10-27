@@ -37,7 +37,7 @@ final class HostCoversMacTests: XCTestCase {
         p.apply(wireBatch([["op": "create", "id": 1, "kind": "view"], ["op": "roots", "ids": [1]]]))
         for limit in [4, 64] {
             var count = 0, depth = 0, deepest = 0
-            p.onCovers = { _ in
+            p.onCovers = { _, _ in
                 count += 1
                 depth += 1
                 deepest = max(deepest, depth)

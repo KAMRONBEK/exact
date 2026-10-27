@@ -54,22 +54,31 @@ package struct BlockPlacement: Equatable {
     package init(rect: CGRect, within: UInt32, contentOffset: CGPoint? = nil) { (self.rect, self.within, self.contentOffset) = (rect, within, contentOffset) }
 }
 
+/// How a host shows a route's block against its stack's top (LLP 1127 D8),
+/// as kind 23 says it: in its stack, beside the top and live (a split's
+/// list), or under a pane over it and not live (a split's detail under the
+/// list that overlays it).
+enum BlockShown: Float {
+    case inStack = 0, beside = 1, under = 2
+}
+
 extension Runtime {
     /// Subtrees' containing blocks (nil takes one back) under one layout,
     /// through the door the covers use (`exact_host_covers`, kinds 4 and 5),
     /// and where the blocks are shown when the host shows them in place
     /// (kinds 6 and 13; kind 7 forgets one), which only the runner's geometry
     /// reads (LLP 1123 D2). `shows` shows a split's own placeholder, or hides
-    /// it again (kinds 14 and 15, LLP 1116.006 D2), in the same layout.
-    func blocks(_ blocks: [(UInt32, HostBlock?)], placements: [(UInt32, BlockPlacement?)] = [], shows: [(UInt32, Bool)] = []) -> Batch {
-        let bytes = Self.blockRecords(blocks, placements: placements, shows: shows)
+    /// it again (kinds 14 and 15, LLP 1116.006 D2), in the same layout;
+    /// `shown` says how a block is shown against its stack's top (kind 23, LLP 1127).
+    func blocks(_ blocks: [(UInt32, HostBlock?)], placements: [(UInt32, BlockPlacement?)] = [], shows: [(UInt32, Bool)] = [], shown: [(UInt32, BlockShown)] = []) -> Batch {
+        let bytes = Self.blockRecords(blocks, placements: placements, shows: shows, shown: shown)
         return self.blocks(bytes)
     }
 
     func blocks(_ records: Data) -> Batch { on(layout: true) { read(exact_host_covers(rt, write(records))) } }
 
-    static func blockRecords(_ blocks: [(UInt32, HostBlock?)], placements: [(UInt32, BlockPlacement?)] = [], shows: [(UInt32, Bool)] = []) -> Data {
-        var bytes = Data(capacity: (blocks.count + placements.count + shows.count) * 36)
+    static func blockRecords(_ blocks: [(UInt32, HostBlock?)], placements: [(UInt32, BlockPlacement?)] = [], shows: [(UInt32, Bool)] = [], shown: [(UInt32, BlockShown)] = []) -> Data {
+        var bytes = Data(capacity: (blocks.count + placements.count + shows.count + shown.count) * 36)
         let append = { (words: [UInt32]) in
             for word in words { withUnsafeBytes(of: word.littleEndian) { bytes.append(contentsOf: $0) } }
         }
@@ -88,6 +97,7 @@ extension Runtime {
             let offset = placement.contentOffset ?? .zero
             append([view, placement.contentOffset == nil ? 6 : 13] + [r.minX, r.minY, r.width, r.height].map { Float($0).bitPattern } + [placement.within] + [offset.x, offset.y].map { Float($0).bitPattern })
         }
+        for (view, how) in shown { append([view, 23, how.rawValue.bitPattern, 0, 0, 0]) }
         return bytes
     }
 }

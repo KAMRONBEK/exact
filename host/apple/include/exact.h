@@ -32,7 +32,7 @@
 #include <stdint.h>
 
 /* The ABI's version: part of the compatibility id (LLP 1030 D3a). */
-#define EXACT_ABI_VERSION 19
+#define EXACT_ABI_VERSION 20
 
 #ifdef __cplusplus
 extern "C" {
@@ -996,7 +996,7 @@ uint32_t exact_screen(ExactRuntime rt, float width, float height);
  * then, with 16, the rects' count and each rect's x y w h, on the grid
  * exact_segments set, then, with 32, the software keyboard's overlap with the
  * viewport (exactViewport().keyboardHeight), then, with 64, block and
- * placement records as exact_host_covers kinds 4, 5, 6, 7 and 13:
+ * placement records as exact_host_covers kinds 4, 5, 6, 7, 13 and 23:
  * exact_screen, exact_insets,
  * exact_regions, exact_resize and a keyboard's segment extents in one batch
  * under one layout. Rects off the grid, or not finite, are refused and change
@@ -1051,7 +1051,10 @@ uint32_t exact_intrinsics(ExactRuntime rt, size_t len);
  * right, bottom, left, the content root's width and height, uint32 columns
  * and rows, four float rects x y w h (the segments, row-major), uint32 1 when
  * twenty float region insets follow (else 0, the regions the safe area's);
- * kind 22 takes them back. */
+ * kind 22 takes them back. Kind 23 says how a block is shown against its
+ * stack's top (LLP 1127): float 1 beside it, live (a split's list column, the
+ * detail beside an inspector), 2 under a pane over it, not live (a split's
+ * detail under the list that overlays it), 0 in its stack; then three unused. */
 uint32_t exact_host_covers(ExactRuntime rt, size_t len);
 /* What a block's root would measure in another block (a popover's
  * position-area option, LLP 1021 D2): each axis a length and a policy as

@@ -212,7 +212,7 @@ impl<D: DataSource> Host<D> {
         placements: &[(exact_kernel::ViewId, Option<exact_runner::BlockPlacement>)],
     ) -> String {
         self.set_view_at(
-            screen, insets, regions, size, segments, keyboard, blocks, placements, None,
+            screen, insets, regions, size, segments, keyboard, blocks, placements, &[], None,
         )
     }
 
@@ -229,6 +229,7 @@ impl<D: DataSource> Host<D> {
         keyboard: Option<f32>,
         blocks: &[(exact_kernel::ViewId, Option<exact_kernel::HostBlock>)],
         placements: &[(exact_kernel::ViewId, Option<exact_runner::BlockPlacement>)],
+        shown: &[(exact_kernel::ViewId, exact_kernel::BlockShown)],
         now_ms: Option<f64>,
     ) -> String {
         let keyboard = keyboard.map(f64::from);
@@ -277,7 +278,7 @@ impl<D: DataSource> Host<D> {
         } else {
             (Batch::new(), None)
         };
-        let error = error.or(self.blocks_into(blocks, placements));
+        let error = error.or(self.blocks_into(blocks, placements, shown));
         let changed = self.environment_into(env, segments, &mut batch);
         if let Err(error) = changed {
             return self.geometry_refused(error, Some(previous));

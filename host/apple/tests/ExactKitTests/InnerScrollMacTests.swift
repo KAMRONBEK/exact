@@ -59,12 +59,12 @@ final class InnerScrollMacTests: XCTestCase {
         let p = session.presenter
         var deliveries = 0, depth = 0, deepest = 0
         let deliver = p.onCovers
-        p.onCovers = { changes in
+        p.onCovers = { changes, owners in
             deliveries += 1
             guard deliveries < 64 else { return }
             depth += 1
             deepest = max(deepest, depth)
-            deliver?(changes)
+            deliver?(changes, owners)
             depth -= 1
         }
         defer { p.onCovers = deliver }

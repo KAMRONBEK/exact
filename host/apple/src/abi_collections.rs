@@ -74,7 +74,9 @@ impl<D: DataSource> Bridge<D> {
     /// segments, row-major, the unused ones zero), u32 1 when twenty f32
     /// region insets follow (D10's five regions, each top, right, bottom,
     /// left) and 0 when the regions are the safe area's. Kind 22 takes an
-    /// owner's values back.
+    /// owner's values back. Kind 23 says how a block is shown against its
+    /// stack's top (LLP 1127), its first float 1 beside it, 2 under a pane
+    /// over it, 0 in its stack.
     pub fn covers(&mut self, len: usize) -> u32 {
         let bytes = self.input.get(..len).unwrap_or(&[]);
         let out = if let Ok(records) = records(bytes) {
@@ -143,6 +145,7 @@ impl<D: DataSource> Bridge<D> {
                     restyles: &restyles,
                     locals: &locals,
                     owners: &owned,
+                    shown: &owners.shown,
                 })
             })
         } else {
@@ -426,11 +429,13 @@ pub(super) fn records(bytes: &[u8]) -> Result<Vec<&[u8]>, &'static str> {
 pub(super) struct BlockChanges {
     pub blocks: Vec<(u32, Option<exact_kernel::HostBlock>)>,
     pub placements: Vec<(u32, Option<exact_runner::BlockPlacement>)>,
+    pub shown: Vec<(u32, exact_kernel::BlockShown)>,
 }
 
 impl BlockChanges {
-    /// Whether this record is an owner allocation or placement; an error
-    /// for a block whose try tactic is no side permutation.
+    /// Whether this record is an owner allocation, a placement or how a
+    /// block is shown (kind 23); an error for a block whose try tactic is no
+    /// side permutation.
     pub fn push(&mut self, r: &[u8]) -> Result<bool, &'static str> {
         let word = |i: usize| [r[i], r[i + 1], r[i + 2], r[i + 3]];
         let edge = |i: usize| f32::from_le_bytes(word(i));
@@ -469,6 +474,14 @@ impl BlockChanges {
                 ));
             }
             7 => self.placements.push((view, None)),
+            23 => self.shown.push((
+                view,
+                match edge(8) {
+                    1.0 => exact_kernel::BlockShown::Beside,
+                    2.0 => exact_kernel::BlockShown::Under,
+                    _ => exact_kernel::BlockShown::InStack,
+                },
+            )),
             _ => return Ok(false),
         }
         Ok(true)

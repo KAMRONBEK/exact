@@ -322,16 +322,16 @@ final class NavigationTabsIOSTests: XCTestCase {
         guard hostedWindowScene() != nil else { throw missing("scene", "the authored tabs need their window safe area and control dispatch") }
         var calls = 0, depth = 0, maximumDepth = 0
         var history: [String] = []
-        var deliver: (([(UInt32, HostCover?)]) -> Void)?
+        var deliver: (([(UInt32, HostCover?)], [(UInt32, OwnerValues?)]) -> Void)?
         let session = try fixture("overflowing-authored-tabs", wholeScreen: true, plan: "EXACT_OVERFLOWING_TABS_PLAN", prepare: { session in
             deliver = session.presenter.onCovers
-            session.presenter.onCovers = { changes in
+            session.presenter.onCovers = { changes, owners in
                 depth += 1
                 defer { depth -= 1 }
                 maximumDepth = max(maximumDepth, depth)
                 calls += 1
                 history.append(String(describing: changes))
-                if depth < 3 && calls < 24 { deliver?(changes) }
+                if depth < 3 && calls < 24 { deliver?(changes, owners) }
             }
         })
         let p = session.presenter, list = try node(session, "tabs")
@@ -355,7 +355,7 @@ final class NavigationTabsIOSTests: XCTestCase {
         let navigation = p.navigationHost
         p.apply(wireBatch([["op": "create", "id": 1, "kind": "view"], ["op": "roots", "ids": [1]]]))
         var count = 0, depth = 0, maximumDepth = 0
-        p.onCovers = { _ in
+        p.onCovers = { _, _ in
             depth += 1
             defer { depth -= 1 }
             maximumDepth = max(maximumDepth, depth)

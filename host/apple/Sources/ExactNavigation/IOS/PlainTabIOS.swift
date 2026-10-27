@@ -92,7 +92,7 @@ extension NavigationHost {
     /// the one stack of a root without tabs.
     var primaryStacks: [UIViewController] {
         if let bootOwner { return [bootOwner] }
-        guard !tabPanels.isEmpty else { return [primaryNavigation].compactMap { $0 } }
+        guard !tabPanels.isEmpty else { return [primaryNavigation, split?.detail, split?.inspector].compactMap { $0 } }
         let held = moreTab
         return tabPanels.indices.compactMap { $0 == held ? more : tabStack($0) }
     }

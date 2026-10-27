@@ -574,7 +574,7 @@ final class NativeListScrollIOSTests: GroupedListFixture {
                            ["op": "props", "id": 1, "set": ["scrollTop": "140"]]]))
         let scroll = try XCTUnwrap(owner.scrollView)
         var delivered = 0
-        p.onCovers = { _ in delivered += 1 }
+        p.onCovers = { _, _ in delivered += 1 }
         owner.retainScrollPosition(from: scroll)
         p.navigationHost.reportCovers()
         XCTAssertEqual(delivered, 0, "nothing changed, so nothing is delivered")
@@ -596,7 +596,7 @@ final class NativeListScrollIOSTests: GroupedListFixture {
                            ["op": "frame", "id": 1, "x": 0.0, "y": 0.0, "w": 402.0, "h": 180.0], ["op": "content", "id": 1, "w": 402.0, "h": 9000.0],
                            ["op": "props", "id": 1, "set": ["scrollTop": "140"]]]))
         let scroll = try XCTUnwrap(owner.scrollView)
-        p.onCovers = { _ in }
+        p.onCovers = { _, _ in }
         owner.retainScrollPosition(from: scroll)
         scroll.contentOffset.y = 0
         var chain: AnyObject?
@@ -621,7 +621,7 @@ final class NativeListScrollIOSTests: GroupedListFixture {
                            ["op": "frame", "id": 1, "x": 0.0, "y": 0.0, "w": 402.0, "h": 180.0], ["op": "content", "id": 1, "w": 402.0, "h": 9000.0],
                            ["op": "props", "id": 1, "set": ["scrollTop": "140"]]]))
         let scroll = try XCTUnwrap(owner.scrollView)
-        p.onCovers = { _ in }
+        p.onCovers = { _, _ in }
         session.holdFillForTests()
         session.whenIdle {
             owner.retainScrollPosition(from: scroll)

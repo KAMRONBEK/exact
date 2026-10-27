@@ -78,7 +78,7 @@ final class ScrollAnchoringIOSTests: XCTestCase {
             p.navigationHost.covers = [2: .whole]
             p.navigationHost.delivered = p.navigationHost.covers
             var deliveries = 0
-            p.onCovers = { changes in
+            p.onCovers = { changes, _ in
                 deliveries += 1
                 XCTAssertFalse(p.applying)
                 XCTAssertEqual(changes.count, 1)
@@ -102,7 +102,7 @@ final class ScrollAnchoringIOSTests: XCTestCase {
         p.navigationHost.covers = [2: .whole]
         p.navigationHost.delivered = p.navigationHost.covers
         var deliveries: [[(UInt32, HostCover?)]] = []
-        p.onCovers = { changes in
+        p.onCovers = { changes, _ in
             XCTAssertFalse(p.applying)
             deliveries.append(changes)
         }

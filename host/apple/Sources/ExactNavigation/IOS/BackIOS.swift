@@ -28,10 +28,18 @@ extension NavigationHost {
             more.popViewController(animated: !ExactEnv.agentFreezes)
             return ""
         }
-        guard (navigation?.viewControllers.count ?? 0) > 1 else { return nil }
+        guard (backBar?.depth ?? 0) > 1 else { return nil }
         guard back != nil else { return backRefusal }
         goBack()
         return ""
+    }
+
+    /// The controller whose bar holds Back for the stack in front, and how
+    /// many routes that bar goes back through: in a split, the list's while
+    /// collapsed, else the detail's over its own routes.
+    var backBar: (nav: UINavigationController, depth: Int)? {
+        guard modalNavigation == nil, let split else { return navigation.map { ($0, $0.viewControllers.count) } }
+        return split.controller.isCollapsed ? (split.list, split.shown.count) : (split.detail, split.shown.count - 1)
     }
 
     /// More, while it shows a tab's root or a plain tab over its list with
@@ -91,7 +99,7 @@ extension NavigationHost {
                                            inAnyRoute: { control in routes.contains { control === $0 || control.isDescendant(of: $0) } })
     }
 
-    private var selectedRoute: NodeView? {
+    var selectedRoute: NodeView? {
         guard let key = selectedKey else { return nil }
         return routeIDs.compactMap({ presenter.views[$0] }).first(where: { $0.props["navigationKey"] == key })
     }

@@ -444,7 +444,7 @@ final class NativeListNavigationIOSTests: XCTestCase {
         route.view.addSubview(native)
         // The covers report is swallowed: no batch follows, as none does when the covers do not change
         let deliver = p.onCovers
-        p.onCovers = { _ in }
+        p.onCovers = { _, _ in }
         defer { native.removeFromSuperview(); p.onCovers = deliver }
         automatic.contentOffset.y += 120
         let top = automatic.contentOffset.y + node.scrollTopInset(automatic)
@@ -684,7 +684,7 @@ final class NativeListNavigationIOSTests: XCTestCase {
         let heading = try XCTUnwrap(p.views.values.first { $0.props["accessibilityHeadingLevel"] != nil && $0.isDescendant(of: header) })
         XCTAssertEqual(collection.contentOffset.y + node.scrollTopInset(collection), 0, accuracy: 0.5)
         var nested = 0
-        p.onCovers = { _ in
+        p.onCovers = { _, _ in
             guard nested == 0 else { return }
             nested += 1
             XCTAssertFalse(p.applying)

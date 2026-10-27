@@ -294,6 +294,22 @@ package protocol NavigationHosting: AnyObject {
     /// The correction a route's opted-out edges hold in `scroll`'s insets (`RouteSafeArea`).
     func safeAreaCorrection(_ scroll: UIScrollView) -> UIEdgeInsets
 
+    // A split's columns (LLP 1127).
+    /// Whether a grouped list shows as UIKit's sidebar: in a split's list column beside its detail.
+    func showsAsSidebar(_ list: UIView) -> Bool
+    /// The row of a sidebar whose detail shows, which stays selected.
+    func sidebarSelection(_ list: UIView) -> UInt32?
+    /// Whether a view is in a split's column whose ground is UIKit's: the sidebar or the inspector.
+    func onColumnGround(_ view: UIView) -> Bool
+    /// Whether `id`'s view is the inspector's route's, or in it, live while its column slides out.
+    func slidesOut(_ id: UInt32) -> Bool
+    /// How the split's routes show against the stack's top (LLP 1127 D8): beside it, live, or under it.
+    var splitShownSurfaces: (beside: [any RouteSurface], under: [any RouteSurface]) { get }
+    /// Tells `tell` the routes' blocks and placements, those of routes no frame has shown first and still.
+    func tellStill<A, B>(_ a: [(UInt32, A)], _ b: [(UInt32, B)], _ tell: ([(UInt32, A)], [(UInt32, B)]) -> Void)
+    /// Keeps the inspector's route live while its column slides out, when `batch` destroys it.
+    func slideOutInspector(_ batch: Batch)
+
     // Scrolling.
     var scrollsToTopSelection: UIScrollView? { get set }
     func shownScroll(_ node: NodeView?) -> UIScrollView?
@@ -561,6 +577,14 @@ package final class NoNavigation: NavigationHosting {
     /// No route turns an edge's clearance off without navigation.
     package func adjustedInsetChanged(_ node: NodeView) {}
     package func safeAreaCorrection(_ scroll: UIScrollView) -> UIEdgeInsets { .zero }
+    /// No split shows without navigation.
+    package func showsAsSidebar(_ list: UIView) -> Bool { false }
+    package func sidebarSelection(_ list: UIView) -> UInt32? { nil }
+    package func onColumnGround(_ view: UIView) -> Bool { false }
+    package func slidesOut(_ id: UInt32) -> Bool { false }
+    package var splitShownSurfaces: (beside: [any RouteSurface], under: [any RouteSurface]) { ([], []) }
+    package func tellStill<A, B>(_ a: [(UInt32, A)], _ b: [(UInt32, B)], _ tell: ([(UInt32, A)], [(UInt32, B)]) -> Void) { tell(a, b) }
+    package func slideOutInspector(_ batch: Batch) {}
 
     package func shownScroll(_ node: NodeView?) -> UIScrollView? { node?.scrollView }
     package func scrollBackendChanged(_ node: NodeView) {

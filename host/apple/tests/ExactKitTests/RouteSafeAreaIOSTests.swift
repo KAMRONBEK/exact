@@ -67,7 +67,7 @@ final class RouteSafeAreaIOSTests: XCTestCase {
             host.view.layoutIfNeeded()
         }
         func policy(_ value: String) {
-            route.node.props["safeArea"] = value
+            route.optOut(value)
             route.safeArea.sync(route)
         }
     }
@@ -128,18 +128,6 @@ final class RouteSafeAreaIOSTests: XCTestCase {
         f.policy("top")
         XCTAssertEqual(f.scroll.adjustedContentInset.top, 0)
         XCTAssertEqual(f.scroll.adjustedContentInset.bottom, 34)
-    }
-
-    func testInvalidRuntimeValuesAreAutoAsAWhole() {
-        let f = Fixture()
-        for value in ["none bottom", "auto top", "top top", "Top", "top,bottom", "", "top unknown"] {
-            f.route.node.props["safeArea"] = value
-            for edge in ["top", "right", "bottom", "left"] {
-                XCTAssertFalse(f.route.ignoresSafeArea(edge), "\(value): \(edge)")
-            }
-            f.route.safeArea.sync(f.route)
-            XCTAssertEqual(f.scroll.contentInset, .zero, value)
-        }
     }
 
     /// While a control refreshes, UIKit adds its room to the scroller's own
@@ -250,6 +238,16 @@ final class RouteSafeAreaIOSTests: XCTestCase {
         XCTAssertEqual(f.scroll.contentInset.right, 6)
         XCTAssertEqual(f.scroll.verticalScrollIndicatorInsets.bottom, 34)
         XCTAssertEqual(f.scroll.horizontalScrollIndicatorInsets, base)
+    }
+}
+
+extension RouteController {
+    /// Turn the route's own clearance off as `-exact-safe-area` does, by
+    /// edge (`NavigationHost.clearanceOff`): "auto", "none" or edge names.
+    func optOut(_ value: String) {
+        let bits = ["top": 1, "right": 2, "bottom": 4, "left": 8]
+        let off = value == "none" ? 15 : value.split(separator: " ").reduce(0) { $0 | (bits[String($1)] ?? 0) }
+        node.style["safe_area"] = .number(Double(off))
     }
 }
 #endif

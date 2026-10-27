@@ -11,7 +11,9 @@
 //! content owner's values (LLP 1123 D9).
 
 use super::Host;
-use exact_kernel::{BlockMeasure, GroupedMargins, HostBlock, HostCover, OwnerValues, ViewId};
+use exact_kernel::{
+    BlockMeasure, BlockShown, GroupedMargins, HostBlock, HostCover, OwnerValues, ViewId,
+};
 use exact_runner::DataSource;
 
 /// A host's restyle of a box under the claims' layout.
@@ -46,6 +48,8 @@ pub struct Claims<'a> {
     pub locals: &'a [(Option<ViewId>, Option<[f32; 4]>)],
     /// A content owner's safe area, regions, segments and size.
     pub owners: &'a [(ViewId, Option<OwnerValues>)],
+    /// How a block is shown against its stack's top (a split's columns).
+    pub shown: &'a [(ViewId, BlockShown)],
 }
 
 impl<D: DataSource> Host<D> {
@@ -121,6 +125,7 @@ impl<D: DataSource> Host<D> {
             restyles,
             locals,
             owners,
+            shown,
         } = *claims;
         self.presence.unauthored = true;
         let (mut error, mut read, mut local_layout) = (None, false, false);
@@ -189,7 +194,7 @@ impl<D: DataSource> Host<D> {
             .iter()
             .map(|&(view, _)| self.runner.kernel().host_block(view))
             .collect();
-        error = error.or(self.blocks_into(blocks, placements));
+        error = error.or(self.blocks_into(blocks, placements, shown));
         // A block is the content root container units read (LLP 1123 D16): the rows under one that changed are sent
         // again as their owner now resolves them, as an owner's values' are, whichever of the two came first
         for (&(view, _), was) in blocks.iter().zip(was) {
@@ -233,11 +238,13 @@ impl<D: DataSource> Host<D> {
         }
         self.finish(batch, error)
     }
-    /// Set allocations and placements before the caller's single layout.
+    /// Set allocations, placements and how blocks are shown before the
+    /// caller's single layout.
     pub(super) fn blocks_into(
         &mut self,
         blocks: &[(ViewId, Option<HostBlock>)],
         placements: &[(ViewId, Option<exact_runner::BlockPlacement>)],
+        shown: &[(ViewId, BlockShown)],
     ) -> Option<String> {
         let mut error = None;
         if !blocks.is_empty() {
@@ -256,6 +263,10 @@ impl<D: DataSource> Host<D> {
             }
         }
         self.runner.place_blocks(placements);
+        // Liveness alone: the runner reads it, layout does not.
+        for &(view, how) in shown {
+            self.runner.kernel_mut().set_host_block_shown(view, how);
+        }
         error
     }
 }

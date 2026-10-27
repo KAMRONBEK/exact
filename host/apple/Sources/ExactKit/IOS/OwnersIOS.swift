@@ -208,6 +208,8 @@ package final class OwnerBlocks {
     /// What the runtime was last told, by route: its block, and its
     /// placement unless it is presented.
     private(set) var told: [UInt32: (block: HostBlock, placement: BlockPlacement?)] = [:]
+    /// How the routes were told they show against their stack's top (a split's columns).
+    private var toldShown: [UInt32: BlockShown] = [:]
     private var resetting = false, revealOwed = false
     private var viewChanges = 0
     /// Each block's rectangle in its root's coordinates (`BatchOp.blockRect`),
@@ -324,19 +326,31 @@ package final class OwnerBlocks {
             DispatchQueue.main.async { [weak self] in self?.publish() }
             return
         }
-        let records = takeChanges()
-        if !records.isEmpty {
-            session.applyUnlessEmpty(session.runtime.blocks(records), scrolled: true)
+        // A route no frame has shown is told first, still (`tellStill`).
+        let (blocks, placements, shown) = takeChangeLists()
+        var untold = shown
+        presenter.navigation.tellStill(blocks, placements) { blocks, placements in
+            let records = Runtime.blockRecords(blocks, placements: placements, shown: untold)
+            if !records.isEmpty { session.applyUnlessEmpty(session.runtime.blocks(records), scrolled: true) }
+            untold = []
         }
         revealIfOwed()
     }
 
-    /// Sample after UIKit has established containing bounds. A pending fill keeps
-    /// its deferred report, which samples again when that fill lands.
+    /// Sample after UIKit has established containing bounds, as records. A
+    /// pending fill keeps its deferred report, which samples again when that
+    /// fill lands.
     func takeChanges() -> Data {
+        let (blocks, placements, shown) = takeChangeLists()
+        return Runtime.blockRecords(blocks, placements: placements, shown: shown)
+    }
+
+    /// The blocks, placements and ways of showing (LLP 1127 D8) that changed
+    /// since the runtime was last told (`takeChanges`).
+    private func takeChangeLists() -> ([(UInt32, HostBlock?)], [(UInt32, BlockPlacement?)], [(UInt32, BlockShown)]) {
         guard !resetting, !presenter.resetting, !presenter.applying,
               !Owner.shared.isServingMain, let session = presenter.session,
-              session.state != .destroyed, !session.fillInFlight else { return Data() }
+              session.state != .destroyed, !session.fillInFlight else { return ([], [], []) }
         var now: [UInt32: (block: HostBlock, placement: BlockPlacement?)] = [:]
         for (id, block) in presenter.dialogs.containingBlocks { now[id] = (block, nil) }
         for (route, view, block, shown, presented) in routes {
@@ -363,8 +377,18 @@ package final class OwnerBlocks {
         }
         // A block taken back forgets its placement with it
         blocks += told.keys.filter { now[$0] == nil && presenter.views[$0] != nil }.map { ($0, nil) }
+        // A block given again starts in its stack in the kernel: how it is shown is told again.
+        let given = Set(now.keys.filter { told[$0] == nil })
         told = now
-        return Runtime.blockRecords(blocks, placements: placements)
+        // A split's list shows beside its detail, live (LLP 1127 D8), as does the detail beside its
+        // inspector; the detail under the list that overlays it, and the columns under a sheet, show, not live.
+        let split = presenter.navigation.splitShownSurfaces
+        var shown: [UInt32: BlockShown] = [:]
+        for route in split.beside { shown[route.node.id] = .beside }
+        for route in split.under { shown[route.node.id] = .under }
+        let changes = Set(toldShown.keys).union(shown.keys).filter { (toldShown[$0] != shown[$0] || given.contains($0)) && (now[$0] != nil || shown[$0] != nil) }.map { ($0, shown[$0] ?? .inStack) }
+        toldShown = shown
+        return (blocks, placements, changes)
     }
 
     private func revealIfOwed() {
@@ -403,7 +427,7 @@ package final class OwnerBlocks {
         resetting = true
         teardown()
         resetting = false
-        told = [:]
+        told = [:]; toldShown = [:]
         blockRects = [:]
         revealOwed = false
     }

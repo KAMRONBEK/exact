@@ -101,7 +101,7 @@ final class NavigationSequenceIOSTests: XCTestCase {
         }
         settle(navigation, more, step.rawValue)
         let deliver = p.onCovers, dismissal = SheetDismissal()
-        p.onCovers = { _ in }
+        p.onCovers = { _, _ in }
         UIView.setAnimationsEnabled(true)
         defer { UIView.setAnimationsEnabled(false); dismissal.interactive = false; p.onCovers = deliver }
         switch step {
@@ -173,7 +173,7 @@ final class NavigationSequenceIOSTests: XCTestCase {
         XCTAssertTrue(c.scrollEdgesOwed && c.collapseScroll === list)
         XCTAssertFalse(navigation.pendingSync || navigation.tabsHeld, "nothing is held")
         let deliver = session.presenter.onCovers
-        session.presenter.onCovers = { _ in }
+        session.presenter.onCovers = { _, _ in }
         defer { session.presenter.onCovers = deliver }
         let syncs = navigation.syncCalls
         three.delegate?.navigationController?(three, didShow: try XCTUnwrap(three.topViewController), animated: false)

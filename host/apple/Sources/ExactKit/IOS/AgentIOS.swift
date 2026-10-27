@@ -428,7 +428,7 @@ extension Agent {
             native["tabBar"] = observation
         }
         // A route's navigation bar, which draws its header (LLP 1115.000 D5.2)
-        if let route = navigation.controllers[host.id], route.node === host, let nav = route.navigationController {
+        if let route = navigation.routeSurfaces[host.id], route.node === host, let nav = route.navigationController {
             let shown = !nav.isNavigationBarHidden && nav.navigationBar.window != nil
             var observation: [String: Any] = ["visible": shown]
             if shown { observation["frame"] = rect(box(nav.navigationBar)) }

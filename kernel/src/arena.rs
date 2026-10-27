@@ -16,8 +16,8 @@ pub(crate) mod button;
 pub(crate) mod control_text;
 pub(crate) mod defaults;
 mod inline_image;
-mod styles;
 mod owners;
+mod styles;
 pub mod text_style;
 
 use taffy::NodeId;

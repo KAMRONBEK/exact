@@ -181,12 +181,26 @@ final class RouteController: UIViewController, UIScrollViewDelegate {
         assign(view, \.tintColor, node.ownAccent)
         let modal = node.props["navigationPresentation"] == "modal"
         let overPage = node.paintsOverPage
+        // In a split's inspector UIKit's column shows behind the route (LLP
+        // 1127); in its sidebar, through the column's glass, the system
+        // background, as SwiftUI's sidebar paints it.
+        let column = host?.onColumnGround(view) == true, sidebar = column && host?.showsAsSidebar(view) == true
         let key = overPage ? []
+            : column ? [sidebar ? [1] : [0]]
             : modal ? [ownBackdrop(dark: false), ownBackdrop(dark: true)]
             : [backdrop(dark: false), backdrop(dark: true)]
         guard view.backgroundColor == nil || key != backdropKey else { return }
         backdropKey = key
         if overPage { view.backgroundColor = .clear; return }
+        if column {
+            // tvOS has no split (`wantsSplit`) and no system backgrounds.
+            #if os(tvOS)
+            view.backgroundColor = .clear
+            #else
+            view.backgroundColor = sidebar ? .systemBackground : .clear
+            #endif
+            return
+        }
         #if os(tvOS)
         // tvOS has no system backgrounds; white stands in, as the viewport's.
         let system = UIColor.white

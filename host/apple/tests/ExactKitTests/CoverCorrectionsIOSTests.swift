@@ -13,7 +13,7 @@ final class CoverCorrectionsIOSTests: XCTestCase {
         defer { session.destroy() }
         let navigation = session.presenter.navigationHost
         var told = 0
-        session.presenter.onCovers = { _ in
+        session.presenter.onCovers = { _, _ in
             told += 1
             guard told < 40 else { return }
             session.whenIdle(bound: true) { session.apply(wireBatch([])) }
@@ -43,7 +43,7 @@ final class CoverCorrectionsIOSTests: XCTestCase {
         let navigation = session.presenter.navigationHost
         var told = 0
         // Two answers to each delivery, each moving its own scroller, which changes that scroller's cover again
-        session.presenter.onCovers = { _ in
+        session.presenter.onCovers = { _, _ in
             told += 1
             guard told < 300 else { return }
             for id: UInt32 in [1, 2] {
@@ -68,7 +68,7 @@ final class CoverCorrectionsIOSTests: XCTestCase {
         defer { session.destroy() }
         let navigation = session.presenter.navigationHost
         var told: [UInt32] = []
-        session.presenter.onCovers = { changes in
+        session.presenter.onCovers = { changes, _ in
             told += changes.map(\.0)
             session.whenIdle(bound: true) { session.apply(wireBatch([])) }
         }
@@ -100,7 +100,7 @@ final class CoverCorrectionsIOSTests: XCTestCase {
         defer { session.destroy() }
         let navigation = session.presenter.navigationHost
         var heldBetween: Bool?, lifted = false
-        session.presenter.onCovers = { _ in session.whenIdle(bound: true) { session.apply(wireBatch([])) } }
+        session.presenter.onCovers = { _, _ in session.whenIdle(bound: true) { session.apply(wireBatch([])) } }
         // The first delivery's answer lifts another header, as `coverLifted` does inside a batch
         session.onApplyForTests = { _ in
             guard session.coversCause != nil, !lifted else { return }
@@ -141,7 +141,7 @@ final class CoverCorrectionsIOSTests: XCTestCase {
         p.apply(wireBatch(ops))
         let owners = try [UInt32(2), 3].map { try XCTUnwrap(p.views[$0]) }
         let scrolls = try owners.map { try XCTUnwrap($0.scrollView) }
-        p.onCovers = { _ in }
+        p.onCovers = { _, _ in }
         // The first write reports covers whose answer is still to come
         var armed = false
         let observations = scrolls.map { $0.observe(\.contentOffset) { _, _ in
@@ -172,7 +172,7 @@ final class CoverCorrectionsIOSTests: XCTestCase {
         let navigation = session.presenter.navigationHost
         var told: [HostCover] = []
         // The runtime's answers change nothing
-        session.presenter.onCovers = { changes in
+        session.presenter.onCovers = { changes, _ in
             told += changes.compactMap(\.1)
             session.whenIdle(bound: true) { session.apply(wireBatch([])) }
         }
@@ -195,7 +195,7 @@ final class CoverCorrectionsIOSTests: XCTestCase {
         let navigation = session.presenter.navigationHost
         var corrections = 0, others: [HostCover] = []
         // The runtime's answer to scroller 1's cover moves it, which changes its cover again; scroller 2's settles
-        session.presenter.onCovers = { changes in
+        session.presenter.onCovers = { changes, _ in
             let flips = changes.contains { $0.0 == 1 }
             if flips { corrections += 1 }
             others += changes.compactMap { $0.0 == 2 ? $0.1 : nil }
