@@ -35,6 +35,7 @@ use crate::error::{KernelError, LayoutError};
 use crate::id::ViewId;
 use crate::layout::LayoutMirror;
 use crate::style::{Dimension, Edge, Region};
+use crate::{AlignItems, AlignSelf, FlexDirection};
 
 /// A host container's claim on one box.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -51,6 +52,44 @@ pub enum HostCover {
     /// Space occupied by native scrollers on the right and bottom edges.
     /// Overlay scrollers report zero; authored padding stays unchanged.
     Gutter([f32; 2]),
+}
+
+/// What host containers cover, by the box's slot, and the absolutely
+/// positioned boxes placed past a covered box's bottom-edge chain
+/// (`settle_chain`), each with the bottom clearance its inset starts past: a
+/// few route nodes at most, so lists by slot rather than a column (and not
+/// maps, whose code every web core would carry).
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Covers {
+    boxes: Vec<(u32, HostCover)>,
+    chain: Vec<(u32, f32)>,
+}
+
+impl Covers {
+    pub(crate) fn get(&self, slot: u32) -> Option<HostCover> {
+        self.boxes.iter().find(|(s, _)| *s == slot).map(|(_, c)| *c)
+    }
+
+    pub(crate) fn set(&mut self, slot: u32, cover: Option<HostCover>) {
+        self.boxes.retain(|(s, _)| *s != slot);
+        self.boxes.extend(cover.map(|c| (slot, c)));
+    }
+
+    /// A freed slot's: its cover, and its place past a chain.
+    pub(crate) fn remove(&mut self, slot: u32) {
+        self.boxes.retain(|(s, _)| *s != slot);
+        self.chain.retain(|(s, _)| *s != slot);
+    }
+
+    /// The bottom clearance the absolutely positioned `slot`'s inset starts
+    /// past, its parent a box of a covered box's bottom-edge chain, as last
+    /// settled.
+    pub(crate) fn chain_past(&self, slot: u32) -> f32 {
+        self.chain
+            .iter()
+            .find(|(s, _)| *s == slot)
+            .map_or(0.0, |(_, p)| *p)
+    }
 }
 
 impl Kernel {
@@ -117,13 +156,25 @@ impl Kernel {
         } else {
             Vec::new()
         };
-        for slot in std::iter::once(slot).chain(chain).chain(blocks) {
+        // And a scroller that reaches past its sides, as far as they are covered (`side_reach`).
+        let reaching = if edges(before) || edges(cover) {
+            reaching(&self.arena, slot)
+        } else {
+            Vec::new()
+        };
+        for slot in std::iter::once(slot)
+            .chain(chain)
+            .chain(blocks)
+            .chain(reaching)
+        {
             if let (Some(node), Some(layout)) = (self.arena.taffy(slot), self.layout.as_deref_mut())
             {
                 layout.restyle(&self.arena, slot, node);
                 layout.mark_dirty(node);
             }
         }
+        // And the absolute boxes a box of its bottom-edge chain holds.
+        settle_chain(&mut self.arena, self.layout.as_deref_mut());
         Ok(())
     }
 }
@@ -250,6 +301,18 @@ pub(crate) fn apply(arena: &NodeArena, slot: u32, s: &mut taffy::style::Style) {
         Some(HostCover::Gutter(gutter)) => lay_gutter(s, gutter),
         None => {}
     }
+    // A scroller under the covered box's side controls, its content where it was.
+    let [right, left] = side_reach(arena, slot);
+    let across = crate::style::cells::COLUMN;
+    let env = &*crate::kernel::owner::env_for(arena, slot, &style);
+    if right > 0.0 {
+        s.margin.right = taffy::style::LengthPercentageAuto::length(-right);
+        s.padding.right = style.padding_right.spaced(env, across).floor_lp(env, right);
+    }
+    if left > 0.0 {
+        s.margin.left = taffy::style::LengthPercentageAuto::length(-left);
+        s.padding.left = style.padding_left.spaced(env, across).floor_lp(env, left);
+    }
     // The solver sizes and places absolute descendants inside the cleared
     // containing block (LLP 1123 D3). Mark matching inset references so they
     // clear the same edge once, after percentages and calculations resolve.
@@ -266,6 +329,19 @@ pub(crate) fn apply(arena: &NodeArena, slot: u32, s: &mut taffy::style::Style) {
             }
         }
     }
+    // An absolute child of a box in the bottom edge's chain, which reaches
+    // under the bar (`applied_padding`), starts its bottom inset past the
+    // clearance that box reaches over (`settle_chain`), as a view pinned to
+    // the safe-area guide of UIKit's lower split view stays above the tab
+    // bar. A percentage inset stays as written. A subtree in its own block
+    // has no covered parent edge.
+    if s.position == taffy::style::Position::Absolute && !arena.blocks.holds(slot) {
+        let past = arena.covers.chain_past(slot);
+        let raw = s.inset.bottom.into_raw();
+        if past > 0.0 && raw.tag() == taffy::style::CompactLength::LENGTH_TAG {
+            s.inset.bottom = taffy::style::LengthPercentageAuto::length(raw.value() + past);
+        }
+    }
 }
 
 /// Whether the scroller at `slot`'s bottom edge is one the platform insets
@@ -278,14 +354,7 @@ pub(crate) fn apply(arena: &NodeArena, slot: u32, s: &mut taffy::style::Style) {
 fn scroller_insets_bottom(arena: &NodeArena, slot: u32) -> bool {
     let mut at = slot;
     loop {
-        let flowing = |&&c: &&u32| {
-            let s = arena.style(c);
-            s.display != crate::Display::None
-                // A popover is out of flow, open or closed (`style::top_layer`).
-                && crate::style::top_layer::layout_position(arena, c) != crate::PositionType::Absolute
-                && arena.cover(c) != Some(HostCover::Whole)
-        };
-        let Some(&last) = arena.children(at).iter().rev().find(flowing) else {
+        let Some(last) = last_flowing(arena, at) else {
             return false;
         };
         match arena.cover(last) {
@@ -300,6 +369,170 @@ fn scroller_insets_bottom(arena: &NodeArena, slot: u32) -> bool {
         }
         at = last;
     }
+}
+
+/// `slot`'s last child in flow, where its bottom-edge chain goes on
+/// (`scroller_insets_bottom`).
+fn last_flowing(arena: &NodeArena, slot: u32) -> Option<u32> {
+    arena
+        .children(slot)
+        .iter()
+        .rev()
+        .copied()
+        .find(|&c| flowing(arena, c))
+}
+
+/// Whether `c` is in flow for the edges a covered box's scrollers take:
+/// shown, not absolutely positioned and not replaced by a native control.
+fn flowing(arena: &NodeArena, c: u32) -> bool {
+    arena.style(c).display != crate::Display::None
+        // A popover is out of flow, open or closed (`style::top_layer`).
+        && crate::style::top_layer::layout_position(arena, c) != crate::PositionType::Absolute
+        && arena.cover(c) != Some(HostCover::Whole)
+}
+
+/// Settle which absolutely positioned boxes start past a covered box's
+/// bottom clearance, and by how much (`apply`): the children of each box of
+/// a bottom-edge chain whose scroller the platform insets there
+/// (`scroller_insets_bottom`), from the covered box down to that scroller,
+/// as those boxes reach under the bar with it. It runs after each batch and
+/// each cover change, and derives again each box whose distance changed.
+/// `apply` reads the settled distance rather than walking the chain, so a
+/// box restyled partway through a batch is corrected here, and one that
+/// leaves the chain, however it left, gives the distance back.
+pub(crate) fn settle_chain<'a>(
+    arena: &mut NodeArena,
+    layout: Option<&mut (dyn LayoutMirror + 'a)>,
+) {
+    let mut now = Vec::new();
+    for &(covered, cover) in &arena.covers.boxes {
+        let HostCover::Edges([_, _, bottom, _]) = cover else {
+            continue;
+        };
+        if bottom <= 0.0 || !arena.is_live(covered) || !scroller_insets_bottom(arena, covered) {
+            continue;
+        }
+        let mut at = last_flowing(arena, covered);
+        let on = |&c: &u32| {
+            !matches!(
+                arena.cover(c),
+                Some(HostCover::Inset(_) | HostCover::Edges(_))
+            ) && !scrolls(arena, c)
+        };
+        while let Some(chain) = at.filter(on) {
+            now.extend(
+                positioned_children(arena, chain)
+                    .into_iter()
+                    .map(|c| (c, bottom)),
+            );
+            at = last_flowing(arena, chain);
+        }
+    }
+    if now == arena.covers.chain {
+        return;
+    }
+    let before = std::mem::replace(&mut arena.covers.chain, now);
+    let Some(layout) = layout else {
+        return;
+    };
+    let arena = &*arena;
+    let changed = |&&(slot, past): &&(u32, f32)| arena.covers.chain_past(slot) != past;
+    let gained = |&&(slot, _): &&(u32, f32)| before.iter().all(|(s, _)| *s != slot);
+    let now = &arena.covers.chain;
+    for &(slot, _) in before
+        .iter()
+        .filter(changed)
+        .chain(now.iter().filter(gained))
+    {
+        if let Some(node) = arena.is_live(slot).then(|| arena.taffy(slot)).flatten() {
+            layout.restyle(arena, slot, node);
+            layout.mark_dirty(node);
+        }
+    }
+}
+
+/// How far a `scroll` reaches past the sides of the box a container's bars
+/// cover (`Edges`), right and left: that box's
+/// side cover, on each side where the scroller lies on the box's content box
+/// (LLP 1123 D3, "A scroller reaches an edge"). It lies there when it and
+/// every box between them fill their parents across, in flow and with no
+/// width or maximum width, and have no margin on that side, and the boxes above it no
+/// padding or border there, the covered box included. The scroller is laid
+/// out that much wider, and its content that much further in (`apply`), so
+/// the content keeps its place while the scroller's box, and the scroll
+/// indicator UIKit draws at its edge, run under the side controls (the
+/// iPhone Duo's side strip), as a hand-built screen's scroll view does. A
+/// list is left out: the platform's own list lays its rows out, and a
+/// covered box's own scroller is it.
+pub(crate) fn side_reach(arena: &NodeArena, slot: u32) -> [f32; 2] {
+    use crate::style::Dimension::{Auto, Points};
+    if arena.node_type(slot) != crate::NodeType::ScrollView
+        || matches!(arena.cover(slot), Some(HostCover::Edges(_)))
+    {
+        return [0.0; 2];
+    }
+    let (mut right, mut left) = (true, true);
+    let mut at = slot;
+    while let Some(p) = arena.parent(at) {
+        let (s, parent) = (arena.style(at), arena.style(p));
+        let fills = match parent.display {
+            crate::Display::Block => true,
+            crate::Display::Flex => {
+                matches!(
+                    parent.flex_direction,
+                    FlexDirection::Column | FlexDirection::ColumnReverse
+                ) && match s.align_self {
+                    AlignSelf::Auto => {
+                        matches!(parent.align_items, AlignItems::Normal | AlignItems::Stretch)
+                    }
+                    AlignSelf::Stretch => true,
+                    _ => false,
+                }
+            }
+            _ => false,
+        };
+        if !fills || positioned(arena, at) || s.width != Auto || s.max_width != Auto {
+            return [0.0; 2];
+        }
+        let [_, border_right, _, border_left] = parent.border_widths();
+        right &= s.margin_right == Points(0.0)
+            && parent.padding_right == Points(0.0)
+            && border_right == 0.0;
+        left &= s.margin_left == Points(0.0)
+            && parent.padding_left == Points(0.0)
+            && border_left == 0.0;
+        if matches!(arena.cover(p), Some(HostCover::Edges(_))) {
+            let [_, cover_right, _, cover_left] = added_padding(arena, p);
+            return [
+                if right { cover_right } else { 0.0 },
+                if left { cover_left } else { 0.0 },
+            ];
+        }
+        if scrolls(arena, p) {
+            return [0.0; 2];
+        }
+        at = p;
+    }
+    [0.0; 2]
+}
+
+/// The scrollers that may reach past `slot`'s sides when it is covered
+/// (`side_reach`): the first `scroll` on each path down from it, which
+/// `apply` derives again when the cover changes.
+fn reaching(arena: &NodeArena, slot: u32) -> Vec<u32> {
+    let mut out = Vec::new();
+    let mut stack: Vec<u32> = arena.children(slot).to_vec();
+    while let Some(c) = stack.pop() {
+        if positioned(arena, c) {
+            continue;
+        }
+        if arena.node_type(c) == crate::NodeType::ScrollView {
+            out.push(c);
+        } else if !scrolls(arena, c) {
+            stack.extend(arena.children(c).iter().copied());
+        }
+    }
+    out
 }
 
 /// Whether `slot` scrolls vertically, as its engine style says (`style.rs`).
@@ -356,6 +589,30 @@ pub(crate) fn style_changed(
     {
         chain_changed(arena, layout, slot);
     }
+    if [
+        StyleId::Display,
+        StyleId::FlexDirection,
+        StyleId::AlignItems,
+        StyleId::AlignSelf,
+        StyleId::PositionType,
+        StyleId::Width,
+        StyleId::MaxWidth,
+        StyleId::MarginLeft,
+        StyleId::MarginRight,
+        StyleId::PaddingLeft,
+        StyleId::PaddingRight,
+        StyleId::BorderWidthLeft,
+        StyleId::BorderWidthRight,
+        StyleId::BorderStyleLeft,
+        StyleId::BorderStyleRight,
+        StyleId::OverflowX,
+        StyleId::OverflowY,
+    ]
+    .iter()
+    .any(|&id| mask.has(id))
+    {
+        reach_changed(arena, layout, slot);
+    }
 }
 
 /// `slot`'s place on the bottom edge's chain may have changed (its
@@ -372,8 +629,8 @@ pub(crate) fn chain_changed(arena: &NodeArena, layout: &mut dyn LayoutMirror, sl
 }
 
 /// The points a cover adds to the box's padding as layout pads it (`apply`):
-/// `added_padding`, but nothing at the bottom where the scroller at the
-/// box's bottom edge takes the bar's clearance as its platform inset (LLP
+/// `added_padding`, but nothing at the top or the bottom where the scroller
+/// at that edge takes the bar's clearance as its platform inset (LLP
 /// 1116.000 D1.2), so it reaches under the bar. An absolutely positioned
 /// child is still placed past the whole cover (`added_padding`).
 pub(crate) fn applied_padding(arena: &NodeArena, slot: u32) -> [f32; 4] {
@@ -411,6 +668,19 @@ pub(crate) fn contributed_padding(arena: &NodeArena, slot: u32) -> [f32; 4] {
             false => clearance,
         }
     })
+}
+
+/// The absolutely positioned children of `slot`: derived again whenever the
+/// cover's points change (a cover cleared included, so the caller says when).
+pub(crate) fn positioned_children(arena: &NodeArena, slot: u32) -> Vec<u32> {
+    (arena.children(slot).iter().copied())
+        .filter(|&c| positioned(arena, c))
+        .collect()
+}
+
+/// Whether `slot` lays out absolute: authored so, or a popover (`style::top_layer`).
+fn positioned(arena: &NodeArena, slot: u32) -> bool {
+    crate::style::top_layer::layout_position(arena, slot) == crate::PositionType::Absolute
 }
 
 /// The points a cover adds to the box's padding for layout (`apply`), top,
@@ -500,6 +770,27 @@ pub(crate) fn children_changed(
         if !matches!(arena.cover(slot), Some(HostCover::Edges(_))) && !scrolls(arena, slot) {
             chain_changed(arena, layout, slot);
         }
+        reach_changed(arena, layout, slot);
     }
     crate::rows::children_changed(arena, layout, slot, touched);
+}
+
+/// A box at or under a covered one changed what decides how far a scroller
+/// reaches past the covered box's sides (`side_reach`): its fill, width,
+/// margins, padding, borders or children. The scrollers that may reach
+/// (`reaching`) are derived again.
+fn reach_changed(arena: &NodeArena, layout: &mut dyn LayoutMirror, slot: u32) {
+    let mut at = Some(slot);
+    while let Some(s) = at {
+        if matches!(arena.cover(s), Some(HostCover::Edges(_))) {
+            for r in reaching(arena, s) {
+                if let Some(node) = arena.taffy(r) {
+                    layout.restyle(arena, r, node);
+                    layout.mark_dirty(node);
+                }
+            }
+            return;
+        }
+        at = arena.parent(s);
+    }
 }

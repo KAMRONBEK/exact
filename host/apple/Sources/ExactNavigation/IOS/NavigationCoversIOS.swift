@@ -147,10 +147,9 @@ extension NavigationHost {
     }
 
     /// What Exact's containers cover of each route — its controller's safe
-    /// area past the insets the kernel already has as `env()`: a shown bar's
-    /// top, and every edge while the containers take the whole view for a
-    /// page that did not ask to cover it — and the header a bar replaces,
-    /// reported when they change, after the batch being applied.
+    /// area: a shown bar's top, and every edge while the containers take the
+    /// whole view — and the header a bar replaces, reported when they change,
+    /// after the batch being applied.
     func reportCovers() {
         clearBesideRoutes()
         var changes: [(UInt32, HostCover?)] = []
@@ -172,7 +171,7 @@ extension NavigationHost {
             let covered = wantsWholeView && presenter.viewportFit == "cover"
             let whole = presented || (wantsWholeView && !covered)
             let shows = nav.map(barShows) ?? !ExactEnv.authoredChrome
-            guard shows || whole || covered else { continue }
+            guard shows || whole else { continue }
             var edges: HostCover.Edges?
             // What the route clears, its values' content root (`ownerValues`)
             var ownerClearance: HostCover.Edges?
@@ -529,13 +528,23 @@ extension NavigationHost {
         for id in deliveredOwners.keys where ownerValues[id] == nil && presenter.views[id] != nil { owners.append((id, nil)) }
         return owners
     }
+
+    /// Whether the kernel pads `c`'s top by its cover (`reportCovers`): a
+    /// route whose title's scroller goes under the bar keeps its top cover,
+    /// which the kernel pads nothing of while UIKit insets that scroller.
+    func padsTop(_ c: RouteController) -> Bool {
+        guard case .edges(let e)? = covers[c.node.id] else { return false }
+        return e.top > 0.5 && c.collapseScroll == nil
+    }
+
     /// A route's values as a content owner (LLP 1123 D9): what UIKit reports
     /// for a view at its content root, the route's box less what it clears
-    /// (`clearance`). That is its cover, but a route whose title's scroller,
-    /// or a band riding the bar, goes under the bar is covered nothing at the
-    /// top while its content root still starts at the bar's bottom, as a
-    /// view pinned to the safe-area guide does (D3): its top inset stays 0 as
-    /// the title collapses, and `cqh` leaves the bar out. Its bottom is the
+    /// (`clearance`). That is its cover, and the top too where a band rides
+    /// the bar, which the cover leaves out. A route whose title's scroller,
+    /// or a band riding the bar, goes under the bar pads nothing at the top
+    /// while its content root still starts at the bar's bottom, as a view
+    /// pinned to the safe-area guide does (D3): its top inset stays 0 as the
+    /// title collapses, and `cqh` leaves the bar out. Its bottom is the
     /// cover's, at a tab bar's top though a scroller reaches under the bar.
     /// The regions are its controller's, measured from there (D10); the
     /// segments are the parts of the document's that the content root holds:

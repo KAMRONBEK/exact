@@ -24,3 +24,4 @@ component LargeTitle
             scroll testId="home-strip" overflow-x="scroll" overflow-y="hidden" height=60
               row width=1200 height=100
             column height=1600 width=800
+          column testId="home-pinned" position="absolute" top=16 left=16 width=40 height=20

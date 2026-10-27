@@ -1383,17 +1383,24 @@ final class ContentOwnersIOSTests: XCTestCase {
         XCTAssertEqual(agent.clock(["settle": true])["settled"] as? Bool, true)
         let nav = try XCTUnwrap(p.navigationHost.primaryNavigation)
         let route = try XCTUnwrap(nav.topViewController as? RouteController)
-        // The route's child that contains viewport-info-open: a left cover moves it right
-        var child = try node(session, "viewport-info-open").id
-        while let parent = (agent.runnerNode(child)["parent"] as? NSNumber)?.uint32Value, parent != route.node.id { child = parent }
+        // Where viewport-info-open starts in the route: a left cover moves it right, also inside a
+        // scroller that reaches under the cover, whose content stays clear of it
+        let target = try node(session, "viewport-info-open").id
         func left() -> CGFloat? {
-            guard let frame = agent.runnerNode(child)["frame"] as? [String: Any], let x = frame["x"] as? NSNumber else { return nil }
-            return CGFloat(x.doubleValue)
+            var x: CGFloat = 0, at = target
+            while at != route.node.id {
+                let n = agent.runnerNode(at)
+                guard let frame = n["frame"] as? [String: Any], let dx = frame["x"] as? NSNumber,
+                      let parent = (n["parent"] as? NSNumber)?.uint32Value else { return nil }
+                x += CGFloat(dx.doubleValue); at = parent
+            }
+            return x
         }
         func wantedLeft() -> CGFloat {
             if case .edges(let edges)? = p.navigationHost.covers[route.node.id] { return edges.left }
             return 0
         }
+        let uncovered = try XCTUnwrap(left()) - wantedLeft()
         let insets = route.additionalSafeAreaInsets, frame = route.view.frame
         for extra in [CGFloat(31), 0] {
             let previous = wantedLeft()
@@ -1405,8 +1412,8 @@ final class ContentOwnersIOSTests: XCTestCase {
                     XCTAssertNotEqual(wantedLeft(), previous, "the native change produces a different cover inside the served callback")
                 }
             }
-            until("the runner applies the sampled left cover \(wantedLeft()); the route's child starts at \(String(describing: left()))") {
-                left().map { abs($0 - wantedLeft()) < 0.5 } == true
+            until("the runner applies the sampled left cover \(wantedLeft()); the target starts at \(String(describing: left()))") {
+                left().map { abs($0 - uncovered - wantedLeft()) < 0.5 } == true
             }
             XCTAssertEqual(p.navigationHost.delivered[route.node.id], p.navigationHost.covers[route.node.id])
         }
