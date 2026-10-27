@@ -1009,5 +1009,64 @@ final class NavigationCollapseIOSTests: XCTestCase {
             XCTAssertEqual(bar.frame.height, collapsed, accuracy: 0.5, "the title still collapsed, as UIKit leaves it")
         }
     }
+
+    /// LLP 1123 D9 and D12 on the fixture's Second route, whose scroller goes
+    /// under the bar with its title and reaches the window's bottom under the
+    /// bars there: the route is covered nothing at the top and pads nothing at
+    /// the bottom. Its values still describe its content root between the
+    /// bars as they are: `--exact-safe-area-inset-top` is 0, so a box padded
+    /// by it gains nothing, and `10cqh` is a tenth of the height between the
+    /// bars. They stay so as the large title collapses (where UIKit shows it
+    /// large: the iPhone Duo's cover screen shows it inline), under a bar
+    /// over the bottom, as an iPhone's tab bar is (the cover screen holds its
+    /// tab bar in the side strip), and as the route's safe area at the top
+    /// grows, as under a taller bar.
+    func testARoutesValuesLeaveOutItsBarsAsItsTitleCollapses() throws {
+        let (session, nav) = try second("owner-values")
+        let route = try XCTUnwrap(nav.topViewController as? RouteController), host = try XCTUnwrap(window?.rootViewController)
+        let list = try node(session, "list-second")
+        XCTAssertTrue(route.collapseScroll === list, "the title collapses with the scroller")
+        XCTAssertTrue(route.edgeScroll === list, "which reaches the bottom edge")
+        let padded = try node(session, "owner-padded"), content = try node(session, "owner-padded-content")
+        func check(_ title: String) {
+            let safe = route.view.safeAreaInsets, box = route.node.convert(route.node.bounds, to: route.view)
+            let size = CGSize(width: box.width - safe.left - safe.right, height: box.height - safe.top - safe.bottom)
+            XCTAssertEqual(list.convert(list.bounds, to: route.view).maxY, route.view.bounds.maxY, accuracy: 0.5,
+                           "\(title): the scroller reaches under the bars at the bottom")
+            until("\(title): the values describe the content root between the bars") {
+                guard let values = session.presenter.navigationHost.ownerValues[route.node.id] else { return false }
+                return values.safe.allSatisfy { abs($0) < 0.5 }
+                    && abs(values.size.width - size.width) < 0.5 && abs(values.size.height - size.height) < 0.5
+            }
+            if let values = session.presenter.navigationHost.ownerValues[route.node.id] {
+                XCTAssertTrue(values.safe.allSatisfy { abs($0) < 0.5 }, "\(title): the safe area's insets, \(values.safe)")
+                XCTAssertEqual(values.size.width, size.width, accuracy: 0.5, "\(title): the content root's width")
+                XCTAssertEqual(values.size.height, size.height, accuracy: 0.5, "\(title): the content root's height")
+            }
+            until("\(title): the kernel lays out by them") {
+                abs(content.frame.minY) < 0.5 && abs(padded.bounds.height - size.height / 10) < 0.5
+            }
+            XCTAssertEqual(content.frame.minY, 0, accuracy: 0.5, "\(title): `var(--exact-safe-area-inset-top)` pads nothing")
+            XCTAssertEqual(padded.bounds.height, size.height / 10, accuracy: 0.5, "\(title): `10cqh`")
+        }
+        check("at rest")
+        // UIKit shows no large title where it places a vertical bar (the iPhone Duo upright or closed)
+        if !nav.traitCollection.placesVerticalBar {
+            let bar = nav.navigationBar, expanded = bar.frame.height
+            XCTAssertGreaterThan(expanded, 90, "the large title is expanded at rest")
+            list.pendingScrollTop = 300
+            list.applyPendingScroll()
+            until("the title collapses") { bar.frame.height < expanded - 20 }
+            check("collapsed")
+        }
+        let bottom = route.view.safeAreaInsets.bottom
+        host.additionalSafeAreaInsets.bottom += 49
+        until("a bar over the bottom") { route.view.safeAreaInsets.bottom >= bottom + 48.5 }
+        check("over a bottom bar")
+        let top = route.view.safeAreaInsets.top
+        route.additionalSafeAreaInsets.top += 52
+        until("a taller bar") { route.view.safeAreaInsets.top >= top + 51.5 }
+        check("under a taller bar")
+    }
 }
 #endif

@@ -6,11 +6,12 @@
 //! shows that subtree's root when it does not lift it to the top layer (a
 //! stack's route, LLP 1123 D2), which only the runner's geometry reads.
 //! And the margins UIKit's own list gives a grouped list's cards and cells,
-//! and which split placeholders a pane shows (LLP 1116.006 D2). And the
-//! size a person dragged a box's `resize` grip to (`Runner::resize_box`).
+//! which split placeholders a pane shows (LLP 1116.006 D2), the size a
+//! person dragged a box's `resize` grip to (`Runner::resize_box`), and a
+//! content owner's values (LLP 1123 D9).
 
 use super::Host;
-use exact_kernel::{BlockMeasure, GroupedMargins, HostBlock, HostCover, ViewId};
+use exact_kernel::{BlockMeasure, GroupedMargins, HostBlock, HostCover, OwnerValues, ViewId};
 use exact_runner::DataSource;
 
 /// A host's restyle of a box under the claims' layout.
@@ -24,12 +25,38 @@ pub enum Restyle {
     Size([Option<f32>; 2]),
 }
 
+/// What a host claims of boxes in one report, each `None` taking one back.
+#[derive(Default)]
+pub struct Claims<'a> {
+    /// What a native container covers of a box.
+    pub covers: &'a [(ViewId, Option<HostCover>)],
+    /// The containing block a container gives a subtree.
+    pub blocks: &'a [(ViewId, Option<HostBlock>)],
+    /// Where a block's root is shown.
+    pub placements: &'a [(ViewId, Option<exact_runner::BlockPlacement>)],
+    /// A grouped list's card and cell margins.
+    pub margins: &'a [(ViewId, Option<GroupedMargins>)],
+    /// A cells list's rows' cell margin.
+    pub list_margins: &'a [(ViewId, Option<[f32; 2]>)],
+    /// A host's restyles: a split's own placeholder (LLP 1116.006 D2), a
+    /// box a person resized.
+    pub restyles: &'a [(ViewId, Restyle)],
+    /// A content owner's local insets, or the session root's (`None`), top
+    /// right bottom left; `None` insets take them back (LLP 1123 D9).
+    pub locals: &'a [(Option<ViewId>, Option<[f32; 4]>)],
+    /// A content owner's safe area, regions, segments and size.
+    pub owners: &'a [(ViewId, Option<OwnerValues>)],
+}
+
 impl<D: DataSource> Host<D> {
     /// Several boxes' covers (`None` clears one) under one layout. A refusal
     /// for one view (it is gone) leaves the others set and is the batch's
     /// error.
     pub fn set_covers(&mut self, covers: &[(ViewId, Option<HostCover>)]) -> String {
-        self.set_claims(covers, &[], &[], &[], &[], &[], &[])
+        self.set_claims(&Claims {
+            covers,
+            ..Claims::default()
+        })
     }
 
     /// What UIKit covers of list `view`'s port at its start and end
@@ -58,28 +85,46 @@ impl<D: DataSource> Host<D> {
     /// layout: each root's frame comes back in its block's space, with the
     /// block's used size.
     pub fn set_blocks(&mut self, blocks: &[(ViewId, Option<HostBlock>)]) -> String {
-        self.set_claims(&[], blocks, &[], &[], &[], &[], &[])
+        self.set_claims(&Claims {
+            blocks,
+            ..Claims::default()
+        })
     }
 
-    /// Covers, containing blocks and the blocks' placements under one
-    /// layout, and the canvases' work after it: a canvas in a box given
-    /// back is laid out and drawn in this batch. And content owners' local
-    /// insets (`None` for the session root's; LLP 1123 D9), which change
-    /// only the lengths that read them.
-    #[allow(clippy::too_many_arguments)]
-    pub fn set_claims(
-        &mut self,
-        covers: &[(ViewId, Option<HostCover>)],
-        blocks: &[(ViewId, Option<HostBlock>)],
-        placements: &[(ViewId, Option<exact_runner::BlockPlacement>)],
-        margins: &[(ViewId, Option<GroupedMargins>)],
-        list_margins: &[(ViewId, Option<[f32; 2]>)],
-        restyles: &[(ViewId, Restyle)],
-        locals: &[(Option<ViewId>, Option<[f32; 4]>)],
-    ) -> String {
+    /// The views at or under `root` whose style reads a viewport or
+    /// environment length, an owner's value included.
+    fn env_readers(&self, root: ViewId) -> Vec<ViewId> {
+        let kernel = self.runner.kernel();
+        let (mut out, mut stack) = (Vec::new(), vec![root]);
+        while let Some(id) = stack.pop() {
+            let Some(node) = kernel.node(id) else {
+                continue;
+            };
+            if exact_kernel::uses_env(node.style) {
+                out.push(id);
+            }
+            stack.extend(node.children());
+        }
+        out
+    }
+    /// Every claim under one layout, and the canvases' work after it: a
+    /// canvas in a box given back is laid out and drawn in this batch.
+    /// Content owners' local insets (`None` for the session root's) and
+    /// values (LLP 1123 D9) change only the lengths that read them.
+    pub fn set_claims(&mut self, claims: &Claims<'_>) -> String {
+        let Claims {
+            covers,
+            blocks,
+            placements,
+            margins,
+            list_margins,
+            restyles,
+            locals,
+            owners,
+        } = *claims;
         self.presence.unauthored = true;
-        let mut local_layout = false;
-        let mut error = None;
+        let (mut error, mut read, mut local_layout) = (None, false, false);
+        let mut batch = crate::batch::Batch::new();
         for &(view, insets) in locals {
             let set = match view {
                 Some(view) => self.runner.kernel_mut().set_local_insets(view, insets),
@@ -90,7 +135,26 @@ impl<D: DataSource> Host<D> {
                 Err(e) => drop(error.get_or_insert(format!("local insets: {e:?}"))),
             }
         }
+        // An owner's values lay out again only where a row reads them, and
+        // those rows' native styles are sent again as the owner resolves them,
+        // once its covers and block are set too (below).
+        let mut reread = Vec::new();
+        for (view, values) in owners {
+            match self
+                .runner
+                .kernel_mut()
+                .set_owner_values(*view, values.clone())
+            {
+                Ok(true) => {
+                    read = true;
+                    reread.push(*view);
+                }
+                Ok(false) => {}
+                Err(e) => drop(error.get_or_insert(format!("owner values: {e:?}"))),
+            }
+        }
         let needs_layout = local_layout
+            || read
             || !(covers.is_empty()
                 && blocks.is_empty()
                 && margins.is_empty()
@@ -98,7 +162,6 @@ impl<D: DataSource> Host<D> {
         if needs_layout {
             self.height_targets_dirty = true;
         }
-        let mut batch = crate::batch::Batch::new();
         // A placeholder's or a resized box's style changes as a commit does,
         // so the presenter hears its rows; it is laid out with the claims
         // below, once.
@@ -122,7 +185,30 @@ impl<D: DataSource> Host<D> {
                 error.get_or_insert(format!("cover: {e:?}"));
             }
         }
+        let was: Vec<_> = blocks
+            .iter()
+            .map(|&(view, _)| self.runner.kernel().host_block(view))
+            .collect();
         error = error.or(self.blocks_into(blocks, placements));
+        // A block is the content root container units read (LLP 1123 D16): the rows under one that changed are sent
+        // again as their owner now resolves them, as an owner's values' are, whichever of the two came first
+        for (&(view, _), was) in blocks.iter().zip(was) {
+            if self.runner.kernel().host_block(view) != was {
+                reread.push(view);
+            }
+        }
+        let mut sent = std::collections::HashSet::new();
+        for view in &reread {
+            for id in self.env_readers(*view) {
+                if sent.insert(id) {
+                    self.update(id, &mut batch);
+                }
+            }
+        }
+        // A run that reads them has no view: its paragraph is sent again
+        if !reread.is_empty() {
+            self.emit_paragraphs(&mut batch);
+        }
         for &(view, list) in margins {
             if let Err(e) = self.runner.kernel_mut().set_grouped_margins(view, list) {
                 error.get_or_insert(format!("grouped margins: {e:?}"));
@@ -173,3 +259,7 @@ impl<D: DataSource> Host<D> {
         error
     }
 }
+
+#[cfg(test)]
+#[path = "owner_tests.rs"]
+mod owner_tests;

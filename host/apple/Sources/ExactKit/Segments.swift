@@ -36,6 +36,15 @@ struct ViewportFold: Equatable {
         return fold
     }
 
+    /// The fold whose segments are `rects`, the parts of a grid's segments
+    /// a box inside it holds (LLP 1123 D9), when they make a whole grid;
+    /// flat otherwise.
+    static func grid(_ rects: [CGRect]) -> ViewportFold {
+        let cols = Set(rects.map(\.minX)).count, rows = Set(rects.map(\.minY)).count
+        guard rects.count > 1, cols * rows == rects.count else { return .flat }
+        return ViewportFold(posture: "folded", cols: cols, rows: rows, rects: rects.sorted { ($0.minY, $0.minX) < ($1.minY, $1.minX) })
+    }
+
     /// `layout.env`'s four names (LLP 1012 §1; LLP 1078 D7).
     var env: [String: Any] {
         ["device-posture": posture, "horizontal-viewport-segments": cols, "vertical-viewport-segments": rows,

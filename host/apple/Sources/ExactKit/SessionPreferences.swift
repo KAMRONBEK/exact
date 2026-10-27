@@ -9,8 +9,11 @@ extension ExactSession {
     /// Returns the batch's error, when the runtime refused the grid; the fold is kept only when it took it.
     @discardableResult func segments(_ fold: ViewportFold) -> String? {
         guard booted, state != .destroyed else { return nil }
+        // The routes are told their own segments first (LLP 1123 D9), so the batch lays them out once
+        let before = presenter.fold
+        presenter.fold = fold
         let batch = runtime.segments(fold)
-        if batch.error == nil { presenter.fold = fold }
+        if batch.error != nil { presenter.fold = before }
         apply(batch)
         return batch.error
     }

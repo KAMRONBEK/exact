@@ -170,6 +170,12 @@ pub(super) fn env(term: EnvTerm, out: &mut String) {
         out.push(')');
         return;
     }
+    if let EnvTerm::Owner(var) = term {
+        out.push_str("var(");
+        out.push_str(&var.name());
+        out.push(')');
+        return;
+    }
     out.push_str("env(");
     match term {
         EnvTerm::Inset(edge) => {
@@ -189,6 +195,7 @@ pub(super) fn env(term: EnvTerm, out: &mut String) {
             out.push_str(var.name());
         }
         EnvTerm::Local(_) => unreachable!("written as var() above"),
+        EnvTerm::Owner(_) => unreachable!("written above"),
     }
     out.push(')');
 }

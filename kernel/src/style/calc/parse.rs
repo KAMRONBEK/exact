@@ -42,6 +42,7 @@ pub(crate) mod refusal {
     pub(crate) const DEPTH: &str =
         "calc(), min(), max() and clamp() nest at most 32 deep in one length, parentheses included";
     pub(crate) const SIZE: &str = "one length holds at most 32 values";
+    pub(crate) const OWNER_NAME: &str = "var() in a length names a content owner's value: --exact-safe-area-inset-<edge>, --exact-<region>-inset-<edge> or --exact-viewport-segment-<field>-<x>-<y> (LLP 1123 D9)";
     pub(crate) const FALLBACK: &str =
         "an env() with a fallback is read once substituted, by the property it is a value of";
     pub(crate) const RELATIVE_FALLBACK: &str =
@@ -503,6 +504,12 @@ impl Calc {
             Ok(name) => name,
             Err(_) => return why(p, refusal::VAR),
         };
+        if let Some(var) = crate::style::OwnerVar::from_name(&name) {
+            if !p.is_exhausted() {
+                return why(p, refusal::VAR_FALLBACK);
+            }
+            return Ok((Node::Env(EnvTerm::Owner(var)), Ty::Length));
+        }
         if let Some(edge) = name
             .strip_prefix(env::LOCAL_PREFIX)
             .and_then(env::Edge::from_name)
@@ -558,7 +565,6 @@ impl Calc {
         };
         Ok((node, Ty::Length))
     }
-
     /// `env(<name> <index>*)`: the variable. One with a fallback makes the
     /// whole value a substitution, which a row holds as written and reads
     /// only once substituted ([`substitutes`]), never a tree.
@@ -588,10 +594,26 @@ pub(crate) fn substitutes(text: &str) -> Result<bool, Refused> {
         let syntax = || Fail::Why(refusal::SYNTAX);
         while let Ok(token) = p.next_including_whitespace_and_comments() {
             match token.clone() {
-                Token::Function(name) if name.eq_ignore_ascii_case("env") => {
-                    let (_, fallback) = p
+                Token::Function(name)
+                    if name.eq_ignore_ascii_case("env") || name.eq_ignore_ascii_case("var") =>
+                {
+                    let env = name.eq_ignore_ascii_case("env");
+                    let fallback = p
                         .parse_nested_block(|p| {
-                            env_parts(p, depth).map_err(|f| p.new_custom_error(f))
+                            // A content owner's value substitutes as `env()` does (LLP 1123
+                            // D9); another `var()` is the calculation's to read (D5, D7)
+                            if !env && !names_owner(p) {
+                                if depth == MAX_DEPTH {
+                                    return Err(p.new_custom_error(Fail::Why(refusal::DEPTH)));
+                                }
+                                return walk(p, depth + 1, false, found)
+                                    .map(|()| None)
+                                    .map_err(|f| p.new_custom_error(f));
+                            }
+                            let parts = if env { env_parts } else { var_parts };
+                            parts(p, depth)
+                                .map(|(_, fallback)| fallback)
+                                .map_err(|f| p.new_custom_error(f))
                         })
                         .map_err(fail)?;
                     *found |= fallback.is_some();
@@ -683,19 +705,52 @@ pub(super) fn env_parts(
             _ => return Err(Fail::Why(refusal::NOT_A_LENGTH)),
         },
     };
-    let fallback = match p.next() {
-        Err(_) => None,
+    Ok((term, fallback(p, depth)?))
+}
+
+/// `var(--exact-…)`'s parts, as [`env_parts`]: a content owner's value
+/// (LLP 1123 D9) and its fallback's tokens, if it has one.
+pub(super) fn var_parts(
+    p: &mut Parser<'_, '_>,
+    depth: usize,
+) -> Result<(EnvTerm, Option<String>), Fail> {
+    let name = p
+        .parse_until_before(Delimiter::Comma, |p| {
+            let name = p.expect_ident()?.to_string();
+            p.expect_exhausted()?;
+            Ok::<_, ParseError<'_, ()>>(name)
+        })
+        .map_err(|_| Fail::Why(refusal::SYNTAX))?;
+    let var = crate::style::OwnerVar::from_name(&name).ok_or(Fail::Why(refusal::OWNER_NAME))?;
+    Ok((EnvTerm::Owner(var), fallback(p, depth)?))
+}
+
+/// Whether the `var()` whose arguments `p` reads names a content owner's
+/// value (LLP 1123 D9), leaving `p` where it was.
+pub(super) fn names_owner(p: &mut Parser<'_, '_>) -> bool {
+    let state = p.state();
+    let owner = p
+        .expect_ident()
+        .is_ok_and(|name| crate::style::OwnerVar::from_name(name).is_some());
+    p.reset(&state);
+    owner
+}
+
+/// What follows a variable's name: nothing, or a comma and its fallback,
+/// whose tokens are returned as written.
+fn fallback(p: &mut Parser<'_, '_>, depth: usize) -> Result<Option<String>, Fail> {
+    match p.next() {
+        Err(_) => Ok(None),
         Ok(Token::Comma) => {
             let start = p.position();
             declaration_value(p, depth, true)?;
             let tokens = p
                 .slice_from(start)
                 .trim_matches(['\t', '\n', '\u{c}', '\r', ' ']);
-            Some(tokens.to_string())
+            Ok(Some(tokens.to_string()))
         }
-        Ok(_) => return Err(Fail::Why(refusal::SYNTAX)),
-    };
-    Ok((term, fallback))
+        Ok(_) => Err(Fail::Why(refusal::SYNTAX)),
+    }
 }
 
 /// Read a `<declaration-value>` to the end of its block (CSS Syntax 3
@@ -718,13 +773,22 @@ fn declaration_value(p: &mut Parser<'_, '_>, depth: usize, top: bool) -> Result<
             | Token::CloseParenthesis
             | Token::CloseSquareBracket
             | Token::CloseCurlyBracket => return Err(syntax()),
-            // A fallback's own `env()` names a variable too
-            Token::Function(name) if name.eq_ignore_ascii_case("env") => {
+            // A fallback's own `env()` or `var()` names a variable too
+            Token::Function(name)
+                if name.eq_ignore_ascii_case("env") || name.eq_ignore_ascii_case("var") =>
+            {
                 if depth == MAX_DEPTH {
                     return Err(syntax());
                 }
+                let env = name.eq_ignore_ascii_case("env");
                 p.parse_nested_block(|p| {
-                    env_parts(p, depth + 1)
+                    // Another `var()` than a content owner's value is a block as any
+                    if !env && !names_owner(p) {
+                        return declaration_value(p, depth + 1, false)
+                            .map_err(|f| p.new_custom_error(f));
+                    }
+                    let parts = if env { env_parts } else { var_parts };
+                    parts(p, depth + 1)
                         .map(|_| ())
                         .map_err(|f| p.new_custom_error(f))
                 })

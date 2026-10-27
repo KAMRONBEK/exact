@@ -29,6 +29,7 @@ pub(crate) mod line_height;
 mod miswiring;
 mod navigation_back;
 mod nested_header;
+mod owner_env;
 mod parts;
 mod roles;
 mod routeless_header;
@@ -87,7 +88,7 @@ pub(crate) fn with_text_styles(
             (in_root, back)
         }
     });
-    let (mut seen, mut platform) = (BTreeSet::new(), Vec::new());
+    let (mut seen, mut platform, mut owned) = (BTreeSet::new(), Vec::new(), BTreeSet::new());
     for (visit, (in_root, back)) in visits {
         if let Some((tag, positional, attrs)) = visit.element() {
             // A component used twice is inlined twice: one line for its source.
@@ -126,6 +127,9 @@ pub(crate) fn with_text_styles(
             }
             if let (true, Some(name)) = (route, back) {
                 drawn_back(attrs, visit.regions()[0], name, &mut out);
+            }
+            if route {
+                owner_env::env_in_owner(visit, &checked.file.styles, &mut owned, &mut out);
             }
             if literal(attrs, "role") == Some("tablist") {
                 tabs::single_tab(visit, &mut out);

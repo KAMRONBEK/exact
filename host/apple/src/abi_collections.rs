@@ -67,6 +67,14 @@ impl<D: DataSource> Bridge<D> {
     /// four floats are unused. Kind 16 is the border box a person dragged
     /// the box's `resize` grip to (`Runner::resize_box`): f32 width and
     /// height, a NaN keeping that axis, and two unused.
+    /// Kind 21 is a content owner's values (LLP 1123 D9), in its content
+    /// root's points ([`OWNER_RECORD`] bytes): f32 the safe area's top,
+    /// right, bottom and left, the content root's width and height, u32
+    /// columns and rows, four f32 rectangles x, y, width, height (the
+    /// segments, row-major, the unused ones zero), u32 1 when twenty f32
+    /// region insets follow (D10's five regions, each top, right, bottom,
+    /// left) and 0 when the regions are the safe area's. Kind 22 takes an
+    /// owner's values back.
     pub fn covers(&mut self, len: usize) -> u32 {
         let bytes = self.input.get(..len).unwrap_or(&[]);
         let out = if let Ok(records) = records(bytes) {
@@ -74,6 +82,7 @@ impl<D: DataSource> Bridge<D> {
                 (Vec::new(), Vec::new(), Vec::new(), Vec::new());
             let mut locals = Vec::new();
             let mut owners = BlockChanges::default();
+            let mut owned = Vec::new();
             for r in records {
                 match owners.push(r) {
                     Ok(true) => continue,
@@ -106,6 +115,8 @@ impl<D: DataSource> Bridge<D> {
                     18 | 20 => locals.push(((kind == 18).then_some(view), None)),
                     10 => lists.push((view, Some([edge(8), edge(12)]))),
                     11 => lists.push((view, None)),
+                    21 => owned.push((view, Some(owner_values(&edge, &word)))),
+                    22 => owned.push((view, None)),
                     1 => {
                         let edges = [edge(8), edge(12), edge(16), edge(20)];
                         covers.push((view, Some(exact_kernel::HostCover::Edges(edges))));
@@ -123,15 +134,16 @@ impl<D: DataSource> Bridge<D> {
                 }
             }
             self.host.as_mut().map_or_else(not_booted, |h| {
-                h.set_claims(
-                    &covers,
-                    &owners.blocks,
-                    &owners.placements,
-                    &margins,
-                    &lists,
-                    &restyles,
-                    &locals,
-                )
+                h.set_claims(&crate::Claims {
+                    covers: &covers,
+                    blocks: &owners.blocks,
+                    placements: &owners.placements,
+                    margins: &margins,
+                    list_margins: &lists,
+                    restyles: &restyles,
+                    locals: &locals,
+                    owners: &owned,
+                })
             })
         } else {
             self.refusal("covers: truncated record")
@@ -344,6 +356,38 @@ fn block_axis(length: f32, policy: f32) -> exact_kernel::BlockAxis {
     }
 }
 
+/// The bytes of a kind 21 record, the view and the kind included.
+const OWNER_RECORD: usize = 188;
+
+/// A kind 21 record's values, read by `edge` (an f32 at a byte offset) and
+/// `word` (its four bytes). The kernel refuses a grid the rectangles do not
+/// fill, which a count past the record's four rectangles never is.
+fn owner_values(
+    edge: &dyn Fn(usize) -> f32,
+    word: &dyn Fn(usize) -> [u8; 4],
+) -> exact_kernel::OwnerValues {
+    let count = |i: usize| u8::try_from(u32::from_le_bytes(word(i))).unwrap_or(u8::MAX);
+    let (cols, rows) = (count(32), count(36));
+    let n = usize::from(cols) * usize::from(rows);
+    let segments = (0..n)
+        .filter(|_| (2..=4).contains(&n))
+        .map(|i| {
+            let at = 40 + i * 16;
+            exact_kernel::Rect::new(edge(at), edge(at + 4), edge(at + 8), edge(at + 12))
+        })
+        .collect();
+    let regions = (u32::from_le_bytes(word(104)) == 1)
+        .then(|| std::array::from_fn(|r| std::array::from_fn(|e| edge(108 + (r * 4 + e) * 4))));
+    exact_kernel::OwnerValues {
+        safe: [edge(8), edge(12), edge(16), edge(20)],
+        regions,
+        cols,
+        rows,
+        segments,
+        size: (edge(24), edge(28)),
+    }
+}
+
 /// Four two-bit physical side indices, least significant first.
 fn block_tactic(bits: u32) -> Option<exact_kernel::position_try::BlockTactic> {
     if bits > 255 {
@@ -362,6 +406,7 @@ pub(super) fn records(bytes: &[u8]) -> Result<Vec<&[u8]>, &'static str> {
         let size = match u32::from_le_bytes(rest[4..8].try_into().unwrap()) {
             4 => 28,
             6 | 13 => 36,
+            21 => OWNER_RECORD,
             _ => 24,
         };
         let Some((record, after)) = rest.split_at_checked(size) else {

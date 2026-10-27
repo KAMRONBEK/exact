@@ -582,6 +582,7 @@ fn push_dimension(out: &mut String, d: Dimension) {
         Dimension::Env(..)
         | Dimension::Region(..)
         | Dimension::Segment(..)
+        | Dimension::Owner(..)
         | Dimension::Viewport(..)
         | Dimension::Compare(..) => {
             unreachable!("resolved, and a calculation written by push_length")

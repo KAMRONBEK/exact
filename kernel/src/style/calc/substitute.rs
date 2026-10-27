@@ -8,7 +8,7 @@
 //! Syntax 3 §9), so `env(…, 1)0px` stays a number beside a length.
 
 use super::super::{Dimension, Env};
-use super::parse::env_parts;
+use super::parse::{env_parts, names_owner, var_parts};
 use cssparser::{ParseError, Parser, ParserInput, Token};
 
 /// `text` with every `env()` whose variable `env` does not define and that
@@ -47,10 +47,28 @@ fn walk<'i>(
         };
         let close = match token.clone() {
             Token::Comment(_) => continue,
-            Token::Function(name) if env.is_some() && name.eq_ignore_ascii_case("env") => {
+            Token::Function(name)
+                if env.is_some()
+                    && (name.eq_ignore_ascii_case("env") || name.eq_ignore_ascii_case("var")) =>
+            {
                 let env = env.expect("checked");
-                let (term, fallback) =
-                    p.parse_nested_block(|p| env_parts(p, 0).map_err(|_| p.new_custom_error(())))?;
+                let is_env = name.eq_ignore_ascii_case("env");
+                let mut kept = Vec::new();
+                let parsed = p.parse_nested_block(|p| {
+                    // Another `var()` than a content owner's value (LLP 1123 D9) is kept as
+                    // written, the calculation's to read (D5, D7)
+                    if !is_env && !names_owner(p) {
+                        return walk(p, Some(env), &mut kept).map(|()| None);
+                    }
+                    let parts = if is_env { env_parts } else { var_parts };
+                    parts(p, 0).map(Some).map_err(|_| p.new_custom_error(()))
+                })?;
+                let Some((term, fallback)) = parsed else {
+                    tokens.push(format!("{name}("));
+                    tokens.append(&mut kept);
+                    tokens.push(")".to_string());
+                    continue;
+                };
                 match fallback {
                     // Defined: the variable itself, its fallback unused
                     _ if term.value(env).is_some() => {

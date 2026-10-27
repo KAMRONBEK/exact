@@ -207,6 +207,15 @@ impl<'a> Reader<'a> {
                     _ => return Err(DecodeError::UnknownDimensionKind(kind)),
                 }
             }
+            // A content owner's value (LLP 1123 D9): its four bytes follow.
+            36 => {
+                let bytes = [self.u8()?, self.u8()?, self.u8()?, self.u8()?];
+                Dimension::Owner(
+                    crate::style::OwnerVar::from_bytes(bytes)
+                        .ok_or(DecodeError::UnknownDimensionKind(kind))?,
+                    value,
+                )
+            }
             // The leading `f32` is zero; the tree follows.
             24 if value.to_bits() == 0 => {
                 Dimension::Compare(crate::style::Comparison::decode(self, style)?)
@@ -563,6 +572,13 @@ impl Writer {
                 self.u8(x);
                 self.u8(y);
             }
+            Dimension::Owner(var, v) => {
+                self.u8(36);
+                self.f32(v);
+                for b in var.bytes() {
+                    self.u8(b);
+                }
+            }
             Dimension::Percent(v) => {
                 self.u8(2);
                 self.f32(v);
@@ -755,7 +771,7 @@ mod tests {
         // Recomputed when the schema changes; the digest test prints the value.
         // Apple JSON record and inline style declarations participate (LLP 1172.001 E4),
         // even when the EXWF codec bytes above stay unchanged.
-        assert_eq!(SCHEMA_DIGEST, 0x1bfeff5fe342b063);
+        assert_eq!(SCHEMA_DIGEST, 0x50f2c0b78f978766);
     }
 
     #[test]
@@ -811,11 +827,11 @@ mod tests {
                 Ok(Dimension::Env(*edge, i as f32 * 1.5))
             );
         }
-        // Past the container units' kinds, 30 to 35
-        let mut r = Reader::new(&[36u8, 0, 0, 0, 0]);
+        // Past the container units' kinds, 30 to 35, and a content owner's value, 36
+        let mut r = Reader::new(&[37u8, 0, 0, 0, 0]);
         assert_eq!(
             r.dimension(StyleId::Width, true),
-            Err(DecodeError::UnknownDimensionKind(36))
+            Err(DecodeError::UnknownDimensionKind(37))
         );
     }
 

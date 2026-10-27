@@ -116,7 +116,14 @@ fn node_rows(style: &StyleProps) -> StyleMask {
     let mut rows = StyleMask::EMPTY;
     for id in style.mask.iter().filter(|id| !OVERRIDES.contains(id)) {
         let row = style.get(id);
-        if calc::reads_plain_container(&row)
+        // A content owner's safe-area inset falls back to the local inset
+        // where the host publishes no owner values (`OwnerVar::value`)
+        let owner_safe = matches!(
+            row,
+            RowValue::Dimension(Dimension::Owner(crate::style::OwnerVar::Safe(_), _))
+        );
+        if owner_safe
+            || calc::reads_plain_container(&row)
             || calc::in_row(row).any(|c| {
                 c.reads_local()
                     || c.reads_custom()
@@ -348,18 +355,19 @@ pub(crate) fn declarations(style: &StyleProps) -> SafeAreaProperties {
 }
 
 /// The environment `slot`'s lengths, `style`, resolve against: the
-/// arena's, unless they read a local inset ([`env_at`]).
+/// arena's with the values of the content owner `slot` is in
+/// ([`NodeArena::owner_env`]), unless they read a local inset ([`env_at`]).
 pub(crate) fn env_for<'a>(arena: &'a NodeArena, slot: u32, style: &StyleProps) -> Cow<'a, Env> {
     match reads_node(style) || style.mask.has(StyleId::ObjectPosition) {
         true => env_at(arena, slot),
-        false => Cow::Borrowed(arena.env()),
+        false => Cow::Borrowed(arena.owner_env(slot)),
     }
 }
 
-/// The environment `slot`'s lengths resolve against: the arena's, with the
-/// local insets `slot` inherits ([`local_at`]), the custom properties its
-/// lengths read ([`properties_at`]), its observations, and its query
-/// containers where it reads them ([`container_at`]).
+/// The environment `slot`'s lengths resolve against: the arena's with its
+/// owner's values, the local insets `slot` inherits ([`local_at`]), the
+/// custom properties its lengths read ([`properties_at`]), its observations,
+/// and its query containers where it reads them ([`container_at`]).
 pub(crate) fn env_at(arena: &NodeArena, slot: u32) -> Cow<'_, Env> {
     env_with_containers(arena, slot, Some(slot))
 }
@@ -374,14 +382,14 @@ pub(crate) fn env_for_reservations<'a>(
 ) -> Cow<'a, Env> {
     match reads_node(style) {
         true => env_with_containers(arena, slot, arena.parent(slot)),
-        false => Cow::Borrowed(arena.env()),
+        false => Cow::Borrowed(arena.owner_env(slot)),
     }
 }
 
 /// [`env_at`] with the containers from `from` outward, or the small
 /// viewport's where it is `None`.
 fn env_with_containers(arena: &NodeArena, slot: u32, from: Option<u32>) -> Cow<'_, Env> {
-    let mut env = arena.env().clone();
+    let mut env = arena.owner_env(slot).clone();
     env.font_size = arena.computed_source(slot, StyleId::FontSize).font_size;
     env.local = Some(local_at(arena, slot));
     env.properties = Some(properties_at(arena, slot, &arena.effective_style(slot)));

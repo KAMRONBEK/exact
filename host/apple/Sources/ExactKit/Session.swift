@@ -791,7 +791,8 @@ public final class ExactSession {
         presenter.onIntrinsic = { [unowned self] sizes in whenIdle(bound: true) { [unowned self] in applyUnlessEmpty(runtime.intrinsics(sizes)) } }
         // @ref LLP 1075.003 §3.5, Q3 (c) — what a bar covers reaches layout as an intrinsic
         // size does, on AppKit too (LLP 1115.002 D8.1); the hatches replay once the module connects.
-        presenter.onCovers = { [unowned self] covers in whenIdle(bound: true) { [unowned self] in applyUnlessEmpty(runtime.covers(covers)) } }
+        // An owner's values change with each frame of a keyboard; where no row reads them the batch changes nothing (LLP 1123 D9).
+        presenter.onCovers = { [unowned self] covers, owners in whenIdle(bound: true) { [unowned self] in applyUnlessEmpty(runtime.covers(covers, owners: owners)) } }
         presenter.onResizeBox = { [unowned self] id, width, height in
             whenIdle(bound: true) { [unowned self] in admit(id) { applyUnlessEmpty(runtime.resizeBox(id, width: width, height: height)) } }
         }
@@ -1375,8 +1376,11 @@ public final class ExactSession {
         change.segments = fold?.rects
         guard booted, state != .destroyed, !change.isEmpty else { return }
         if let screen = change.screen { screenSize = screen }
+        // The routes are told their own segments first (LLP 1123 D9), so the batch lays them out once
+        let before = presenter.fold
+        if let fold { presenter.fold = fold }
         let batch = runtime.view(change)
-        if let fold, batch.error == nil { presenter.fold = fold }
+        if batch.error != nil { presenter.fold = before }
         applyUnlessEmpty(batch, scrolled: true, resized: change.size != nil)
     }
     private(set) var screenSize: CGSize? // the screen last told, for the agent's synthetic segments

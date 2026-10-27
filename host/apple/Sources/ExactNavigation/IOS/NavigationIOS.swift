@@ -142,6 +142,10 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     /// The covers the kernel was last told (`deliverCovers`), each route's local insets (LLP 1123 D9), and
     /// the clearance its scrollers' insets hold (D3, ClearanceIOS.swift).
     var delivered: [UInt32: HostCover] = [:], localInsets = LocalInsetsReport(), clearance: [ObjectIdentifier: ClearanceInset] = [:]
+    /// Each shown route's values as a content owner (LLP 1123 D9), and
+    /// those the kernel was last told.
+    var ownerValues: [UInt32: OwnerValues] = [:]
+    var deliveredOwners: [UInt32: OwnerValues] = [:]
     var deliveringCovers = false, deliverAgain = false
     /// The chain of corrections the reports not yet told are told in, nil with none (`countReport`)
     var untoldChain: CoversChain?
@@ -1150,10 +1154,10 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         for c in controllers.values { end(c) }
         retireTabs()
         if let primaryNavigation { retireStack(primaryNavigation) }
-        if !covers.isEmpty || !delivered.isEmpty || !localInsets.wanted.isEmpty {
-            // Clearing the covers or local insets changes them as a report does, and is answered as one
-            if !covers.isEmpty || !localInsets.wanted.isEmpty { countReport() }
-            covers = [:]; localInsets.wanted = [:]
+        if !covers.isEmpty || !delivered.isEmpty || !localInsets.wanted.isEmpty || !deliveredOwners.isEmpty {
+            // Clearing the covers, local insets or owners' values changes them as a report does, and is answered as one
+            if !covers.isEmpty || !localInsets.wanted.isEmpty || !ownerValues.isEmpty { countReport() }
+            covers = [:]; localInsets.wanted = [:]; ownerValues = [:]
             presenter.afterBatch { [weak self] in self?.deliverCovers() }
         }
         primaryNavigation?.willMove(toParent: nil)

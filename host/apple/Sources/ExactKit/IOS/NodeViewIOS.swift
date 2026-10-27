@@ -709,7 +709,7 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
         followingEndAnimated = false; authoredScrollAnimating = false; pageIfPager(scrollView)
         presenter?.collections.animationEnded(id, dragging: true)
         presenter?.collections.userIntent(id, travel: true)
-        retainedScrollTop = nil; dropCarriedScroll()
+        retainedScrollTop = nil; dropCarriedScroll(); endScrollToTop(dragging: true)
         if handlers.contains("scrolldragstart") { presenter?.scrollDrag(id, nil) }
         #if os(iOS)
         if #available(iOS 27.1, *) { presenter?.arrangements.cancelScrollHandoff(id) }
@@ -749,6 +749,7 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
         let session = presenter.session
         FrameSampler.scrolled(scrollView, in: session, person: false)
         session?.frameHealth.trackScrolled(scrollView)
+        if heldSize != nil { releaseSize() }
         repaintThrough()
         scrollEndMoved(scrollView)
         // User scrolling is already a coherent position. Deliver before the
@@ -1357,7 +1358,7 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
         let s = presenter?.gridScale ?? 1, o = grid?.origin ?? .zero, content = zoomExtent ?? self.content
         let size = CGSize(width: sv.scrollsX ? max(PixelGrid.length(content.width, from: o, vertical: false, scale: s), sv.bounds.width) : sv.bounds.width,
                           height: sv.scrollsY ? max(PixelGrid.length(content.height, from: o, vertical: true, scale: s), scrollFloor(sv)) : sv.bounds.height)
-        if sv.contentSize != size { sv.contentSize = size }
+        if !holdsSize(sv, for: size), sv.contentSize != size { sv.contentSize = size }
         // Forced bounce on a carousel's computed y traps Mac wheel input; one travels a quarter of its width or lays a
         // row (itself, or a child wider than the port), and a page a few points too wide keeps its bounce.
         let travel = size.width - sv.bounds.width
