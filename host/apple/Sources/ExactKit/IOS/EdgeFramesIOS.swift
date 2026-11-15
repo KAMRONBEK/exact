@@ -16,13 +16,12 @@ extension Presenter {
     /// frame now, then at each knot `t` of the way to the block's top; the op's own frame,
     /// with the edge at the block's top).
     func farFrame(_ op: BatchOp) {
-        if op.property.hasPrefix("reset") { edgeFrames[op.id] = [:]; NSLog("PROTO rule4 far pass %@", op.property); return }
+        if op.property.hasPrefix("reset") { edgeFrames[op.id] = [:]; return }
         let parts = op.property.split(separator: ";").map { $0.split(separator: " ").compactMap { Double($0) } }
         guard let first = parts.first, first.count == 5, parts.dropFirst().allSatisfy({ $0.count == 5 }) else { return }
         let rect = { (n: ArraySlice<Double>) in CGRect(x: n[n.startIndex], y: n[n.startIndex + 1], width: n[n.startIndex + 2], height: n[n.startIndex + 3]) }
         let inner: [(t: Double, frame: CGRect)] = parts.dropFirst().map { (t: $0[0], frame: rect($0.dropFirst())) }
         edgeFrames[UInt32(first[0]), default: [:]][op.id] = [(t: 0, frame: rect(first.dropFirst()))] + inner + [(t: 1, frame: CGRect(x: op.x, y: op.y, width: op.w, height: op.h))]
-        if !inner.isEmpty { NSLog("PROTO rule4 knots %d for %u", inner.count, op.id) } // PROTO: how far the range was halved
     }
 
     /// After a batch, which places each box at its resting frame: each moving route's
