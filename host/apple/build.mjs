@@ -68,7 +68,7 @@ import { writeDataKeys } from './data-keys.mjs';
 import { backgroundKeys, firstFrameKeys, declaredOrigin, interfaceStyle, localNetworking, memoryEntitlements, modulePlist, nfcKeys, startLocation, storeKeys, transportSecurity, updateActivation, withPackageKeys } from './plist.mjs';
 import { compileFixtures, iosTestRuns, macTests, onlyClasses } from './xctest.mjs';
 import { APPLE_STATIC_TREES, appIcon, appleRefusals, buildInfo, iosAssets, appleAssets, appleAssetCatalogInventory, copyNativeResources, signingOrder, helperEntitlements, plistFile, wrapFramework, signedGpuProduct, assertArchiveFrameworks } from './assets.mjs';
-import { auditLaunchParts, launchModules, launchPartsObjects, launchServices, serviceArgs, writeLaunchParts } from './launch-parts.mjs';
+import { auditLaunchParts, embeddedLibraries, launchModules, launchPartsObjects, launchServices, serviceArgs, writeLaunchParts } from './launch-parts.mjs';
 import { keptModules } from './modules.mjs';
 import { appleLinkArgs, embedLibrary, prepareLibrary } from '../../scripts/package-libraries.mjs';
 import { quiet, quietFor } from './quiet.mjs';
@@ -1186,7 +1186,8 @@ async function main(args, lockHeld = false) {
     return arm(moduleArgs(on, [...target, probeMain], built, true, variant, variant === true ? simulatorArch : macArch, packagesIn, true).filter(a => a !== '-emit-library'), [...moduleSources, ...packageSources, probeMain], built, frameworkStamp(true, variant, variant === true ? simulatorArch : macArch) + packageStamp, true, true);
   };
   const firstRoute = routes.find(r => !r.lacking); if (firstRoute && !firstRoute.placed) try { firstRoute.placed = compileProbe(firstRoute); } catch (e) { firstRoute.placed = () => { throw e; }; }
-  const serviceDylibs = launchServices(launchModules(app.dir, app.manifest), webBuildDir); for (const svc of serviceDylibs) arms.push(arm(['--sdk', sdkName, 'swiftc', '-module-cache-path', resolve(packagesRoot, 'modules-module-cache'), ...serviceArgs(svc), ...(ios ? ['-target', iosTripleFor(app, device, tv, compiled.ios), '-sdk', sdk] : macTarget)], svc.sources, svc.built, '', true));
+  const serviceDylibs = launchServices(launchModules(app.dir, app.manifest), webBuildDir, frameworkTarget(ios, ios && !device, ios ? iosArch : macArch)); for (const svc of serviceDylibs) arms.push(arm(['--sdk', sdkName, 'swiftc', '-module-cache-path', resolve(packagesRoot, 'modules-module-cache'), ...serviceArgs(svc), ...(ios ? ['-target', iosTripleFor(app, device, tv, compiled.ios), '-sdk', sdk] : macTarget)], svc.sources, svc.built, JSON.stringify(svc.frameworks.stamped.map(f => { const st = statSync(f); return [f, st.size, st.mtimeMs]; })), true));
+  const bundledLibraries = embeddedLibraries(moduleLibraries, serviceDylibs);
   await hostCompile?.done({ repeated: true });
   // The early build stands when it succeeded and the bake came out as it was expected to.
   const linkedEarly = early ? await early.step.done({ repeated: true }) && expected.capture === libDir && expected.composition === composition && expected.scratch === paths.scratch : false;
@@ -1337,7 +1338,7 @@ async function main(args, lockHeld = false) {
 
   const bundleTools = {runApple,appleArtifacts, macInfoPlist, copyAppleStaticTrees, writeUsageStrings, receipt, shippedReceipt, assertAppleIdentity, placeAppleArtifact, infoPlist, distributionKeys, copyAppleGpuProducts, entitlements, appClip};
   if (!ios) {
-    const bundlePath = assembleMac({intents, shared, library, moduleLibraries, serviceDylibs, macWidgets, shareTeam: signing.shareTeam, provisioning, triple: moduleTripleFor(app, ios, device, tv), appleReach, hasWeb, webLoadName, args, app, paths, binDir, libDir, bin, loadName, hasGpu, dylib, moduleDylibs, looseArms, hasSvg, svgLoadName, modulesLoadName, modulesBuilt, svgBuilt, canvasGpuLoadName, canvasGpuBuilt, sha1, linkRoot, swiftc, buildReceipt, development, bakedCompat, rosterKeys, production, distribution, stampSdk, products, composition, sdk, bakedPlan, cleanup}, bundleTools);
+    const bundlePath = assembleMac({intents, shared, library, moduleLibraries: bundledLibraries, serviceDylibs, macWidgets, shareTeam: signing.shareTeam, provisioning, triple: moduleTripleFor(app, ios, device, tv), appleReach, hasWeb, webLoadName, args, app, paths, binDir, libDir, bin, loadName, hasGpu, dylib, moduleDylibs, looseArms, hasSvg, svgLoadName, modulesLoadName, modulesBuilt, svgBuilt, canvasGpuLoadName, canvasGpuBuilt, sha1, linkRoot, swiftc, buildReceipt, development, bakedCompat, rosterKeys, production, distribution, stampSdk, products, composition, sdk, bakedPlan, cleanup}, bundleTools);
     publishProducts();
     release();
     rmSync(webBuildDir, { recursive: true, force: true });
@@ -1348,7 +1349,7 @@ async function main(args, lockHeld = false) {
     return;
   }
 
-  const { bundles, frameworkSymbols } = assembleIOS({intents, shared, library, moduleLibraries, serviceDylibs, triple: iosTripleFor(app, device, tv, compiled.ios), app, paths, binDir, bin, clipBin, device, development, appleReach, tv, bakedCompat, bakedPlan, ipa, linkRoot, swiftc, buildReceipt, rosterKeys, sdkName, production, distribution, stampSdk, libDir, gpuArtifacts, looseArms, modulesBuilt, modulesLoadName, hasSvg, svgBuilt, svgLoadName, svgFilterBuilt, svgFilterLibraryName, canvasGpuBuilt, canvasGpuLoadName, args, unsigned, prof, ph, sha1, composition, destination, target, sdk, hasGpu, dylib, alarm: ios && !tv && packaged.has('alarms') ? alarmActivity(packages) : null, watch: device && !tv && packaged.has('watch') && watchCompanion(app)}, bundleTools);
+  const { bundles, frameworkSymbols } = assembleIOS({intents, shared, library, moduleLibraries: bundledLibraries, serviceDylibs, triple: iosTripleFor(app, device, tv, compiled.ios), app, paths, binDir, bin, clipBin, device, development, appleReach, tv, bakedCompat, bakedPlan, ipa, linkRoot, swiftc, buildReceipt, rosterKeys, sdkName, production, distribution, stampSdk, libDir, gpuArtifacts, looseArms, modulesBuilt, modulesLoadName, hasSvg, svgBuilt, svgLoadName, svgFilterBuilt, svgFilterLibraryName, canvasGpuBuilt, canvasGpuLoadName, args, unsigned, prof, ph, sha1, composition, destination, target, sdk, hasGpu, dylib, alarm: ios && !tv && packaged.has('alarms') ? alarmActivity(packages) : null, watch: device && !tv && packaged.has('watch') && watchCompanion(app)}, bundleTools);
   publishProducts();
   release();
   if (!ipa && frameworkSymbols.count) console.log(`host/apple: framework symbols: ${resolve(paths.products, basename(frameworkSymbols.dir))} (${frameworkSymbols.count} frameworks, ${(frameworkSymbols.saved / 1048576).toFixed(1)} MB off them)`);

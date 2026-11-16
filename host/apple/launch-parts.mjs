@@ -2,6 +2,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
 import { launchModules } from '../../scripts/launch-modules.mjs';
+import { moduleFrameworks } from './arms.mjs';
 
 export { launchModules };
 
@@ -27,12 +28,18 @@ export function writeLaunchParts(pkg, app) {
 }
 
 /** Each launch module's `apple/service/*.swift`, built as its own dylib.
- * ExactKit loads it when the launch part's policy says, never during launch. */
-export const launchServices = (modules, buildDir) => modules.filter(m => m.service.length)
-  .map(m => ({ name: m.name, load: `lib${m.name}_service.dylib`, framework: serviceFramework(m.name), built: resolve(buildDir, `lib${m.name}_service.dylib`), sources: m.service }));
+ * ExactKit loads it when the launch part's policy says, never during launch.
+ * It links the module's `apple/service/*.xcframework` slices for `target`
+ * (moduleFrameworks' `{platform, variant, arch}`), and the app embeds each dynamic one. */
+export const launchServices = (modules, buildDir, target) => modules.filter(m => m.service.length)
+  .map(m => ({ name: m.name, load: `lib${m.name}_service.dylib`, framework: serviceFramework(m.name), built: resolve(buildDir, `lib${m.name}_service.dylib`), sources: m.service, frameworks: moduleFrameworks(m.serviceFrameworks ?? [], target) }));
 
 /** swiftc's arguments for a service dylib, before its target. */
-export const serviceArgs = svc => ['-parse-as-library', '-emit-library', '-O', '-swift-version', '5', '-module-name', `ExactService_${svc.name}`, ...svc.sources, '-lsqlite3', '-o', svc.built];
+export const serviceArgs = svc => ['-parse-as-library', '-emit-library', '-O', '-swift-version', '5', '-module-name', `ExactService_${svc.name}`, ...svc.sources, ...(svc.frameworks?.args ?? []), '-lsqlite3', '-o', svc.built];
+
+/** The prebuilt frameworks the bundle embeds: the app's native modules' and its launch services', each once. */
+export const embeddedLibraries = (moduleLibraries, services) => [...moduleLibraries, ...services.flatMap(svc => svc.frameworks?.libraries ?? [])]
+  .filter((lib, i, all) => all.findIndex(other => other.placed === lib.placed) === i);
 
 /** The objects SwiftPM compiled ExactLaunchParts into, in `binDir` (its --show-bin-path): Swift Build links the
  * target into one `ExactLaunchParts.o`; the native build system (what a Linux cross build runs) leaves one object

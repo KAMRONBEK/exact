@@ -2,7 +2,8 @@ import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
-import { auditLaunchParts, launchPartsObjects } from './launch-parts.mjs';
+import { auditLaunchParts, embeddedLibraries, launchModules, launchPartsObjects, launchServices, serviceArgs } from './launch-parts.mjs';
+import { plistFile } from './assets.mjs';
 
 const object = import.meta.filename;
 const modules = [{ name: 'observe' }];
@@ -78,4 +79,38 @@ test('the budget and the forbidden code count across every launch-parts object',
   expect(() => auditLaunchParts([object, object], modules, second)).toThrow('static initializer');
   let m = 0;
   expect(() => auditLaunchParts([object, object], modules, tool => tool === 'xcrun' ? (m++ ? { status: 1, stdout: '' } : size) : commands)).toThrow('size inspection failed');
+});
+
+test.skipIf(process.platform !== 'darwin')("a launch service links its module's xcframework slice and the app embeds it once", () => {
+  const app = mkdtempSync(resolve(tmpdir(), 'exact-launch-service-'));
+  try {
+    const service = resolve(app, 'modules/feedback/apple/service'), fw = resolve(service, 'Vendor.xcframework');
+    const slices = { 'ios-arm64': undefined, 'ios-arm64-simulator': 'simulator' };
+    for (const id of Object.keys(slices)) {
+      const placed = resolve(fw, id, 'Vendor.framework'), binary = Buffer.alloc(16);
+      binary.writeUInt32LE(0xfeedfacf, 0);
+      binary.writeUInt32LE(6, 12);
+      mkdirSync(placed, { recursive: true });
+      writeFileSync(resolve(placed, 'Vendor'), binary);
+    }
+    writeFileSync(resolve(fw, 'Info.plist'), plistFile({ AvailableLibraries: Object.entries(slices).map(([id, variant]) => ({
+      LibraryIdentifier: id, LibraryPath: 'Vendor.framework', SupportedPlatform: 'ios', SupportedArchitectures: ['arm64'], ...(variant ? { SupportedPlatformVariant: variant } : {}),
+    })) }));
+    writeFileSync(resolve(service, 'Feedback.swift'), 'import Vendor\n');
+    const [module] = launchModules(app, { launch: ['feedback'] });
+    expect(module.service).toEqual([resolve(service, 'Feedback.swift')]);
+    expect(module.serviceFrameworks).toEqual([fw]);
+    for (const [variant, id] of [['simulator', 'ios-arm64-simulator'], [undefined, 'ios-arm64']]) {
+      const [svc] = launchServices([module], resolve(app, 'build'), { platform: 'ios', variant, arch: 'arm64' });
+      const placed = resolve(fw, id, 'Vendor.framework');
+      expect(svc.frameworks.libraries).toEqual([{ placed, link: 'Vendor' }]);
+      const args = serviceArgs(svc);
+      expect(args.slice(args.indexOf('-F'), args.indexOf('-lsqlite3'))).toEqual(['-F', resolve(fw, id), '-framework', 'Vendor', '-Xlinker', '-rpath', '-Xlinker', '@executable_path/Frameworks']);
+      expect(embeddedLibraries([{ placed, link: 'Vendor' }], [svc])).toEqual([{ placed, link: 'Vendor' }]);
+      expect(embeddedLibraries([], [svc, svc])).toEqual([{ placed, link: 'Vendor' }]);
+    }
+    const [plain] = launchServices([{ ...module, serviceFrameworks: [] }], resolve(app, 'build'), { platform: 'ios', arch: 'arm64' });
+    expect(serviceArgs(plain)).not.toContain('-framework');
+    expect(embeddedLibraries([], [plain])).toEqual([]);
+  } finally { rmSync(app, { recursive: true, force: true }); }
 });
