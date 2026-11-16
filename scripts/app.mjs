@@ -496,7 +496,23 @@ export function resolveApp(nameOrCrate) {
     }
   };
   const platformKind = kind => platformCrateKind(dir, kind);
-  const crate = kind => `${name}-${platformKind(kind)}`;
+  // Authored app workspaces may keep a stable crate name that predates (or
+  // intentionally differs from) the checkout directory. Native verification
+  // and Android packaging must use the package Cargo will actually load; the
+  // generated `.exact/shells` workspace still follows the app-name convention.
+  const crate = kind => {
+    const platform = platformKind(kind), authored = resolve(dir, platform, 'Cargo.toml');
+    if (existsSync(authored)) {
+      try {
+        const named = Bun.TOML.parse(readFileSync(authored, 'utf8')).package?.name;
+        if (typeof named === 'string' && named) return named;
+      } catch {
+        // Cargo will report the authored manifest's parse error at the normal
+        // workspace validation point; keep the conventional name here.
+      }
+    }
+    return `${name}-${platform}`;
+  };
   const cargoPackage = kind => {
     prepare();
     if (!packages) {

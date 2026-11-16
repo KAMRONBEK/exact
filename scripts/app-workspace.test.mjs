@@ -681,6 +681,25 @@ test.each(['notes', 'planner'])('OS-specific folders resolve for %s without app-
   }
 });
 
+test('authored host crates keep their Cargo package names when a checkout is renamed', () => {
+  const dir = realpathSync(mkdtempSync(resolve(tmpdir(), 'exact-authored-crates-')));
+  const previous = process.env.EXACT_APP_DIR;
+  const write = (path, text) => { mkdirSync(dirname(resolve(dir, path)), { recursive: true }); writeFileSync(resolve(dir, path), text); };
+  try {
+    write('app.contract', 'component App\n  view\n    text "test"\n');
+    write('app.json', JSON.stringify({ name: 'Stable App', app: { id: 'dev.example.stable', name: 'Stable App' }, host: { android: { minimumOS: '12' } } }));
+    write('linux/Cargo.toml', '[package]\nname = "stable-services-linux"\nversion = "0.1.0"\nedition = "2021"\n');
+    write('android/Cargo.toml', '[package]\nname = "stable-services-android"\nversion = "0.1.0"\nedition = "2021"\n');
+    process.env.EXACT_APP_DIR = dir;
+    const app = resolveApp();
+    assert.equal(app.crate('linux'), 'stable-services-linux');
+    assert.equal(app.crate('android'), 'stable-services-android');
+  } finally {
+    if (previous === undefined) delete process.env.EXACT_APP_DIR; else process.env.EXACT_APP_DIR = previous;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('native resource snapshot preserves ignored scoped packages, executable bits and links', () => fixture(({app,root,dir,write,run})=>{
   const resolved=app();resolved.cargoPackage('gpu');
   run('cargo',['generate-lockfile','--offline']);
