@@ -94,9 +94,16 @@ fn owner_spelling(value: &str) -> Option<String> {
                 .filter(|n| n.contains("-inset-"))
                 .map(|n| format!("--exact-{n}"))
         };
-        match owned.filter(|n| exact_kernel::OwnerVar::from_name(n).is_some()) {
+        // An owner's value, or its safe area's own (the local inset, `EnvTerm::Local`)
+        let local = |n: &str| {
+            n.strip_prefix(exact_kernel::style::env::LOCAL_PREFIX)
+                .and_then(exact_kernel::style::Edge::from_name)
+                .is_some()
+        };
+        match owned.filter(|n| exact_kernel::OwnerVar::from_name(n).is_some() || local(n)) {
             Some(n) => {
-                out.push_str(&match fallback {
+                // The local inset takes no fallback: every host defines it
+                out.push_str(&match fallback.filter(|_| !local(&n)) {
                     Some(f) => format!("var({n}, {f})"),
                     None => format!("var({n})"),
                 });
@@ -144,10 +151,10 @@ mod tests {
         );
         assert_eq!(owner_spelling("env(keyboard-inset-height)"), None);
         assert_eq!(owner_spelling("env(titlebar-area-x)"), None);
-        // A fallback is kept, a function in it whole.
+        // The local inset takes no fallback; an owner's value keeps one, a function in it whole.
         assert_eq!(
             owner_spelling("env(safe-area-inset-top, 0px)").as_deref(),
-            Some("var(--exact-safe-area-inset-top, 0px)")
+            Some("var(--exact-safe-area-inset-top)")
         );
         assert_eq!(
             owner_spelling("calc(env(viewport-segment-width 0 0, calc(50% - 1px)) + 2px)")

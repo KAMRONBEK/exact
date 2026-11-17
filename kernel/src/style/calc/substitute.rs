@@ -49,26 +49,17 @@ fn walk<'i>(
             Token::Comment(_) => continue,
             Token::Function(name)
                 if env.is_some()
-                    && (name.eq_ignore_ascii_case("env") || name.eq_ignore_ascii_case("var")) =>
+                    && (name.eq_ignore_ascii_case("env")
+                        || (name.eq_ignore_ascii_case("var") && names_owner(p))) =>
             {
                 let env = env.expect("checked");
-                let is_env = name.eq_ignore_ascii_case("env");
-                let mut kept = Vec::new();
-                let parsed = p.parse_nested_block(|p| {
-                    // Another `var()` than a content owner's value (LLP 1123 D9) is kept as
-                    // written, the calculation's to read (D5, D7)
-                    if !is_env && !names_owner(p) {
-                        return walk(p, Some(env), &mut kept).map(|()| None);
-                    }
-                    let parts = if is_env { env_parts } else { var_parts };
-                    parts(p, 0).map(Some).map_err(|_| p.new_custom_error(()))
-                })?;
-                let Some((term, fallback)) = parsed else {
-                    tokens.push(format!("{name}("));
-                    tokens.append(&mut kept);
-                    tokens.push(")".to_string());
-                    continue;
+                let parts = if name.eq_ignore_ascii_case("env") {
+                    env_parts
+                } else {
+                    var_parts
                 };
+                let (term, fallback) =
+                    p.parse_nested_block(|p| parts(p, 0).map_err(|_| p.new_custom_error(())))?;
                 match fallback {
                     // Defined: the variable itself, its fallback unused
                     _ if term.value(env).is_some() => {

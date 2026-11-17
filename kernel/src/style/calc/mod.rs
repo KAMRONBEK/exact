@@ -1117,10 +1117,7 @@ impl Comparison {
     pub(crate) fn reads_local(&self) -> bool {
         self.with(|e| match e {
             Entry::Tree(t) => t.any(&|n| {
-                matches!(
-                    n,
-                    Node::Env(EnvTerm::Local(_) | EnvTerm::Owner(crate::style::OwnerVar::Safe(_)))
-                )
+                matches!(n, Node::Env(EnvTerm::Local(_)))
             }),
             Entry::Text { text, .. } => text.contains(env::LOCAL_PREFIX),
         })
@@ -1245,7 +1242,7 @@ impl Comparison {
     pub(crate) fn reads_local_edge(&self, edge: Edge) -> bool {
         self.with(|e| match e {
             Entry::Tree(t) => t.any(&|n| {
-                matches!(n, Node::Env(EnvTerm::Local(e) | EnvTerm::Owner(crate::style::OwnerVar::Safe(e))) if *e == edge)
+                matches!(n, Node::Env(EnvTerm::Local(e)) if *e == edge)
             }),
             Entry::Text { text, .. } => {
                 text.contains(&format!("{}{}", env::LOCAL_PREFIX, edge.name()))

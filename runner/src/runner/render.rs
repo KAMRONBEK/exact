@@ -218,7 +218,7 @@ pub(super) fn scroll_margin(kernel: &exact_kernel::Kernel, view: ViewId) -> [f64
 #[cfg(test)]
 mod tests {
     use crate::{DataError, DataSource, Runner};
-    use exact_kernel::{Kernel, OwnerValues};
+    use exact_kernel::{BlockAxis, HostBlock, Kernel, OwnerValues};
     use exact_plan::Value;
 
     struct NoData;
@@ -233,7 +233,7 @@ mod tests {
     /// top inset and 10% of its 300, not the window's.
     #[test]
     fn scroll_padding_and_margin_read_the_owners_values() {
-        let source = "component App\n  view\n    column testId=\"owner\" width=\"100%\" height=\"100%\"\n      scroll testId=\"list\" height=200 scroll-padding-top=\"var(--exact-safe-area-inset-top)\"\n        column testId=\"row\" height=40 scroll-margin-top=\"10cqh\"\n";
+        let source = "component App\n  view\n    column\n      column testId=\"owner\" width=\"100%\" height=\"100%\"\n        scroll testId=\"list\" height=200 scroll-padding-top=\"var(--exact-safe-area-inset-top)\"\n          column testId=\"row\" height=40 scroll-margin-top=\"10cqh\"\n";
         let plan = contract::compile(source).unwrap();
         let mut r = Runner::boot(
             plan,
@@ -258,6 +258,17 @@ mod tests {
         r.kernel_mut()
             .set_owner_values(owner, Some(values))
             .unwrap();
+        // `var(--exact-safe-area-inset-top)` is main's local inset, which a host reports for the owner, and `cqh` its
+        // content root, in the block its host fixes (LLP 1123 D16)
+        r.kernel_mut()
+            .set_local_insets(owner, Some([20.0, 0.0, 0.0, 0.0]))
+            .unwrap();
+        let block = HostBlock {
+            tactic: Default::default(),
+            width: BlockAxis::Is(400.0),
+            height: BlockAxis::Is(300.0),
+        };
+        r.kernel_mut().set_host_block(owner, Some(block)).unwrap();
         assert_eq!(super::scroll_padding(r.kernel(), list)[0], 20.0);
         assert_eq!(super::scroll_margin(r.kernel(), row)[0], 30.0);
     }

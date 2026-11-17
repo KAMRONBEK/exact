@@ -11,8 +11,6 @@ use super::env::{Edge, Env, Rect, Region, SegmentVar};
 /// Which owner value a `var(--exact-…)` names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OwnerVar {
-    /// `--exact-safe-area-inset-<edge>`.
-    Safe(Edge),
     /// `--exact-<region>-inset-<edge>`, one of D10's five regions.
     Region(Region, Edge),
     /// `--exact-viewport-segment-<field>-<x>-<y>`, `x` and `y` each 0 or 1.
@@ -25,12 +23,11 @@ pub const MAX_SEGMENT_INDEX: u8 = 1;
 
 impl OwnerVar {
     /// The variable a custom property's name names, without `var(`:
-    /// `--exact-safe-area-inset-top`. `None` for any other name.
+    /// `--exact-layout-margins-inset-top`. `None` for any other name: the
+    /// safe area's own (`--exact-safe-area-inset-*`) is the local inset
+    /// (`EnvTerm::Local`).
     pub fn from_name(name: &str) -> Option<OwnerVar> {
         let rest = name.strip_prefix("--exact-")?;
-        if let Some(edge) = rest.strip_prefix("safe-area-inset-") {
-            return Edge::from_name(edge).map(OwnerVar::Safe);
-        }
         if let Some(seg) = rest.strip_prefix("viewport-segment-") {
             let mut parts = seg.rsplitn(3, '-');
             let y = parts.next()?.parse::<u8>().ok()?;
@@ -43,10 +40,9 @@ impl OwnerVar {
         Region::from_name(&name[1..]).map(|(r, e)| OwnerVar::Region(r, e))
     }
 
-    /// The custom property's name: `--exact-safe-area-inset-top`.
+    /// The custom property's name: `--exact-layout-margins-inset-top`.
     pub fn name(self) -> String {
         match self {
-            OwnerVar::Safe(edge) => format!("--exact-safe-area-inset-{}", edge.name()),
             OwnerVar::Region(region, edge) => format!("-{}{}", region.prefix(), edge.name()),
             OwnerVar::Segment(var, x, y) => {
                 format!("--exact-viewport-segment-{}-{x}-{y}", var.name())
@@ -54,10 +50,9 @@ impl OwnerVar {
         }
     }
 
-    /// Its wire form: a tag (0 safe area, 1 region, 2 segment) and three bytes.
+    /// Its wire form: a tag (1 region, 2 segment) and three bytes.
     pub fn bytes(self) -> [u8; 4] {
         match self {
-            OwnerVar::Safe(edge) => [0, edge as u8, 0, 0],
             OwnerVar::Region(region, edge) => [1, region as u8, edge as u8, 0],
             OwnerVar::Segment(var, x, y) => [2, var as u8, x, y],
         }
@@ -66,7 +61,6 @@ impl OwnerVar {
     /// The variable its wire form names.
     pub fn from_bytes(b: [u8; 4]) -> Option<OwnerVar> {
         match b[0] {
-            0 => Edge::from_index(b[1]).map(OwnerVar::Safe),
             1 => Some(OwnerVar::Region(
                 Region::from_index(b[1])?,
                 Edge::from_index(b[2])?,
@@ -81,19 +75,11 @@ impl OwnerVar {
     }
 
     /// The points it reads under `env`: the owner's when `env` carries one,
-    /// the document's otherwise. A safe-area inset with no owner values is
-    /// the local inset where the environment was made for a node that has
-    /// one, as on a host that publishes local insets rather than owner
-    /// values. `None` for a segment that does not exist, whose property the
-    /// host leaves invalid so `var()`'s fallback applies.
+    /// the document's otherwise. `None` for a segment that does not exist,
+    /// whose property the host leaves invalid so `var()`'s fallback applies.
     pub fn value(self, env: &Env) -> Option<f64> {
         let owner = env.owner.as_deref();
         match self {
-            OwnerVar::Safe(edge) => Some(f64::from(match (owner, env.local) {
-                (Some(o), _) => o.safe[edge as usize],
-                (None, Some(local)) => local[edge as usize],
-                (None, None) => env.root_inset(edge),
-            })),
             OwnerVar::Region(region, edge) => Some(f64::from(match owner {
                 Some(o) => o.region_inset(region, edge),
                 None => env.region_inset(region, edge),
@@ -178,19 +164,14 @@ mod tests {
 
     #[test]
     fn names_round_trip_and_refuse_what_d9_does_not_name() {
-        let all = Edge::ALL
+        let all = Region::ALL
             .iter()
-            .map(|e| OwnerVar::Safe(*e))
-            .chain(
-                Region::ALL
-                    .iter()
-                    .flat_map(|r| Edge::ALL.iter().map(move |e| OwnerVar::Region(*r, *e))),
-            )
+            .flat_map(|r| Edge::ALL.iter().map(move |e| OwnerVar::Region(*r, *e)))
             .chain(SegmentVar::ALL.iter().flat_map(|v| {
                 [(0, 0), (1, 0), (0, 1), (1, 1)].map(|(x, y)| OwnerVar::Segment(*v, x, y))
             }))
             .collect::<Vec<_>>();
-        assert_eq!(all.len(), 4 + 20 + 24);
+        assert_eq!(all.len(), 20 + 24);
         for var in all {
             assert_eq!(
                 OwnerVar::from_name(&var.name()),
@@ -205,12 +186,13 @@ mod tests {
             None
         );
         assert_eq!(OwnerVar::from_name("--exact-press"), None);
-        assert_eq!(OwnerVar::from_name("--exact-safe-area-inset-middle"), None);
+        // The safe area's own is the local inset (`EnvTerm::Local`)
+        assert_eq!(OwnerVar::from_name("--exact-safe-area-inset-top"), None);
         assert_eq!(
             parse(" var( --exact-readable-content-inset-left ) "),
             Some(OwnerVar::Region(Region::ReadableContent, Edge::Left))
         );
-        assert_eq!(parse("var(--exact-safe-area-inset-top, 0px)"), None);
+        assert_eq!(parse("var(--exact-layout-margins-inset-top, 0px)"), None);
     }
 
     #[test]
@@ -223,7 +205,8 @@ mod tests {
                 Rect::new(495.5, 0.0, 455.5, 669.0),
             ],
         );
-        let top = OwnerVar::Safe(Edge::Top);
+        // A region with none reported is the safe area: the document's, then the owner's (D10)
+        let top = OwnerVar::Region(Region::SafeAreaCorners, Edge::Top);
         let lower = OwnerVar::Segment(SegmentVar::Top, 0, 1);
         let left = OwnerVar::Segment(SegmentVar::Left, 1, 0);
         assert_eq!(top.value(&env), Some(59.0));

@@ -116,14 +116,7 @@ fn node_rows(style: &StyleProps) -> StyleMask {
     let mut rows = StyleMask::EMPTY;
     for id in style.mask.iter().filter(|id| !OVERRIDES.contains(id)) {
         let row = style.get(id);
-        // A content owner's safe-area inset falls back to the local inset
-        // where the host publishes no owner values (`OwnerVar::value`)
-        let owner_safe = matches!(
-            row,
-            RowValue::Dimension(Dimension::Owner(crate::style::OwnerVar::Safe(_), _))
-        );
-        if owner_safe
-            || calc::reads_plain_container(&row)
+        if calc::reads_plain_container(&row)
             || calc::in_row(row).any(|c| {
                 c.reads_local()
                     || c.reads_custom()

@@ -1504,14 +1504,15 @@ fn the_windows_env_with_a_fallback_in_a_route_is_named_with_the_routes_var() {
         .iter()
         .find(|w| w.id == "lower-env-in-owner")
         .unwrap_or_else(|| panic!("{warnings:?}"));
+    // The route's safe area takes no fallback: every host defines it
     assert!(
         named
             .message
-            .contains("`padding-top=\"var(--exact-safe-area-inset-top, 0px)\"`"),
+            .contains("`padding-top=\"var(--exact-safe-area-inset-top)\"`"),
         "{named:?}"
     );
     // What it names compiles, and is the route's.
-    let owned = warned(&route("var(--exact-safe-area-inset-top, 0px)"));
+    let owned = warned(&route("var(--exact-safe-area-inset-top)"));
     assert!(
         owned.iter().all(|(id, _)| id != "lower-env-in-owner"),
         "{owned:?}"

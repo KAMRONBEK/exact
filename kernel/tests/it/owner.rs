@@ -4,8 +4,8 @@
 //! takes; `env()` stays the window's.
 
 use exact_kernel::{
-    Env, HostCover, Kernel, NodeType, Offer, Op, OwnerValues, PropId, Rect, StyleId, StyleProps,
-    StyleValue,
+    BlockAxis, Env, HostBlock, HostCover, Kernel, NodeType, Offer, Op, OwnerValues, PropId, Rect,
+    StyleId, StyleProps, StyleValue,
 };
 
 fn style(rows: &[(StyleId, StyleValue)]) -> StyleProps {
@@ -116,7 +116,20 @@ fn laptop() -> Kernel {
     kernel
         .set_host_cover(2, Some(HostCover::Edges([134.0, 0.0, 0.0, 0.0])))
         .unwrap();
+    // The route's host fixes its block, so container units read its content
+    // root, the block less what the host clears (D16)
     kernel
+        .set_host_block(2, Some(fixed_block(669.0, 951.0)))
+        .unwrap();
+    kernel
+}
+
+fn fixed_block(width: f32, height: f32) -> HostBlock {
+    HostBlock {
+        tactic: Default::default(),
+        width: BlockAxis::Is(width),
+        height: BlockAxis::Is(height),
+    }
 }
 
 fn frame(kernel: &mut Kernel, id: u32) -> (f32, f32, f32, f32) {
@@ -164,9 +177,10 @@ fn a_route_under_a_bar_places_its_panes_on_the_windows_segments() {
         (0.0, 495.5, 669.0, 455.5),
         "starts after it"
     );
-    // `cqh` is the route's content height; the owner's safe area is 0 at the
-    // cleared top, where `env()` would still give the window's 82.
-    assert_eq!(frame(&mut kernel, 5), (0.0, 134.0, 10.0, 408.5));
+    // `cqh` is the route's content height. `var(--exact-safe-area-inset-top)`
+    // is main's local inset, which no host reports here, so it is the window's
+    // 82 inside the route as outside it.
+    assert_eq!(frame(&mut kernel, 5), (0.0, 134.0, 92.0, 408.5));
     // Taken back, the route reads the document's again.
     assert!(kernel.set_owner_values(2, None).unwrap());
     assert_eq!(frame(&mut kernel, 3).3, 455.5);
@@ -415,8 +429,9 @@ fn a_sticky_inset_in_an_owner_reads_the_owners_values() {
     let sticky = kernel
         .sticky_constraint(kernel.arena().key_of(13).unwrap())
         .unwrap();
-    // The route's cleared top, 0, not the window's 82.
-    assert_eq!(sticky.insets[0], Some(4.0));
+    // `var(--exact-safe-area-inset-top)` is main's local inset, the window's
+    // 82 where no host reports the route's own.
+    assert_eq!(sticky.insets[0], Some(86.0));
 }
 
 #[test]
@@ -661,7 +676,7 @@ fn a_box_made_a_popover_at_run_time_takes_the_documents_values_and_gives_them_ba
         Op::SetStyle {
             id: 11,
             patch: Box::new(style(&[
-                (StyleId::Width, text("var(--exact-safe-area-inset-top)")),
+                (StyleId::Width, text("var(--exact-viewport-segment-height-0-0)")),
                 (StyleId::Height, StyleValue::Number(10.0)),
             ])),
         },
@@ -675,17 +690,17 @@ fn a_box_made_a_popover_at_run_time_takes_the_documents_values_and_gives_them_ba
         },
     ];
     kernel.apply(0, 2, &boxed).unwrap();
-    // In the route: its cleared top, 0.
-    assert_eq!(frame(&mut kernel, 11).2, 0.0);
+    // In the route: its upper segment's height, 321.5.
+    assert_eq!(frame(&mut kernel, 11).2, 321.5);
     let lift = Op::SetProp {
         id: 10,
         prop: exact_kernel::PropId::Popover,
         value: exact_kernel::PropValue::Str("auto".into()),
     };
     let receipt = kernel.apply(0, 3, &[lift]).unwrap();
-    // In the top layer: the window's 82 (LLP 1123 D9), and the host hears
-    // the child whose style that changes.
-    assert_eq!(frame(&mut kernel, 11).2, 82.0);
+    // In the top layer: the window's, 455.5 (LLP 1123 D9), and the host
+    // hears the child whose style that changes.
+    assert_eq!(frame(&mut kernel, 11).2, 455.5);
     let child = kernel.node(11).unwrap().key;
     assert!(receipt.touched.contains(&child), "{:?}", receipt.touched);
     let lower = Op::ClearProp {
@@ -693,5 +708,5 @@ fn a_box_made_a_popover_at_run_time_takes_the_documents_values_and_gives_them_ba
         prop: exact_kernel::PropId::Popover,
     };
     kernel.apply(0, 4, &[lower]).unwrap();
-    assert_eq!(frame(&mut kernel, 11).2, 0.0);
+    assert_eq!(frame(&mut kernel, 11).2, 321.5);
 }
