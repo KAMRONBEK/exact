@@ -1,0 +1,18 @@
+// Observe record fields are positional on every host: the field name is
+// emitted before its value, in declaration order.
+shape EventScreen
+  screen: string
+
+component App
+  state screen = "overview"
+  action navigate(next: string)
+    screen = next
+    observeAttributes(EventScreen(screen=screen))
+    observe("navigation", EventScreen(screen=screen))
+  view
+    column
+      button press=navigate("overview") testId="overview"
+        text "Overview"
+
+test "observe attributes keep their field names"
+  tap "overview"
