@@ -1,5 +1,5 @@
 // Observe record fields are positional on every host: the field name is
-// emitted before its value, in declaration order.
+// emitted before its value, in the order the call names them.
 shape EventScreen
   screen: string
 

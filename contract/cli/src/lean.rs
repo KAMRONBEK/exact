@@ -1002,36 +1002,6 @@ impl Emitter<'_> {
         list(body, |s| self.stmt(s))
     }
 
-    /// Observe records are flattened by the Rust lowerer before they reach a
-    /// host. Keep the Lean embedding's command values positional too:
-    /// `observeAttributes(Shape(a=v))` becomes `"a", v`, while `observe`
-    /// prefixes the severity before the same field/value pairs.
-    fn observe_command_parts(
-        &self,
-        name: &str,
-        args: &[Expr],
-    ) -> Result<Vec<String>, CompileError> {
-        let (mut parts, record) = if name == "observe" {
-            let severity = args
-                .get(2)
-                .map(|e| self.expr(e))
-                .unwrap_or_else(|| Ok(format!("(.str {})", string("info"))))?;
-            let parts = vec![self.expr(&args[0])?, severity];
-            (parts, args.get(1))
-        } else {
-            (Vec::new(), args.first())
-        };
-        if let Some(Expr::Call(_, fields, _)) = record {
-            for field in fields {
-                if let Expr::NamedArg(key, value, _) = field {
-                    parts.push(format!("(.str {})", string(key)));
-                    parts.push(self.expr(value)?);
-                }
-            }
-        }
-        Ok(parts)
-    }
-
     fn stmt(&self, s: &Stmt) -> Result<String, CompileError> {
         Ok(match s {
             Stmt::Let { name, expr, .. } => {
@@ -1043,8 +1013,10 @@ impl Emitter<'_> {
             Stmt::Command { name, args, .. } => {
                 // The arguments in the order the runner receives them, `none`
                 // where a named one is left to its default.
-                let parts = if name == "observe" || name == "observeAttributes" {
-                    self.observe_command_parts(name, args)?
+                let parts = if let Some(flat) = contract_lower::expr::observe_args(name, args) {
+                    flat.iter()
+                        .map(|e| self.expr(e))
+                        .collect::<Result<Vec<_>, _>>()?
                 } else {
                     let ordered = contract_lower::expr::command_args(name, args);
                     ordered
