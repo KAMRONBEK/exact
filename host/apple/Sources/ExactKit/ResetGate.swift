@@ -145,7 +145,7 @@ enum ResetGate {
         "viewScheme(_:dark:)": "a view's colour scheme: told again with the window's (`rebooted`)",
         "segments(_:)": "the posture and viewport segments: the view's `rebooted` tells them again",
         "listMargins(_:)": "UIKit's cell margins: the presenter's reset clears what was told (`RowCells.reset`), and the new rows report their own",
-        "groupedMargins(_:)": "UIKit's grouped-card margins: the new tree's grouped lists measure and report their own",
+        "groupedCells(_:)": "UIKit's grouped-list cells: the new tree's grouped lists measure and report their own",
         "localInsets(_:)": "content owners' local insets (LLP 1123 D9): the navigation's reset clears what was told, and each route and block reports its own as the new tree lays out",
         "resizeBox(_:width:height:)": "a resize grip's drag on the old tree: a restart takes the size back to the plan's, as a reload does the browser's",
         "setTime(epochAtZero:utcOffset:)": "the date, told by a check an input the teardown sets off makes (`followOffset`): forgotten when held, so the next check tells it again (boot and the agent tell it outside the hold)",

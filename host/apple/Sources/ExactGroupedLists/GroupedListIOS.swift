@@ -211,7 +211,7 @@ final class GroupedListHost: GroupedLists {
     private(set) var lists: [UInt32: GroupedListView] = [:]
     /// The theme's generation the lists last drew from (`sync`).
     private var theme = ThemeRoles.generation
-    /// Each list's margins as the kernel was last told them (`tell`).
+    /// Each list's cells as the kernel was last told them (`tell`).
     var told: [UInt32: [CGFloat]] = [:]
     /// What each view is covered by, as the kernel was last told (`tellAccessories`).
     var covered: [UInt32: HostCover] = [:]

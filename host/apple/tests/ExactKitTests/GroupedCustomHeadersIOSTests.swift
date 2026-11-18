@@ -221,7 +221,8 @@ final class GroupedCustomHeadersIOSTests: GroupedListFixture {
         let cell = try XCTUnwrap(c.visibleCells.first as? UICollectionViewListCell)
         let margin = cell.convert(cell.bounds, to: c).minX + cell.directionalLayoutMargins.leading
         XCTAssertEqual(box.size, CGSize(width: 24, height: 24))
-        XCTAssertEqual(told[0] + told[2], margin, accuracy: 0.5)
+        XCTAssertEqual(told[0], cell.bounds.width, accuracy: 0.5, "told UIKit's cell width")
+        XCTAssertEqual(told[1], cell.directionalLayoutMargins.leading, accuracy: 0.5, "and its leading margin")
         XCTAssertEqual(box.minX, margin, accuracy: 0.5, "at UIKit's margin, where a standard row's text starts")
         XCTAssertEqual(text.minX - box.maxX, 8, accuracy: 0.5, "the name 8 points after the avatar")
         XCTAssertEqual(shown.frame.height, header.bounds.height, accuracy: 0.5, "as tall as the kernel's header")
@@ -237,10 +238,11 @@ final class GroupedCustomHeadersIOSTests: GroupedListFixture {
         // not yet given its cells their margins; shown with no batch, the
         // kernel is told the margins that show, and rows and header follow.
         view.removeFromSuperview()
-        host(p).told[owner.id] = [0, 0, 8, 8]
-        session.apply(session.runtime.groupedMargins([(owner.id, [0, 0, 8, 8])]))
+        let bare: [CGFloat] = [told[0], 8, 8]
+        host(p).told[owner.id] = bare
+        session.apply(session.runtime.groupedCells([(owner.id, bare)]))
         settle()
-        XCTAssertEqual(host(p).told[owner.id], [0, 0, 8, 8], "nothing is told of a list out of the window")
+        XCTAssertEqual(host(p).told[owner.id], bare, "nothing is told of a list out of the window")
         root.view.addSubview(view)
         settle()
         XCTAssertEqual(host(p).told[owner.id], told, "told UIKit's margins as the list shows")

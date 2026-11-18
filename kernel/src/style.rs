@@ -1459,7 +1459,7 @@ pub fn taffy_style(arena: &NodeArena, slot: u32) -> taffy::style::Style {
     if direction == Direction::Rtl {
         sides::mirror_unsaid(arena.style(slot), &mut s);
     }
-    crate::grouped::apply_card_margins(arena, slot, &mut s);
+    crate::grouped::apply_card_width(arena, slot, &mut s);
     // After the mirror: a table's sides are what they cancel, physically.
     table::apply(arena, slot, &mut s);
     // After the mirror and a table's padding: a reservation is physical

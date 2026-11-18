@@ -1,5 +1,5 @@
 // Which batches take a grouped list's carried rows home, and where a row
-// goes when it does (`GroupedListView.restore`, `sendHome`); the margins the
+// goes when it does (`GroupedListView.restore`, `sendHome`); the cells the
 // kernel is told (`tell`); and the rows a scroll to a row passes, sized
 // before it aims (`measure`).
 import ExactKit
@@ -7,8 +7,8 @@ import ExactKit
 import UIKit
 
 extension GroupedListHost {
-    /// The kernel lays a list's custom rows out by the margins UIKit gave its
-    /// cards and cells (`GroupedMargins`), told after the batch and once no
+    /// The kernel lays a list's custom rows out at the width and margins
+    /// UIKit gave its cells (`GroupedCells`), told after the batch and once no
     /// slice is in flight, as a route's blocks are (`OwnerBlocks.publish`):
     /// sampled when told, so a report that waited tells what is current, and
     /// one behind it finds nothing changed. A list of standard rows alone
@@ -20,15 +20,15 @@ extension GroupedListHost {
                 guard let self else { return }
                 var changes: [(UInt32, [CGFloat]?)] = []
                 for (id, list) in lists where list.carriesCustomRows || list.model.sections.contains(where: { $0.headerView != nil }) {
-                    guard let margins = list.margins(), told[id] != margins else { continue }
-                    told[id] = margins
-                    changes.append((id, margins))
+                    guard let cells = list.cells(), told[id] != cells else { continue }
+                    told[id] = cells
+                    changes.append((id, cells))
                 }
                 for id in Array(told.keys) where lists[id] == nil {
                     told[id] = nil
                     if presenter.views[id] != nil { changes.append((id, nil)) }
                 }
-                if !changes.isEmpty { session.apply(session.runtime.groupedMargins(changes)) }
+                if !changes.isEmpty { session.apply(session.runtime.groupedCells(changes)) }
                 tellAccessories(session)
             }
         }
@@ -51,32 +51,38 @@ extension GroupedListHost {
 }
 
 extension GroupedListView {
-    /// UIKit's card and cell margins, left then right, inside the list's
-    /// content box. The kernel already applies CSS padding; including it
-    /// in the card margins would subtract it from a custom row's width twice.
-    /// None outside a window: UIKit gives a list's cells their margins as
-    /// it shows them, and a cell laid out before that has a bare view's 8.
-    func margins() -> [CGFloat]? {
-        guard collection.window != nil, let cell = collection.visibleCells.first as? UICollectionViewListCell,
+    /// UIKit's cells as its list lays them out now: their width, then their
+    /// left and right layout margins. The kernel lays a custom row out at
+    /// that width; one value UIKit gives, read with the margins from one
+    /// layout, where insets from the kernel's box for the list mixed two
+    /// layouts that change at different moments. None outside a window: UIKit
+    /// gives a list's cells their margins as it shows them, and a cell laid
+    /// out before that has a bare view's 8.
+    func cells() -> [CGFloat]? {
+        guard collection.window != nil else { return nil }
+        collection.layoutIfNeeded()
+        guard let cell = collection.visibleCells.first as? UICollectionViewListCell,
               let path = collection.indexPath(for: cell),
               let frame = collection.layoutAttributesForItem(at: path)?.frame else { return nil }
         let m = cell.directionalLayoutMargins
         let rtl = cell.effectiveUserInterfaceLayoutDirection == .rightToLeft
-        return [max(0, frame.minX - reach.left - horizontalPadding.left),
-                max(0, collection.bounds.width - frame.maxX - reach.right - horizontalPadding.right),
-                rtl ? m.trailing : m.leading, rtl ? m.leading : m.trailing]
+        return [frame.width, rtl ? m.trailing : m.leading, rtl ? m.leading : m.trailing]
     }
 
     /// Before a batch: the carried rows it must read at home go back. A
-    /// carried row's own box (a `frame` op) and the order of the nodes it
-    /// was carried from (a `children` op, which `placing` follows) are kept
-    /// in its cell, as are those nodes' boxes and their props other than
-    /// `inert`: the shown rows of a list two rows are inserted into, or
-    /// whose `refreshing` changes, stay in their cells, as a collection
-    /// view's cells do under an insert. Any other op on a row takes it home
-    /// alone; any other op on a node it was carried from (a style its rows
-    /// inherit, an `inert`) takes every row home. Carried home and back,
-    /// each shown row's subtree took UIKit's move and trait passes twice.
+    /// carried row's own box and content box (`frame`, `fieldContent`) and
+    /// the order of the nodes it was carried from (a `children` op, which
+    /// `placing` follows) are kept in its cell, as are those nodes' boxes,
+    /// their blocks' used sizes and their props other than `inert`: the
+    /// shown rows of a list two rows are inserted into, or whose
+    /// `refreshing` changes, stay in their cells, as a collection view's
+    /// cells do under an insert, and the rows of a list whose column UIKit
+    /// resizes in an animation move with it. Any other op on a row takes it
+    /// home alone; any other op on a node it was carried from (a style its
+    /// rows inherit, an `inert`) takes every row home. Carried home and
+    /// back, each shown row's subtree took UIKit's move and trait passes
+    /// twice, and was placed at once, not moved: a view that moved to
+    /// another parent showed in no frame there (`Presenter.moveOrPlace`).
     func prepare(_ ops: [BatchOp]) {
         guard !carried.isEmpty else { return }
         var above = Set<UInt32>(), walked = Set<ObjectIdentifier>()
@@ -89,14 +95,18 @@ extension GroupedListView {
         }
         var alone: [NodeView] = []
         for op in ops {
+            // A far frame moves nothing: it is where a box goes when its route's edge moves (`farFrame`)
+            if op.op == .far { continue }
             if [.roots, .flight, .land, .exit].contains(op.op) { return restore() }
             if carried[op.id] != nil {
-                if op.op != .frame, let row = host.presenter.views[op.id] { alone.append(row) }
+                if op.op != .frame, op.op != .fieldContent, let row = host.presenter.views[op.id] { alone.append(row) }
                 continue
             }
             guard above.contains(op.id) else { continue }
             switch op.op {
             case .frame, .content, .children: continue
+            // A block's used size (a route's, as its column moves) changes nothing its rows read
+            case .unknown where op.payload["op"] as? String == "block": continue
             case .props where op.props["inert"] == nil && !op.clear.contains("inert"): continue
             default: return restore()
             }

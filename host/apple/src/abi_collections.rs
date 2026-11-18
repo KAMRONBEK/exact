@@ -59,8 +59,8 @@ impl<D: DataSource> Bridge<D> {
     /// offsets x and y (36 bytes). Kind 6 is a fixed allocation and ignores
     /// the offsets; kind 13 is a scrollport, including at offset zero.
     /// Kind 7 forgets either placement. Kind 8 reports UIKit's grouped-list
-    /// card and cell margins: f32 the card's left and right
-    /// insets, then the cell's left and right margins; kind 9 clears them.
+    /// cells: f32 the width of its cards, a field unused, then the cell's left
+    /// and right layout margins; kind 9 clears them.
     /// Kind 12 reports scrollbar gutters in the right and bottom fields.
     /// Kind 14 shows a split's own placeholder (LLP 1116.006 D2,
     /// `Runner::show_split_placeholder`) and kind 15 hides it again; their
@@ -80,7 +80,7 @@ impl<D: DataSource> Bridge<D> {
     pub fn covers(&mut self, len: usize) -> u32 {
         let bytes = self.input.get(..len).unwrap_or(&[]);
         let out = if let Ok(records) = records(bytes) {
-            let (mut covers, mut margins, mut lists, mut restyles) =
+            let (mut covers, mut cells, mut lists, mut restyles) =
                 (Vec::new(), Vec::new(), Vec::new(), Vec::new());
             let mut locals = Vec::new();
             let mut owners = BlockChanges::default();
@@ -95,14 +95,14 @@ impl<D: DataSource> Bridge<D> {
                 let edge = |i: usize| f32::from_le_bytes(word(i));
                 let (view, kind) = (u32::from_le_bytes(word(0)), u32::from_le_bytes(word(4)));
                 match kind {
-                    8 => margins.push((
+                    8 => cells.push((
                         view,
-                        Some(exact_kernel::GroupedMargins {
-                            card: [edge(8), edge(12)],
+                        Some(exact_kernel::GroupedCells {
+                            width: edge(8),
                             cell: [edge(16), edge(20)],
                         }),
                     )),
-                    9 => margins.push((view, None)),
+                    9 => cells.push((view, None)),
                     14 | 15 => restyles.push((view, Restyle::Placeholder(kind == 14))),
                     16 => {
                         let axis = |i: usize| Some(edge(i)).filter(|v| !v.is_nan());
@@ -145,7 +145,7 @@ impl<D: DataSource> Bridge<D> {
                     covers: &covers,
                     blocks: &owners.blocks,
                     placements: &owners.placements,
-                    margins: &margins,
+                    cells: &cells,
                     list_margins: &lists,
                     restyles: &restyles,
                     locals: &locals,
