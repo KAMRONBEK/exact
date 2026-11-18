@@ -683,7 +683,7 @@ extension NavigationHost {
     }
 
     func makeNavigation(first: NodeView?) -> UINavigationController {
-        let nav = UINavigationController(navigationBarClass: RouteNavigationBar.self, toolbarClass: nil)
+        let nav = ExactNavigationController(navigationBarClass: RouteNavigationBar.self, toolbarClass: nil)
         let stack = registerStack(nav)
         #if !os(tvOS)
         nav.navigationBar.prefersLargeTitles = true
