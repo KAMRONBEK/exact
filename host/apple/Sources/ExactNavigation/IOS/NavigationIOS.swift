@@ -205,6 +205,8 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     private var windowless = false, settled = false
     /// Syncs asked for, for tests.
     private(set) var syncCalls = 0
+    /// The children ops of batches applied while a sync ran, which it runs again with as it ends.
+    private var heldChildren: [BatchOp]?
     /// The root key last journaled as matching no route, so a refusal is one
     /// line, not one per batch (LLP 1035.001 D6).
     private var refusedKey: String?
@@ -471,7 +473,12 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         // Installing or moving a controller can synchronously cause layout.
         // That layout must not start another containment handoff inside this one.
         syncCalls += 1
-        guard !syncing else { return }
+        // A batch applied inside a sync (UIKit's layout there can reach the app: a split's collapse asks the router)
+        // is owed, its stacks' children with it: the sync runs again with them once it ends.
+        guard !syncing else {
+            heldChildren = (heldChildren ?? []) + batch.ops.filter { $0.op == .children }
+            return
+        }
         tabsHeld = false
         let window = presenter.session?.view?.window
         windowless = presenter.session != nil && window == nil
@@ -480,13 +487,18 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         guard window != nil else { return }
         nativeMove = .none; settled = false
         syncing = true
-        // On every return, run the edge passes it held from a route's layout while it ran
+        // On every return, run the edge passes it held from a route's layout while it ran, and again the sync a batch
+        // applied inside it asked for
         defer {
             #if os(iOS)
             endBootTransfer()
             #endif
             syncing = false; settleScrollEdges()
             presenter.flushPendingFocus(); presenter.elementScrolls.flush()
+            if let held = heldChildren {
+                heldChildren = nil
+                sync(Batch(ops: held, timers: false, motion: false, clock: nil, error: nil))
+            }
         }
         presenter.owners.publish() // PROTO: covers must find a block before deriving child styles.
         guard let p = projection(batch) else {
