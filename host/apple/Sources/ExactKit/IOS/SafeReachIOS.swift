@@ -90,7 +90,7 @@ extension Presenter {
 }
 
 /// One route's walk: which edges each box touches, which it reaches, and the outset applied.
-struct SafeReach {
+package struct SafeReach {
     let view: UIView, allocation: CGRect, safe: CGRect, pixel: CGFloat
     /// PROTO (UIKit-first measurement): the callback for each box that reaches or takes the top
     /// edge (`Presenter.reachMovingTops`)
@@ -359,7 +359,7 @@ struct SafeReach {
         return c.count < 4 || c[3] > 0
     }
 
-    static func clips(_ v: NodeView) -> Bool {
+    package static func clips(_ v: NodeView) -> Bool {
         let x = v.style["overflow_x"]?.string ?? "visible", y = v.style["overflow_y"]?.string ?? "visible"
         return v.scroll == nil && (x != "visible" || y != "visible")
     }
