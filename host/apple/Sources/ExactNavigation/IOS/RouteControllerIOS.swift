@@ -287,20 +287,22 @@ final class RouteController: UIViewController, UIScrollViewDelegate {
         host?.presenter.regrid(node) // from the controller's view, a grid origin of its own
     }
     /// The route's room for the keys, and its page viewport's frame, extent and inset.
-    func fitContentViewport(in block: CGRect? = nil) {
+    func fitContentViewport(in block: CGRect? = nil, editor: UIView?? = nil) {
         let view = surface
         #if os(iOS)
         // @ref LLP 1127.000 D9 — the docked keys are a region of the window, as SwiftUI's keyboard region is: a route
         // they cover takes the part they cover as bottom safe area, whichever column's field took them, so UIKit insets
-        // its edge scroller and its content height leaves them out. The route whose own editor takes them is shortened
-        // instead (`block(in:)`), a visual viewport that resizes takes them as its inset (`resizes-visual`),
+        // its edge scroller and its content height leaves them out. The route whose own editor (`editor`, when the caller
+        // found it) takes them is shortened instead (`block(in:)`), a visual viewport that resizes takes them as its
+        // inset (`resizes-visual`),
         // `overlays-content` lets them cover, and a route under a presentation keeps its own. The bar UIKit floats the
         // editing search field in, which it places above that safe area, is its edge scroller's bottom inset
         // (`fieldBarInset`).
         if let presenter = host?.presenter {
             var keys: CGFloat = 0
             if contentViewport == nil || presenter.keyboardPolicy != "resizes-visual", presenter.keyboardPolicy != "overlays-content",
-               !presenter.edits(in: view), !presentedOver, let top = presenter.keyboardTop, let window = view.window {
+               !presentedOver, let top = presenter.keyboardTop, let window = view.window,
+               (editor ?? presenter.keyboardEditor)?.isDescendant(of: view) != true {
                 let edge = view.convert(CGPoint(x: 0, y: top), from: window).y
                 // Extend the inherited safe area (including a row beside the tabs) to the keys;
                 // the keyboard and that row obstruct the same edge.
