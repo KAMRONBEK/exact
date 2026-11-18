@@ -121,7 +121,9 @@ impl<D: DataSource> Host<D> {
     }
 
     /// The viewport's change into `batch`, after what it holds (`set_view`),
-    /// with the keyboard's overlap when told.
+    /// with the keyboard's overlap when told, and `held`, a commit the caller
+    /// made before it, committed after the viewport's.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn resize_inner(
         &mut self,
         width: f32,
@@ -130,6 +132,7 @@ impl<D: DataSource> Host<D> {
         mut batch: Batch,
         error: Option<String>,
         previous: Option<Env>,
+        held: Option<Timed>,
     ) -> String {
         let _roles = self.runner.bind_roles(); // Its own (LLP 1121 stage 5).
                                                // @ref LLP 1039 D2 — merge re-answer and relayout, once.
@@ -146,9 +149,10 @@ impl<D: DataSource> Host<D> {
         self.viewport = (width, height);
         self.height_targets_dirty = true;
         self.presence.snap = true;
-        if let Some(receipt) = receipt {
-            let at_ms = self.now_ms;
-            return self.commit_into(&[Timed { at_ms, receipt }], error, batch);
+        let at_ms = self.now_ms;
+        let receipts: Vec<_> = (receipt.map(|receipt| Timed { at_ms, receipt }).into_iter()).chain(held).collect();
+        if !receipts.is_empty() {
+            return self.commit_into(&receipts, error, batch);
         }
         let laid_out = self.layout(&mut batch).err();
         if let Some(canvas) = self.turn.canvas {
@@ -278,32 +282,32 @@ impl<D: DataSource> Host<D> {
         } else {
             (Batch::new(), None)
         };
-        let error = error.or(self.blocks_into(blocks, placements, shown));
+        let (failed, shown) = self.blocks_into(blocks, placements, shown);
+        let error = error.or(failed);
         let changed = self.environment_into(env, segments, &mut batch);
         if let Err(error) = changed {
             return self.geometry_refused(error, Some(previous));
         }
         match size {
             Some((width, height)) => {
-                self.resize_inner(width, height, keyboard, batch, error, Some(previous))
+                self.resize_inner(width, height, keyboard, batch, error, Some(previous), shown)
             }
             None => {
                 match self.runner.set_view(None, keyboard) {
                     Ok(Some(receipt)) => {
-                        return self.commit_into(
-                            &[Timed {
-                                at_ms: self.now_ms,
-                                receipt,
-                            }],
-                            error,
-                            batch,
-                        )
+                        let at_ms = self.now_ms;
+                        let receipts: Vec<_> = std::iter::once(Timed { at_ms, receipt }).chain(shown).collect();
+                        return self.commit_into(&receipts, error, batch);
                     }
                     Err(e) => {
                         return self
                             .geometry_refused(format!("viewport geometry: {e:?}"), Some(previous))
                     }
-                    Ok(None) => {}
+                    Ok(None) => {
+                        if let Some(shown) = shown {
+                            return self.commit_into(&[shown], error, batch);
+                        }
+                    }
                 }
                 if changed != Ok(true) && blocks.is_empty() {
                     return self.finish(batch, error);

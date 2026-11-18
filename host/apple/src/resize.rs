@@ -97,7 +97,7 @@ impl<D: DataSource> Host<D> {
     pub fn resize_at(&mut self, width: f32, height: f32, now_ms: f64) -> String {
         self.now_ms = now_ms.max(self.now_ms);
         let (batch, error) = self.settle_resize_clock(Batch::new(), None);
-        self.resize_inner(width, height, None, batch, error, None)
+        self.resize_inner(width, height, None, batch, error, None, None)
     }
 
     pub(super) fn settle_resize_clock(

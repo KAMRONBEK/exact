@@ -196,7 +196,9 @@ impl<D: DataSource> Host<D> {
             .iter()
             .map(|&(view, _)| self.runner.kernel().host_block(view))
             .collect();
-        error = error.or(self.blocks_into(blocks, placements, shown));
+        let (failed, shown) = self.blocks_into(blocks, placements, shown);
+        error = error.or(failed);
+        receipts.extend(shown);
         // A block is the content root container units read (LLP 1123 D16): the rows under one that changed are sent
         // again as their owner now resolves them, as an owner's values' are, whichever of the two came first
         for (&(view, _), was) in blocks.iter().zip(was) {
@@ -241,13 +243,15 @@ impl<D: DataSource> Host<D> {
         self.finish(batch, error)
     }
     /// Set allocations, placements and how blocks are shown before the
-    /// caller's single layout.
+    /// caller's single layout, and return the commit that answers
+    /// `shownRoutes` again when a block shows its route another way (LLP
+    /// 1127 D8, a fold), for the caller to commit with its own.
     pub(super) fn blocks_into(
         &mut self,
         blocks: &[(ViewId, Option<HostBlock>)],
         placements: &[(ViewId, Option<exact_runner::BlockPlacement>)],
         shown: &[(ViewId, BlockShown)],
-    ) -> Option<String> {
+    ) -> (Option<String>, Option<exact_runner::Timed>) {
         let mut error = None;
         if !blocks.is_empty() {
             self.presence.unauthored = true;
@@ -266,10 +270,15 @@ impl<D: DataSource> Host<D> {
         }
         self.runner.place_blocks(placements);
         // Liveness alone: the runner reads it, layout does not.
+        let mut moved = false;
         for &(view, how) in shown {
-            self.runner.kernel_mut().set_host_block_shown(view, how);
+            moved |= self.runner.kernel_mut().set_host_block_shown(view, how);
         }
-        error
+        if !moved {
+            return (error, None);
+        }
+        let (shown, failed) = self.runner.shown_routes_commit(self.now_ms);
+        (error.or(failed), shown)
     }
 }
 
