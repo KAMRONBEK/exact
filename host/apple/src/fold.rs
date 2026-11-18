@@ -150,7 +150,9 @@ impl<D: DataSource> Host<D> {
         self.height_targets_dirty = true;
         self.presence.snap = true;
         let at_ms = self.now_ms;
-        let receipts: Vec<_> = (receipt.map(|receipt| Timed { at_ms, receipt }).into_iter()).chain(held).collect();
+        let receipts: Vec<_> = (receipt.map(|receipt| Timed { at_ms, receipt }).into_iter())
+            .chain(held)
+            .collect();
         if !receipts.is_empty() {
             return self.commit_into(&receipts, error, batch);
         }
@@ -216,7 +218,16 @@ impl<D: DataSource> Host<D> {
         placements: &[(exact_kernel::ViewId, Option<exact_runner::BlockPlacement>)],
     ) -> String {
         self.set_view_at(
-            screen, insets, regions, size, segments, keyboard, blocks, placements, &[], None,
+            screen,
+            insets,
+            regions,
+            size,
+            segments,
+            keyboard,
+            blocks,
+            placements,
+            &[],
+            None,
         )
     }
 
@@ -296,7 +307,9 @@ impl<D: DataSource> Host<D> {
                 match self.runner.set_view(None, keyboard) {
                     Ok(Some(receipt)) => {
                         let at_ms = self.now_ms;
-                        let receipts: Vec<_> = std::iter::once(Timed { at_ms, receipt }).chain(shown).collect();
+                        let receipts: Vec<_> = std::iter::once(Timed { at_ms, receipt })
+                            .chain(shown)
+                            .collect();
                         return self.commit_into(&receipts, error, batch);
                     }
                     Err(e) => {

@@ -734,11 +734,10 @@ final class ContentOwnersIOSTests: XCTestCase {
     }
 
     /// A node's size as the kernel last laid it out (the agent's `frames`).
-    /// The size `route`'s root is laid out at in `view`, its controller's view. PROTO (safe-area design r2 §2.1): the
-    /// view's bounds less the clearance the route reports as its root's cover (the kernel's `cover_clearance`).
+    /// PROTO: where `route`'s root is laid out in its controller's `view`, its bounds less the route's cover, in the ABI's f32
     private func contentRoot(_ session: ExactSession, _ route: NodeView, in view: UIView) -> CGSize {
-        guard case .edges(let e)? = session.presenter.navigation.covers[route.id] else { return view.bounds.size }
-        return CGSize(width: view.bounds.width - e.left - e.right, height: view.bounds.height - e.top - e.bottom)
+        let e = session.presenter.navigationHost.covers[route.id].flatMap { if case .edges(let e) = $0 { e } else { nil } }
+        return CGSize(width: CGFloat(Float(view.bounds.width - (e?.left ?? 0) - (e?.right ?? 0))), height: CGFloat(Float(view.bounds.height - (e?.top ?? 0) - (e?.bottom ?? 0))))
     }
 
     private func laidOut(_ session: ExactSession, _ id: UInt32) -> CGSize? {
@@ -1106,11 +1105,8 @@ final class ContentOwnersIOSTests: XCTestCase {
         let route = try node(session, routeID)
         let controller = try XCTUnwrap(p.navigationHost.controllers[route.id], file: file, line: line)
         let sheetView = try XCTUnwrap(controller.view, file: file, line: line)
-        // Layout crosses the host ABI as f32; compare UIKit's bounds at that precision.
         until("the sheet's route takes the sheet's size less its clearance: kernel \(String(describing: self.laidOut(session, route.id))), UIKit \(self.contentRoot(session, route, in: sheetView))") {
-            let root = self.contentRoot(session, route, in: sheetView)
-            let size = CGSize(width: CGFloat(Float(root.width)), height: CGFloat(Float(root.height)))
-            return self.laidOut(session, route.id) == size
+            self.laidOut(session, route.id) == self.contentRoot(session, route, in: sheetView)
         }
         let form = try node(session, scroller), sv = try XCTUnwrap(form.scroll, file: file, line: line)
         XCTAssertTrue(controller.edgeScroll === form, "the scroller ends the route", file: file, line: line)
@@ -1391,24 +1387,20 @@ final class ContentOwnersIOSTests: XCTestCase {
         XCTAssertEqual(agent.clock(["settle": true])["settled"] as? Bool, true)
         let nav = try XCTUnwrap(p.navigationHost.primaryNavigation)
         let route = try XCTUnwrap(nav.topViewController as? RouteController)
-        // Where viewport-info-open starts in the route's view: a left cover moves it right, also inside a
-        // scroller that reaches under the cover, whose content stays clear of it. PROTO (safe-area design r2 §2.1): the
-        // route's root itself is laid out in its safe area, so its own place counts.
+        // Where viewport-info-open starts in the route's view, the root's own place counted (PROTO): a left cover moves
+        // it right, inside a scroller that reaches under the cover too.
         let target = try node(session, "viewport-info-open").id
         func left() -> CGFloat? {
-            var x: CGFloat = 0, at = target
-            while true {
-                let n = agent.runnerNode(at)
-                guard let frame = n["frame"] as? [String: Any], let dx = frame["x"] as? NSNumber else { return nil }
+            var x: CGFloat = 0, at: UInt32? = target
+            while let id = at, let dx = (agent.runnerNode(id)["frame"] as? [String: Any])?["x"] as? NSNumber {
                 x += CGFloat(dx.doubleValue)
-                if at == route.node.id { return x }
-                guard let parent = (n["parent"] as? NSNumber)?.uint32Value else { return nil }
-                at = parent
+                if id == route.node.id { return x }
+                at = (agent.runnerNode(id)["parent"] as? NSNumber)?.uint32Value
             }
+            return nil
         }
         func wantedLeft() -> CGFloat {
-            if case .edges(let edges)? = p.navigationHost.covers[route.node.id] { return edges.left }
-            return 0
+            if case .edges(let edges)? = p.navigationHost.covers[route.node.id] { edges.left } else { 0 }
         }
         let uncovered = try XCTUnwrap(left()) - wantedLeft()
         let insets = route.additionalSafeAreaInsets, frame = route.view.frame

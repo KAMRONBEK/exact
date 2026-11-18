@@ -167,9 +167,17 @@ pub(super) fn row_padding(
         super::mv("row-padding-block", span),
     );
     match texts(children).as_slice() {
-        [Node::Element { tag, attrs, children, .. }] if tag == "column" && lines(children) => {
-            without_box(attrs, class, exact_kernel::grouped::authored_subtitle_box, padding)
-        }
+        [Node::Element {
+            tag,
+            attrs,
+            children,
+            ..
+        }] if tag == "column" && lines(children) => without_box(
+            attrs,
+            class,
+            exact_kernel::grouped::authored_subtitle_box,
+            padding,
+        ),
         _ => padding,
     }
 }

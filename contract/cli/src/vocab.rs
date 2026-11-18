@@ -16,6 +16,7 @@
 mod card;
 mod concepts;
 mod frames;
+mod navigation;
 mod recipes;
 mod scroll;
 
@@ -498,23 +499,11 @@ fn one_text(name: &str, shown: &mut Shown) -> bool {
         if name == "title" {
             println!("  on `head`, the document's title; elsewhere HTML's advisory text, the platform's tooltip (prop title, str)");
         }
-        if name == "navigationBar" {
-            println!("  on a route (LLP 1115.000 D5.2). \"none\": the screen has no navigation bar on iOS, a full-bleed screen that draws its own chrome and way back (a photo viewer, a header laid out by hand); its `header` paints as written and the edge swipe still goes back. \"auto\", the default, is the platform's bar: the route's `header` when it is one (`contract vocab header`), else the system Back button alone on a pushed route, and no bar on a stack's first route. A `navigationBack` control drawn in a pushed route's page without it is a second Back (warning `lower-back-twice`). On the navigation root or off a route it is refused. docs/recipes/navigation-stack.md");
+        if let Some(note) = navigation::note(name) {
+            println!("  {note}");
         }
         if name == "-exact-background-extension" {
             println!("  on an `image`, `none` (the default) or `auto`: where the image meets the safe area (a split's sidebar or inspector, the iPhone Duo's side strip), iOS 26 fills that area with the image's mirrored, blurred edges, as SwiftUI's `backgroundExtensionEffect()` does; the image keeps the place and size it was laid out at, so give it a width and height. Other hosts draw nothing more (LLP 1123 D11)");
-        }
-        if name == "navigationInspector" {
-            println!("  on a sheet route (`navigationPresentation=\"modal\"`): the sheet is an inspector, details beside the content they describe (SwiftUI's `inspector(isPresented:)`). Where iOS shows the stack as an expanded split (an iPad, the iPhone Duo open), the route is the split's inspector column at the trailing edge, beside the detail, which stays live; UIKit decides its width and whether the list stays beside it. A compact width and every other host keep the sheet. It opens with a push and closes with a Back, as the sheet does. iOS 26 and later (LLP 1127 D14)");
-        }
-        if name == "navigationDetent" {
-            println!("  {DETENT}");
-        }
-        if name == "navigationInitialDetent" {
-            println!("  on a sheet route (`navigationPresentation=\"modal\"`), the word of its `navigationDetent` the sheet opens at: `navigationDetent=\"medium large\" navigationInitialDetent=\"large\"` opens tall with a half-height stop below, React Navigation's `sheetInitialDetentIndex`. Unsaid or empty (as `navigationDetent=\"\"` is), the sheet opens at its first, the shortest, as UIKit does. It is read when the sheet's detents are set (when it opens, and when `navigationDetent` changes), so a change to it alone leaves the sheet where it is. Off a route, or as a literal that is not one of the route's words, it is refused; a bound one that names none of the detents iOS kept is journaled (`logs`), and the sheet opens at its first. UIKit's `selectedDetentIdentifier`; hosts whose sheets have one height ignore it");
-        }
-        if name == "navigationHistory" {
-            println!("  on the navigation root (LLP 1115.000 D5.5), the ways through history it offers now: \"back forward\", the default, offers each wherever the router has somewhere to go; \"back\", \"forward\" or \"none\" withholds the rest. Bind it when the app's own Back and Forward go less far than its router's visits (a palette open over the page, a history it caps, a visit it will not return to). On macOS a way withheld is no two-finger swipe AppKit tracks (so no `historyswipe`), no three-finger swipe, no Go ▸ Back or Forward and no mouse side button; with Back withheld the toolbar's Back is disabled. The web's Back and Forward are the browser's, and other hosts ignore it");
         }
         if name == "-exact-return-presses" {
             println!("  on a container (LLP 1115.000 D7.3). On the Mac, Return presses no focused button: it is a dialog's default button's, as in AppKit, and Space presses the focused one. \"descendants\" asks for Chromium's keys under this node: Return presses the focused button or pressable as Space does, before a dialog's default button, as a focused `<button>` takes Enter on the web. For an app that copies a web app's keys (a port of an Electron app); \"none\", the default, keeps AppKit's rule. The web already presses a focused button on Enter, and other hosts ignore it");
@@ -528,17 +517,11 @@ fn one_text(name: &str, shown: &mut Shown) -> bool {
         if name == "glassInteractive" {
             println!("  on a box with `backgroundMaterial=\"glass\"` or `\"glass-clear\"`: whether its glass swells and lights under a finger (`UIGlassEffect.isInteractive`). Unset, it does when the box has a `press` and is not disabled; `false` keeps a pressable box's glass still, `true` makes a box without a press react. Only iOS and tvOS 26 have interactive glass; other hosts ignore it");
         }
-        if name == "navigationGrabber" {
-            println!("  on a sheet route (`navigationPresentation=\"modal\"`). \"visible\" shows the sheet's grabber, the short bar at its top edge, \"hidden\" hides it; \"auto\", the default, is the platform's: iOS shows one on a sheet with several detents (`navigationDetent=\"medium large\"`), which the grabber resizes, and none on a sheet of one height. UIKit's `prefersGrabberVisible`. Draw no grabber of your own: say this. Hosts whose sheets have none ignore it");
-        }
         if name == "wakelock" {
             println!("  on any element (LLP 1125 D11). \"screen\" keeps the display from dimming or locking for idleness while the element is mounted and displayed (no ancestor `display: none`, under no unselected tab and no screen a stack keeps under its top; the one a sheet covers is shown), so a screen kept in a hidden tab panel holds nothing; \"none\", the default, holds nothing. Bind it to state: `wakelock=(playing ? \"screen\" : \"none\")`. A literal other than the two is refused; a computed one is journaled and holds nothing. iOS's idle timer, a macOS display-sleep assertion, the web's Screen Wake Lock (asked again when the page is visible again), Android's `keepScreenOn`; Linux and Windows journal it as unavailable. The agent's `state.wakelock` is `{{held, by}}`; `expect wakelock held` or `expect wakelock released` asserts this holder record (displayed elements requesting the lock), not whether the OS or browser granted it.");
         }
         if name == "orientationlock" {
             println!("  on any element (LLP 1133.029). While the element is mounted and displayed (by `wakelock`'s rule) and outside every `dialog` and popover, the window keeps to the orientations it names: a Screen Orientation API lock type (\"portrait\", \"landscape\", \"portrait-primary\", \"portrait-secondary\", \"landscape-primary\", \"landscape-secondary\", \"natural\", \"any\"), or \"current\", the orientation the window has when the lock begins (a game steered by tilt); \"none\", the default, holds nothing. Bind it to state: `orientationlock=(tilt ? \"current\" : \"none\")`. The topmost sheet that holds wins over what it covers, a descendant's lock replaces its ancestor's (\"any\" there frees a subtree), and unrelated locks intersect; locks that share no orientation hold none and are journaled. A type only narrows the manifest's `orientation`: a literal outside it, or one inside a `dialog` or popover, is refused. iOS and Android (on a tablet only \"current\" holds), the web in fullscreen where the browser locks, Windows' auto-rotation preference; macOS, tvOS and Linux have no screen orientation and journal it once. The agent's `state.orientationlock` is `{{held, by, words, lock, conflict, applied}}`, `applied` the host's readback.");
-        }
-        if name == "navigationSplit" {
-            println!("  on a stack's root route (LLP 1116.004 D1.2). A wide window (900 px and up on the web; on iOS where UIKit's split view shows the list beside the detail, as on the iPhone Duo open upright) shows a stack whose root route is a list whose rows push beside its top, as a split view does, with nothing to write: a row pushes when its press does: a `link` to one of the app's routes, or a `button` or pressable whose action writes the router (`push`, `open`, `go`). A row's `image \"symbol:forward-chevron\"` (the disclosure an iOS list draws) is paint, which neither splits a list nor keeps one from splitting, and a list whose rows only select stays pushed. An action that writes the router only to go back or open a sheet looks the same, so say `navigationSplit=\"none\"` for such a list. The list is a 320-wide column, its chevrons hidden and the row whose press pushed the detail marked; the top route is the detail beside it (a detail a row pushed has no Back), a `navigationPresentation=\"modal\"` route stays a sheet, and a narrow window pushes. On iOS the split is UIKit's (LLP 1127), outside a tab: a compact width collapses it to one column, the detail over the list with Back; UIKit sets the list's width, while nothing is selected the detail is an empty page rather than either placeholder, and under the agent's own chrome (`--chrome agent`) and on tvOS the stack pushes. The router is unchanged: a push from a row while a detail shows stacks it, so `replace` there to swap the detail. \"none\" keeps the stack pushed; a number is the column's width and splits a list the rule does not find. While nothing is selected the detail pane shows the platform's placeholder (\"No Selection\" on a Mac or an iPad, \"Select an item\" on the web, centred, in the secondary label's colour); \"placeholder\" on a box in the root route (an `EmptyState`) is your own instead, shown only there and then and laid out nowhere else. A root `tablist` left as the tabs recipe places it is a sidebar on the same window. docs/recipes/navigation-stack.md");
         }
         if matches!(
             name,

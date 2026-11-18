@@ -718,7 +718,13 @@ pub(crate) fn cover_clearance(arena: &NodeArena, slot: u32) -> Option<[f32; 4]> 
     match arena.cover(slot) {
         Some(HostCover::Edges(e)) if arena.blocks.holds(slot) => {
             let off = arena.style(slot).rare.safe_area;
-            Some(std::array::from_fn(|i| if off & (1 << i) != 0 { 0.0 } else { e[i] }))
+            Some(std::array::from_fn(|i| {
+                if off & (1 << i) != 0 {
+                    0.0
+                } else {
+                    e[i]
+                }
+            }))
         }
         _ => None,
     }

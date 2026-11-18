@@ -604,13 +604,17 @@ fn an_inline_image_follows_its_owners_size() {
     // The image stands on the baseline, 3.84 above the line's bottom. Its
     // owner's host fixes the block its container units read (D16).
     kernel.set_owner_values(9, Some(tall(200.0))).unwrap();
-    kernel.set_host_block(9, Some(fixed_block(400.0, 200.0))).unwrap();
+    kernel
+        .set_host_block(9, Some(fixed_block(400.0, 200.0)))
+        .unwrap();
     assert_eq!(
         measured(&mut kernel, 2),
         ((20.0, 20.0), (20.0, 20.0), 23.84)
     );
     kernel.set_owner_values(9, Some(tall(400.0))).unwrap();
-    kernel.set_host_block(9, Some(fixed_block(400.0, 400.0))).unwrap();
+    kernel
+        .set_host_block(9, Some(fixed_block(400.0, 400.0)))
+        .unwrap();
     assert_eq!(
         measured(&mut kernel, 2),
         ((40.0, 40.0), (40.0, 40.0), 43.84)
@@ -650,8 +654,12 @@ fn an_inline_image_moved_to_another_owner_is_measured_by_it() {
     kernel.apply(0, 1, &ops).unwrap();
     kernel.set_owner_values(2, Some(tall(300.0))).unwrap();
     kernel.set_owner_values(3, Some(tall(100.0))).unwrap();
-    kernel.set_host_block(2, Some(fixed_block(200.0, 300.0))).unwrap();
-    kernel.set_host_block(3, Some(fixed_block(200.0, 100.0))).unwrap();
+    kernel
+        .set_host_block(2, Some(fixed_block(200.0, 300.0)))
+        .unwrap();
+    kernel
+        .set_host_block(3, Some(fixed_block(200.0, 100.0)))
+        .unwrap();
     // The image on the baseline, 3.84 above the line's bottom.
     assert_eq!(
         measured(&mut kernel, 5),
@@ -686,7 +694,10 @@ fn a_box_made_a_popover_at_run_time_takes_the_documents_values_and_gives_them_ba
         Op::SetStyle {
             id: 11,
             patch: Box::new(style(&[
-                (StyleId::Width, text("var(--exact-viewport-segment-height-0-0)")),
+                (
+                    StyleId::Width,
+                    text("var(--exact-viewport-segment-height-0-0)"),
+                ),
                 (StyleId::Height, StyleValue::Number(10.0)),
             ])),
         },

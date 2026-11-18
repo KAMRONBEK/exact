@@ -295,8 +295,6 @@ private final class NativeEntry {
     #if os(iOS) || os(tvOS)
     /// A native screen's controller, a child of its route's while it lives.
     var screen: UIViewController?
-    /// The view keeps a size of its own, centred in its clipping box, while UIKit animates the box's size (`resize`).
-    var cropped = false
     #endif
     var intrinsicSize: CGSize?
     var hasIntrinsicReport = false
@@ -310,28 +308,6 @@ private final class NativeEntry {
         return s
     }
 }
-
-#if os(iOS) || os(tvOS)
-/// A fixed-size native child need not get UIKit layout when only an ancestor
-/// moves. Re-arm it after a geometry batch, once per changed window geometry.
-struct NativeWorldLayout {
-    private struct Geometry: Equatable {
-        let frame: CGRect
-        let scale: CGFloat
-        let window: ObjectIdentifier
-    }
-    private var previous: Geometry?
-
-    mutating func refresh(_ view: UIView) {
-        guard let window = view.window else { previous = nil; return }
-        let next = Geometry(frame: view.convert(view.bounds, to: window),
-                            scale: window.screen.scale, window: ObjectIdentifier(window))
-        guard next != previous else { return }
-        previous = next
-        view.setNeedsLayout()
-    }
-}
-#endif
 
 private final class NativeWait { var data: Data?; var error: String?; var done = false }
 
@@ -1167,7 +1143,7 @@ final class NativeViews: NativeModuleHosting {
         guard let entry = entries[owner.id], let view = entry.view else { return }
         if entry.sizing && owner.bounds.isEmpty { return }
         #if os(iOS) || os(tvOS)
-        if entry.cropped { return } // its own size until the box's animation ends
+        if crop.holds(view) { return } // its own size until the box's animation ends
         #endif
         entry.sizing = false
         view.frame = owner.contentBox()
@@ -1178,46 +1154,15 @@ final class NativeViews: NativeModuleHosting {
 
     #if os(iOS) || os(tvOS)
     /// `owner`'s box changes size, in `resize`, inside an animation UIKit has open (a split's column as the device
-    /// folds). A platform view lays its content out for its bounds once, not at each size between, and a map keeps its
-    /// centre and scale as they change, showing more or less around them. In a box that clips its content
-    /// (`overflow`), the view takes the larger of its old and new sizes at once, centred in the box, and only its
-    /// centre moves with the box: the clip UIKit moves shows more of the new layout as the box grows, as SwiftUI's map
-    /// does, and less of the old one as it shrinks, never a layout smaller than the box around it. Once the box's
-    /// animation ends, the view takes its content box. In a box that does not clip, the view follows the box as a
-    /// UIView in a hand-built app does.
+    /// folds): in a box that clips it, its platform view keeps a size of its own until the animation ends (`NativeCrop`);
+    /// in one that does not, the view follows the box as a UIView in a hand-built app does.
     func resize(_ owner: NodeView, inAnimation resize: () -> Void) {
         guard SafeReach.clips(owner), let entry = entries[owner.id], let view = entry.view, !entry.sizing, view.window != nil else { return resize() }
-        let old = view.bounds.size
-        view.autoresizingMask = []
-        resize()
-        let box = owner.contentBox()
-        UIView.performWithoutAnimation { view.bounds.size = CGSize(width: max(old.width, box.width), height: max(old.height, box.height)) }
-        view.center = CGPoint(x: box.midX, y: box.midY)
-        guard !entry.cropped else { return }
-        entry.cropped = true
-        // The box's animation ends on the first frame with nothing of its place or size in flight
-        FrameClock.shared.want(view, .nativeResize) { [weak self, weak entry, weak owner] _ in
-            if let owner, owner.window != nil, Self.moving(owner.layer) { return }
-            self?.endCrop(entry)
+        crop.resize(view, in: owner, resize) { [weak self, weak entry] in
+            if let owner = entry?.owner { UIView.performWithoutAnimation { self?.laidOut(owner) } }
         }
     }
-
-    /// Whether an animation of `layer`'s place or size is under way (`Agent.inFlight`: not one held at speed 0
-    /// or kept past its end).
-    private static func moving(_ layer: CALayer) -> Bool {
-        let now = CACurrentMediaTime()
-        return (layer.animationKeys() ?? []).contains { key in
-            (key.hasPrefix("bounds") || key.hasPrefix("position"))
-                && layer.animation(forKey: key).map { Agent.inFlight($0, on: layer, key: key, now: now) } == true
-        }
-    }
-
-    private func endCrop(_ entry: NativeEntry?) {
-        guard let entry, entry.cropped else { return }
-        if let view = entry.view { FrameClock.shared.drop(view) }
-        entry.cropped = false
-        if let owner = entry.owner { UIView.performWithoutAnimation { laidOut(owner) } }
-    }
+    private let crop = NativeCrop()
     #endif
 
     #if os(iOS) || os(tvOS)

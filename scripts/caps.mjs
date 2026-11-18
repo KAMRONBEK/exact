@@ -251,7 +251,7 @@ function windowsNames(files) {
  * main thread over one pull past a scroller's top. Native host sources may not call `NSLog` or `print` more often
  * than they did when the count began; each one removed lowers it.
  */
-const HOST_LOG_BASELINE = 46;
+const HOST_LOG_BASELINE = 42;
 function hostLogs(root, files) {
   const CALL = /(^|[^\w.])(NSLog|print)\(/g;
   let calls = 0;

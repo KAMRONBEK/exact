@@ -7,6 +7,15 @@ import XCTest
 /// A custom row stays in its cell through what changes no row: a box moved
 /// outside a batch, and a batch's far frames.
 final class GroupedCarriedRowsIOSTests: GroupedListFixture {
+    /// After a batch the sync names every list whose rows it carried into its cells, so the presenter walks those
+    /// lists' routes again (`reachSafeEdges(holding:)`): one it made and one that only carried its rows again.
+    func testTheSyncNamesTheListsWhoseRowsItCarried() throws {
+        let p = presenter { self.model() }
+        let owner = try XCTUnwrap(p.views[1])
+        XCTAssertTrue(host(p).sync(changed: []).contains { $0 === owner }, "a list that only carried its rows again")
+        XCTAssertTrue(host(p).sync(changed: nil).contains { $0 === owner }, "a list updated from its model")
+    }
+
     /// A box moved outside a batch, as a sheet's bar moving its route's edge while the list
     /// scrolls moves the list (`placeEdge`), leaves the rows in their cells and the authored
     /// sections hidden: sent home, each showed its cell empty and the sections over it for a frame.

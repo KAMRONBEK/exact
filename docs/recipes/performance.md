@@ -29,12 +29,12 @@ Costs your Contract chooses:
 - A `scroll=` action lays the screen out and applies it on every frame it changes state. A stretchy header that
   writes only the pull is right, and an action that writes the value state already holds costs nothing; to show a
   button past 300 points, store a boolean, not the offset.
-- `-exact-background-extension="auto"` blurs a picture when it first shows and keeps the blurs: a hero picture, not each
+- `-exact-background-extension="auto"` blurs a picture as it first shows and keeps the blur: a hero picture, not each
   row's thumbnail.
 - A native view in list rows: `ExactNativeFactory(…, reuse: true)` and `prepareForReuse()`. Without `reuse`, which is
   for list rows, a native view is made each time its node is: when it first shows, as SwiftUI makes its map, so do
   not make one at launch or keep one hidden; and again when the key of a `for` around it changes while it stays
-  shown, a remake your Contract causes: keep that key stable and pass what changes as props.
+  shown: keep that key stable and pass what changes as props.
 
 Not evidence:
 

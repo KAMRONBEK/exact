@@ -1116,9 +1116,7 @@ impl Comparison {
     /// whose `env()` has a fallback, wherever it names one.
     pub(crate) fn reads_local(&self) -> bool {
         self.with(|e| match e {
-            Entry::Tree(t) => t.any(&|n| {
-                matches!(n, Node::Env(EnvTerm::Local(_)))
-            }),
+            Entry::Tree(t) => t.any(&|n| matches!(n, Node::Env(EnvTerm::Local(_)))),
             Entry::Text { text, .. } => text.contains(env::LOCAL_PREFIX),
         })
     }
@@ -1241,9 +1239,7 @@ impl Comparison {
     /// Whether it reads the local inset at `edge`.
     pub(crate) fn reads_local_edge(&self, edge: Edge) -> bool {
         self.with(|e| match e {
-            Entry::Tree(t) => t.any(&|n| {
-                matches!(n, Node::Env(EnvTerm::Local(e)) if *e == edge)
-            }),
+            Entry::Tree(t) => t.any(&|n| matches!(n, Node::Env(EnvTerm::Local(e)) if *e == edge)),
             Entry::Text { text, .. } => {
                 text.contains(&format!("{}{}", env::LOCAL_PREFIX, edge.name()))
             }

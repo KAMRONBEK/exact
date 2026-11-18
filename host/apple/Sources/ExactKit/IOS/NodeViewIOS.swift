@@ -367,8 +367,7 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
     /// field does by itself): the web's rule that only a focusable element
     /// hears these. Keys come from a hardware keyboard (`pressesBegan`).
     /// UIKit's focus search finds what UIKit can focus (`FocusSearch`).
-    /// A canvas's GPU surface is never a focus item
-    package override func didAddSubview(_ subview: UIView) { super.didAddSubview(subview); if subview !== metal { FocusSearch.joined(subview) } }
+    package override func didAddSubview(_ subview: UIView) { super.didAddSubview(subview); if subview !== metal { FocusSearch.joined(subview) } } // a canvas's GPU surface is no focus item
     /// A hidden element is not exposed. Children stay in the tree: this is
     /// not `accessibilityElementsHidden`, which would hide them too.
     package override var isAccessibilityElement: Bool {
