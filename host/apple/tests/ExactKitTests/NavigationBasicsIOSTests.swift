@@ -195,7 +195,9 @@ final class NavigationBasicsIOSTests: XCTestCase {
         XCTAssertEqual(p.keyboardPolicy, "resizes-visual")
         setKeyboard(p, top: nil)
         let route = try XCTUnwrap(p.navigationHost.primaryNavigation?.topViewController as? RouteController)
-        let layoutAllocation = route.node.bounds.size
+        // The route's laid-out box: its view reaches past it to the edges it touches (`SafeReach`), which the page's
+        // scroll changes
+        let layoutAllocation = route.node.boxFrame.size
         let owner = try XCTUnwrap(p.navigationHost.primaryOwner?.view)
         let ownerFrame = owner.convert(owner.bounds, to: window)
         let keys = try XCTUnwrap(window).bounds.maxY - 250
@@ -203,7 +205,7 @@ final class NavigationBasicsIOSTests: XCTestCase {
         setKeyboard(p, top: keys)
         p.viewport.layoutIfNeeded()
         _ = Agent(session: session).clock(["settle": true])
-        XCTAssertEqual(route.node.bounds.size, layoutAllocation, "visual keyboard accommodation does not reflow the route")
+        XCTAssertEqual(route.node.boxFrame.size, layoutAllocation, "visual keyboard accommodation does not reflow the route")
         XCTAssertLessThanOrEqual(field.convert(field.bounds, to: window).maxY, keys + 0.5,
                                  "a native route still reveals a field with no authored scroller")
         let content = try XCTUnwrap(route.contentViewport)
@@ -846,7 +848,8 @@ final class NavigationBasicsIOSTests: XCTestCase {
 
     /// The bottom edge (LLP 1116 D2): Detail's scroller has the "Open in"
     /// row under it, which keeps its place above the tab bar, the scroller
-    /// no inset of UIKit's.
+    /// no inset of UIKit's. PROTO (safe-area design r2 §2.3): it touches no edge of the route's safe area, so it reaches
+    /// none, and UIKit's adjustment, which it keeps, insets it nowhere.
     func testAFooterUnderTheScrollerKeepsTheBottomCover() throws {
         let session = try fixture("basics-footer")
         let tabs = try XCTUnwrap(session.presenter.navigationHost.tabController)
@@ -858,7 +861,8 @@ final class NavigationBasicsIOSTests: XCTestCase {
         let list = try node(session, "list-detail"), footer = try node(session, "open-above-card")
         let sv = try XCTUnwrap(list.scroll)
         if #available(iOS 18.0, *) { XCTAssertFalse(tabs.isTabBarHidden, "Detail shows the tab bar") }
-        XCTAssertEqual(sv.contentInsetAdjustmentBehavior, .never)
+        XCTAssertEqual(list.reach, .zero, "the scroller, below the card and above the row, touches no edge of the safe area")
+        XCTAssertEqual(sv.adjustedContentInset.top, 0, "UIKit insets it nowhere")
         XCTAssertEqual(sv.adjustedContentInset.bottom, 0)
         XCTAssertEqual(footer.convert(footer.bounds, to: detail.view).maxY, detail.view.bounds.maxY - detail.view.safeAreaInsets.bottom,
                        accuracy: 0.5, "the footer stays above the tab bar")
@@ -1254,6 +1258,8 @@ final class NavigationBasicsIOSTests: XCTestCase {
     /// and its last line rests above the home indicator, with no scroll by
     /// the insets; with the tall box back the end still lands there, and the
     /// scroller still runs to the screen's edge, its content passing under.
+    /// PROTO (safe-area design r2 §2.3): the route's root is laid out in its safe area and the scroller reaches the
+    /// edges, where UIKit insets it; no `Inset` cover tells the kernel the bars again.
     func testAScrollerUIKitInsetsLaysItsContentOutBetweenTheInsets() throws {
         let session = try fixture("basics-inset")
         let (_, _, chat) = try chat(session)
@@ -1262,9 +1268,8 @@ final class NavigationBasicsIOSTests: XCTestCase {
         let inset = sv.adjustedContentInset
         XCTAssertGreaterThan(inset.top, 0, "under the bar")
         XCTAssertGreaterThan(inset.bottom, 0, "over the home indicator")
-        until("the kernel has the scroller's insets") {
-            session.presenter.navigationHost.covers[list.id] == .inset(top: inset.top, bottom: inset.bottom)
-        }
+        until("the scroller reaches the top and bottom edges") { list.reach.top > 0 && list.reach.bottom > 0 }
+        XCTAssertNil(session.presenter.navigationHost.covers[list.id], "no cover subtracts the bars from the scroller again")
         let bottom = chat.view.bounds.maxY - chat.view.safeAreaInsets.bottom
         let tall = { session.presenter.views.values.contains { $0.props["testId"] == "tall-chat" } }
         try tapNode(session, "toggle-short-chat")

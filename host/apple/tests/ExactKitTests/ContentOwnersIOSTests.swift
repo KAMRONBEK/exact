@@ -734,6 +734,13 @@ final class ContentOwnersIOSTests: XCTestCase {
     }
 
     /// A node's size as the kernel last laid it out (the agent's `frames`).
+    /// The size `route`'s root is laid out at in `view`, its controller's view. PROTO (safe-area design r2 §2.1): the
+    /// view's bounds less the clearance the route reports as its root's cover (the kernel's `cover_clearance`).
+    private func contentRoot(_ session: ExactSession, _ route: NodeView, in view: UIView) -> CGSize {
+        guard case .edges(let e)? = session.presenter.navigation.covers[route.id] else { return view.bounds.size }
+        return CGSize(width: view.bounds.width - e.left - e.right, height: view.bounds.height - e.top - e.bottom)
+    }
+
     private func laidOut(_ session: ExactSession, _ id: UInt32) -> CGSize? {
         guard let reply = try? JSONSerialization.jsonObject(with: Data(session.runtime.agent("{\"op\":\"frames\"}").utf8)) as? [String: Any],
               let row = (reply["nodes"] as? [[Any]])?.first(where: { ($0[0] as? NSNumber)?.uint32Value == id }),
@@ -785,7 +792,7 @@ final class ContentOwnersIOSTests: XCTestCase {
         let p = session.presenter
         let home = try node(session, "route-home")
         let homeView = try XCTUnwrap(p.navigationHost.controllers[home.id]?.view)
-        XCTAssertEqual(laidOut(session, home.id), homeView.bounds.size)
+        XCTAssertEqual(laidOut(session, home.id), contentRoot(session, home, in: homeView))
         XCTAssertEqual(placed(session, home), local(session, homeView), "the stack's root is placed where it is shown")
         XCTAssertNil(shown(session, home), "and keeps its place among its siblings")
         // Its parent's own transform is the runner's to apply, not the placement's
@@ -803,7 +810,7 @@ final class ContentOwnersIOSTests: XCTestCase {
         let detailView = try XCTUnwrap(p.navigationHost.controllers[detail.id]?.view)
         XCTAssertEqual(placed(session, detail), local(session, detailView))
         XCTAssertNil(shown(session, detail))
-        XCTAssertEqual(laidOut(session, detail.id), detailView.bounds.size)
+        XCTAssertEqual(laidOut(session, detail.id), contentRoot(session, detail, in: detailView))
         p.press(try node(session, "back").id)
         until("back on the stack's root") { p.navigationHost.activeRoute?.node === home && !p.navigationHost.transitioning }
         XCTAssertEqual(placed(session, home), local(session, homeView))
@@ -813,7 +820,7 @@ final class ContentOwnersIOSTests: XCTestCase {
         let sheet = try node(session, "route-sheet")
         let controller = try mountSheet()
         let sheetView = try XCTUnwrap(p.navigationHost.controllers[sheet.id]?.view)
-        until("the sheet's route takes its controller's size") { self.laidOut(session, sheet.id) == sheetView.bounds.size }
+        until("the sheet's route takes its controller's size") { self.laidOut(session, sheet.id) == self.contentRoot(session, sheet, in: sheetView) }
         XCTAssertEqual(shown(session, sheet), seen(session, sheetView), "the sheet's route is a top-layer box where it is shown")
         XCTAssertNil(placed(session, sheet), "with no placement")
         XCTAssertNil(shown(session, home), "the screen under it is not one")
@@ -918,7 +925,7 @@ final class ContentOwnersIOSTests: XCTestCase {
         let controller = try mountSheet(at: CGRect(x: 149, y: 16, width: 653, height: 653))
         let sheetView = try XCTUnwrap(p.navigationHost.controllers[sheet.id]?.view)
         XCTAssertEqual(sheetView.bounds.width, 653, "the sheet's route controller fills the sheet")
-        until("the sheet's route takes the sheet's size") { self.laidOut(session, sheet.id) == sheetView.bounds.size }
+        until("the sheet's route takes the sheet's size") { self.laidOut(session, sheet.id) == self.contentRoot(session, sheet, in: sheetView) }
         XCTAssertEqual(laidOut(session, try node(session, "sheet-body").id)?.width, 653, "its content takes the sheet's width")
         XCTAssertTrue(sheet.isDescendant(of: controller.view), "the sheet mounts its own route")
         XCTAssertTrue(p.viewport.isDescendant(of: try XCTUnwrap(session.view)), "the document stays in the session's view")
@@ -974,7 +981,7 @@ final class ContentOwnersIOSTests: XCTestCase {
             sheetView.layoutIfNeeded()
         }
         resize(814)
-        until("the sheet's route takes its size") { self.laidOut(session, sheet.id) == sheetView.bounds.size }
+        until("the sheet's route takes its size") { self.laidOut(session, sheet.id) == self.contentRoot(session, sheet, in: sheetView) }
         // A slice in flight: what the presenter tells the runtime waits for it
         p.listHost.onFill?(sheet.id, Data())
         XCTAssertTrue(session.fillInFlight)
@@ -985,7 +992,7 @@ final class ContentOwnersIOSTests: XCTestCase {
         until("the slice lands") { !session.fillInFlight }
         XCTAssertEqual(sheetView.bounds.height, 300, accuracy: 0.5, "the size set last")
         until("the route is laid out at its controller's size") {
-            self.laidOut(session, sheet.id) == sheetView.bounds.size && p.owners.told[sheet.id]?.block == .size(sheetView.bounds.size)
+            self.laidOut(session, sheet.id) == self.contentRoot(session, sheet, in: sheetView) && p.owners.told[sheet.id]?.block == .size(sheetView.bounds.size)
         }
     }
 
@@ -1053,13 +1060,13 @@ final class ContentOwnersIOSTests: XCTestCase {
         let sheet = try node(session, "route-sheet")
         let controller = try mountSheet()
         let sheetView = try XCTUnwrap(p.navigationHost.controllers[sheet.id]?.view)
-        until("the sheet's route takes the sheet's size") { self.laidOut(session, sheet.id) == sheetView.bounds.size }
+        until("the sheet's route takes the sheet's size") { self.laidOut(session, sheet.id) == self.contentRoot(session, sheet, in: sheetView) }
         XCTAssertTrue(try XCTUnwrap(try node(session, "sheet-field-a").field).becomeFirstResponder())
         controller.view.setNeedsLayout()
         controller.view.layoutIfNeeded()
         p.owners.publish()
         RunLoop.main.run(until: Date().addingTimeInterval(0.5))
-        XCTAssertEqual(laidOut(session, sheet.id), sheetView.bounds.size, "no keys, no end")
+        XCTAssertEqual(laidOut(session, sheet.id), contentRoot(session, sheet, in: sheetView), "no keys, no end")
     }
 
     /// A scroller that ends a sheet's route reaches the sheet's bottom edge
@@ -1100,8 +1107,9 @@ final class ContentOwnersIOSTests: XCTestCase {
         let controller = try XCTUnwrap(p.navigationHost.controllers[route.id], file: file, line: line)
         let sheetView = try XCTUnwrap(controller.view, file: file, line: line)
         // Layout crosses the host ABI as f32; compare UIKit's bounds at that precision.
-        until("the sheet's route takes the sheet's size: kernel \(String(describing: self.laidOut(session, route.id))), UIKit \(sheetView.bounds.size)") {
-            let size = CGSize(width: CGFloat(Float(sheetView.bounds.width)), height: CGFloat(Float(sheetView.bounds.height)))
+        until("the sheet's route takes the sheet's size less its clearance: kernel \(String(describing: self.laidOut(session, route.id))), UIKit \(self.contentRoot(session, route, in: sheetView))") {
+            let root = self.contentRoot(session, route, in: sheetView)
+            let size = CGSize(width: CGFloat(Float(root.width)), height: CGFloat(Float(root.height)))
             return self.laidOut(session, route.id) == size
         }
         let form = try node(session, scroller), sv = try XCTUnwrap(form.scroll, file: file, line: line)
@@ -1358,7 +1366,7 @@ final class ContentOwnersIOSTests: XCTestCase {
         let sheet = try node(session, "route-sheet")
         let controller = try mountSheet()
         let sheetView = try XCTUnwrap(p.navigationHost.controllers[sheet.id]?.view)
-        until("the sheet's route takes its size") { self.laidOut(session, sheet.id) == sheetView.bounds.size }
+        until("the sheet's route takes its size") { self.laidOut(session, sheet.id) == self.contentRoot(session, sheet, in: sheetView) }
         Owner.shared.sync {
             Owner.shared.callMain {
                 controller.view.frame = CGRect(x: 0, y: 374, width: 402, height: 500)
@@ -1367,7 +1375,7 @@ final class ContentOwnersIOSTests: XCTestCase {
             }
         }
         XCTAssertEqual(sheetView.bounds.height, 500)
-        until("the runner lays the route out at its new size") { self.laidOut(session, sheet.id) == sheetView.bounds.size }
+        until("the runner lays the route out at its new size") { self.laidOut(session, sheet.id) == self.contentRoot(session, sheet, in: sheetView) }
     }
 
     /// A route's safe area changed while main serves a callback the runtime
@@ -1383,18 +1391,20 @@ final class ContentOwnersIOSTests: XCTestCase {
         XCTAssertEqual(agent.clock(["settle": true])["settled"] as? Bool, true)
         let nav = try XCTUnwrap(p.navigationHost.primaryNavigation)
         let route = try XCTUnwrap(nav.topViewController as? RouteController)
-        // Where viewport-info-open starts in the route: a left cover moves it right, also inside a
-        // scroller that reaches under the cover, whose content stays clear of it
+        // Where viewport-info-open starts in the route's view: a left cover moves it right, also inside a
+        // scroller that reaches under the cover, whose content stays clear of it. PROTO (safe-area design r2 §2.1): the
+        // route's root itself is laid out in its safe area, so its own place counts.
         let target = try node(session, "viewport-info-open").id
         func left() -> CGFloat? {
             var x: CGFloat = 0, at = target
-            while at != route.node.id {
+            while true {
                 let n = agent.runnerNode(at)
-                guard let frame = n["frame"] as? [String: Any], let dx = frame["x"] as? NSNumber,
-                      let parent = (n["parent"] as? NSNumber)?.uint32Value else { return nil }
-                x += CGFloat(dx.doubleValue); at = parent
+                guard let frame = n["frame"] as? [String: Any], let dx = frame["x"] as? NSNumber else { return nil }
+                x += CGFloat(dx.doubleValue)
+                if at == route.node.id { return x }
+                guard let parent = (n["parent"] as? NSNumber)?.uint32Value else { return nil }
+                at = parent
             }
-            return x
         }
         func wantedLeft() -> CGFloat {
             if case .edges(let edges)? = p.navigationHost.covers[route.node.id] { return edges.left }
@@ -1463,7 +1473,7 @@ final class ContentOwnersIOSTests: XCTestCase {
         let sheet = try node(session, "route-sheet")
         let controller = try mountSheet()
         let sheetView = try XCTUnwrap(p.navigationHost.controllers[sheet.id]?.view)
-        until("the sheet's route takes its size") { self.laidOut(session, sheet.id) == sheetView.bounds.size }
+        until("the sheet's route takes its size") { self.laidOut(session, sheet.id) == self.contentRoot(session, sheet, in: sheetView) }
         // A slice in flight, and a report waiting behind it
         p.listHost.onFill?(sheet.id, Data())
         XCTAssertTrue(session.fillInFlight)

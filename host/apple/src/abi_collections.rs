@@ -84,7 +84,7 @@ impl<D: DataSource> Bridge<D> {
                 (Vec::new(), Vec::new(), Vec::new(), Vec::new());
             let mut locals = Vec::new();
             let mut owners = BlockChanges::default();
-            let mut owned = Vec::new();
+            let (mut owned, mut moving) = (Vec::new(), Vec::new());
             for r in records {
                 match owners.push(r) {
                     Ok(true) => continue,
@@ -119,6 +119,8 @@ impl<D: DataSource> Bridge<D> {
                     11 => lists.push((view, None)),
                     21 => owned.push((view, Some(owner_values(&edge, &word)))),
                     22 => owned.push((view, None)),
+                    // PROTO (rule 4): the route's top edge moves (1) or no longer does (0)
+                    24 => moving.push((view, edge(8) != 0.0)),
                     1 => {
                         let edges = [edge(8), edge(12), edge(16), edge(20)];
                         covers.push((view, Some(exact_kernel::HostCover::Edges(edges))));
@@ -136,6 +138,9 @@ impl<D: DataSource> Bridge<D> {
                 }
             }
             self.host.as_mut().map_or_else(not_booted, |h| {
+                for (route, on) in &moving {
+                    h.set_moving_top(*route, *on);
+                }
                 h.set_claims(&crate::Claims {
                     covers: &covers,
                     blocks: &owners.blocks,

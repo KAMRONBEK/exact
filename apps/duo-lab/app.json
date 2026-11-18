@@ -10,7 +10,7 @@
     "id": "com.exact.duolab",
     "name": "Duo Lab"
   },
-  "data": ["keyboard-screen", "focus-on-show", "pane-layout", "title-display", "bar-minimization", "safe-area-adjustment", "content-scroll"],
+  "data": ["keyboard-screen", "focus-on-show", "pane-layout", "title-display", "bar-minimization", "safe-area-adjustment", "content-scroll", "safe-area-mode", "safe-area-run", "minimize"],
   "hatches": { "keyboard-field": ["ios"], "keyboard-route": ["ios"], "arranged-panes": ["ios"], "arrangement-pane": ["ios"] },
   "host": {
     "ios": {

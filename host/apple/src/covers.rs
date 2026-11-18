@@ -158,8 +158,10 @@ impl<D: DataSource> Host<D> {
                 Err(e) => drop(error.get_or_insert(format!("owner values: {e:?}"))),
             }
         }
+        // PROTO (rule 4): a route's far frames owed (`set_moving_top`) need a layout pass
         let needs_layout = local_layout
             || read
+            || self.far_owed
             || !(covers.is_empty()
                 && blocks.is_empty()
                 && margins.is_empty()

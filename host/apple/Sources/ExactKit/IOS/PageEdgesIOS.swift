@@ -62,7 +62,7 @@ extension Presenter {
                     if let judge, edgeEffect { found = routeBands(of: v, sv, in: route, judge) }
                     #if os(iOS)
                     if route.edgeScroll === v, let top = keyboardTop,
-                       abs(route.node.convert(route.node.bounds, to: nil).maxY - top) < 1 {
+                       abs(route.node.convert(route.node.boxBounds, to: nil).maxY - top) < 1 {
                         found.band.bottom += keyboardAccessoryHeight
                     }
                     #endif
@@ -73,7 +73,7 @@ extension Presenter {
                     var r = routes[ObjectIdentifier(route)] ?? (nil, nil)
                     // The bar follows the route's scroller drawn under it, as UIKit's follows a list that is the controller's
                     // own: the automatic one, which an app's selection overrides until it gives the edge back with nil.
-                    if !found.top.isEmpty || found.band.top > 0.5, navigation.automaticContentScroller(of: route) === v { r.top = sv }
+                    if !found.top.isEmpty || found.band.top > 0.5 || v.reach.top > 0.5, navigation.automaticContentScroller(of: route) === v { r.top = sv }
                     if !found.bottom.isEmpty || found.band.bottom > 0.5 { r.bottom = sv }
                     routes[ObjectIdentifier(route)] = r
                 } else { found = pageBands(of: v, sv, margins: m, area: area, edgeEffect ? judge : nil); own = found.band }
@@ -113,12 +113,12 @@ extension Presenter {
             at = c.superview
         }
         guard at === root, !root.clipsToBounds, let page else { return Bands() }
-        let r = v.convert(v.bounds, to: root), fits = root.bounds.height <= area.height + 0.5
+        let r = v.convert(v.boxBounds, to: root), fits = root.bounds.height <= area.height + 0.5
         let atTop = r.minY <= 0.5, atFoot = r.maxY >= area.height - 0.5 && fits
         let margins = Bands(band: UIEdgeInsets(top: atTop ? m.top : 0, left: 0, bottom: atFoot ? m.bottom : 0, right: 0))
         guard let judge else { return margins }
         guard let top = atTop ? [] : judge.bars(of: v, in: page, top: true), let bottom = atFoot ? [] : judge.bars(of: v, in: page, top: false),
-              !top.isEmpty || !bottom.isEmpty, page.frame.minY <= 0.5, page.frame.maxY >= area.height - 0.5, fits,
+              !top.isEmpty || !bottom.isEmpty, page.boxFrame.minY <= 0.5, page.boxFrame.maxY >= area.height - 0.5, fits,
               Self.over(top, v), Self.over(bottom, v) else { return margins }
         // Both edges reach the page's: an open one through the root's padding too (D2).
         let band = UIEdgeInsets(top: max(0, r.minY) + m.top, left: 0, bottom: max(0, area.height - r.maxY) + m.bottom, right: 0)
@@ -131,14 +131,17 @@ extension Presenter {
     /// reaches the route's edge, the covers included, when either edge has
     /// bars or the open top is under the bar (`controlBands`); an edge the
     /// bar's collapse or the bottom edge already took is there already, so
-    /// the collapse scroller is judged as its title's riders are. None under
-    /// a large title unless the eligible top bars ride its safe area.
+    /// the collapse scroller is judged as its title's riders are. Under a
+    /// large title only riding top bars take a top band (safe-area design §4.4).
     private func routeBands(of v: NodeView, _ sv: UIScrollView, in c: any RouteSurface, _ judge: ControlBars) -> Bands {
+        var bands = controlBands(of: v, in: c.node, judge, apart: c.collapseScroll !== v)
         #if os(iOS)
-        if let nav = c.navigationController, navigation.routeShowsBar(c, in: nav), c.navigationItem.largeTitleDisplayMode == .always, c.ridingBars.isEmpty { return Bands() }
+        if let nav = c.navigationController, navigation.routeShowsBar(c, in: nav), c.navigationItem.largeTitleDisplayMode == .always, c.ridingBars.isEmpty {
+            bands.band.top = 0; bands.top = []
+        }
         #endif
-        if !c.ridingBars.isEmpty, navigation.padsTop(c) { return Bands() }
-        return controlBands(of: v, in: c.node, judge, apart: c.collapseScroll !== v)
+        if !c.ridingBars.isEmpty, navigation.padsTop(c) { bands.band.top = 0; bands.top = [] }
+        return bands
     }
 
     /// Collapse adoption and banding must agree about both edges and paint
@@ -155,24 +158,28 @@ extension Presenter {
     /// both edges where they are (a footer under it keeps the bottom cover).
     package func controlBands(of v: NodeView, in route: NodeView, _ judge: ControlBars, apart: Bool = false) -> Bands {
         guard let sv = v.scrollView else { return Bands() }
-        let r = v.convert(v.bounds, to: route)
+        let r = v.convert(v.boxBounds.inset(by: v.take), to: route)
+        // Clearance surrounds the root's CSS box. Reach already supplies part of the native extent.
+        let area = navigation.routeSurfaces[route.id]?.viewIfLoaded.map { route.convert($0.bounds, from: $0) } ?? route.bounds
         let top = judge.bars(of: v, in: route, top: true), bottom = judge.bars(of: v, in: route, top: false)
         // More than bars over the scroller keeps its top where it is; an open
         // foot over the route's bottom cover (a tab bar), apart from a title's
         // collapse, still reaches it, as a hand-built table under a fixed
-        // header runs under its tab bar. Bars under it keep both edges.
-        if top == nil, apart, bottom?.isEmpty == true, case .edges(let e)? = navigation.covers[route.id],
-           e.bottom > 0.5, route.bounds.height - r.maxY > 0.5 {
-            let band = UIEdgeInsets(top: 0, left: 0, bottom: route.bounds.height - r.maxY, right: 0)
+        // header runs under its tab bar, by what its reach leaves of the way
+        // there. Bars under it keep both edges.
+        let foot = area.maxY - r.maxY - v.reach.bottom
+        if top == nil, apart, bottom?.isEmpty == true, case .edges(let e)? = navigation.covers[route.id], e.bottom > 0.5, foot > 0.5 {
+            let band = UIEdgeInsets(top: 0, left: 0, bottom: foot, right: 0)
             return Self.drawn(band, v, sv) ? Bands(band: band) : Bands()
         }
         guard let top, apart || bottom != nil else { return Bands() }
-        let underBar = apart && top.isEmpty && r.minY > 0.5
+        let underBar = apart && top.isEmpty && r.minY > area.minY + 0.5
         var overCover = false
         if apart, bottom?.isEmpty == true, case .edges(let e)? = navigation.covers[route.id] { overCover = e.bottom > 0.5 && route.bounds.height - r.maxY > 0.5 }
         guard !top.isEmpty || bottom?.isEmpty == false || underBar || overCover,
               Self.over(top, v), Self.over(bottom ?? [], v) else { return Bands() }
-        let band = UIEdgeInsets(top: max(0, r.minY), left: 0, bottom: bottom == nil ? 0 : max(0, route.bounds.height - r.maxY), right: 0)
+        let band = UIEdgeInsets(top: max(0, r.minY - area.minY - v.reach.top), left: 0,
+                               bottom: bottom == nil ? 0 : max(0, area.maxY - r.maxY - v.reach.bottom), right: 0)
         return Self.drawn(band, v, sv) ? Bands(band: band, top: top, bottom: bottom ?? []) : Bands()
     }
 
@@ -223,7 +230,8 @@ extension NodeView {
         sv.verticalScrollIndicatorInsets = bars
         fitScroll()
         if atEnd { sv.layoutIfNeeded() }
-        sv.contentOffset = PixelGrid.offset(CGPoint(x: sv.contentOffset.x, y: atEnd ? end() : top - scrollTopInset(sv)), in: sv, clamped: !sv.isTracking && !sv.isDragging && !sv.isDecelerating)
+        let point = CGPoint(x: sv.contentOffset.x, y: atEnd ? end() : top - scrollTopInset(sv))
+        if point != sv.contentOffset { sv.contentOffset = PixelGrid.offset(point, in: sv, clamped: !sv.isTracking && !sv.isDragging && !sv.isDecelerating) } // PROTO: leave UIKit's unchanged offset unsnapped
         // Offsets a layout in flight saved to restore are native: they move with the inset.
         let moved = own.top - oldOwn.top
         if var saved = beforeLayoutScroll { saved.offset.y -= moved; saved.topInset += moved; beforeLayoutScroll = saved }

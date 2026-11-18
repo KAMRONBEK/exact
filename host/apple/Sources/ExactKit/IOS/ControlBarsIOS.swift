@@ -36,7 +36,7 @@ package final class ControlBars {
 
     static func laid(_ node: NodeView) -> CGRect {
         CGRect(x: node.center.x - node.bounds.width / 2, y: node.center.y - node.bounds.height / 2,
-               width: node.bounds.width, height: node.bounds.height)
+               width: node.bounds.width, height: node.bounds.height).inset(by: node.reach).inset(by: node.take)
     }
     static func onlyRide(_ node: NodeView) -> Bool {
         let a = node.transform, b = CGAffineTransform(translationX: 0, y: node.controlRide)
@@ -116,11 +116,11 @@ package final class ControlBars {
                   p.scrollView == nil || p === c else { return nil }
             let k = children(of: p)
             guard let i = k.at[ObjectIdentifier(x)] else { return nil }
-            let room = available(p)
+            let room = p.contentBox(), frame = Self.laid(x)
             if !(top ? k.barsBefore[i] : k.barsAfter[i]) { return nil }
             let side = (top ? k.all[..<i] : k.all[(i + 1)...]).compactMap { $0 }
             // The host is not told the flex direction: the frames say which side a bar is on.
-            guard side.allSatisfy({ top ? Self.laid($0).maxY <= x.frame.minY + 0.5 : Self.laid($0).minY >= x.frame.maxY - 0.5 }) else { return nil }
+            guard side.allSatisfy({ top ? Self.laid($0).maxY <= frame.minY + 0.5 : Self.laid($0).minY >= frame.maxY - 0.5 }) else { return nil }
             if side.isEmpty {
                 // Nothing between them: open only where it reaches its parent's edge.
                 if !reaches(x, room, top: top) { return nil }
@@ -129,44 +129,23 @@ package final class ControlBars {
                 // of a column growing by 1 or more, with no `max-height`), as a hand-built screen's list
                 // does; so does a box holding it beside its own neighbours (a chat's thread and its
                 // floating button, over a composer).
-                guard abs(x.frame.minX - room.minX) <= 0.5, abs(x.frame.maxX - room.maxX) <= 0.5, x.props["flexGrows"] == "true" else { return nil }
+                guard abs(frame.minX - room.minX) <= 0.5, abs(frame.maxX - room.maxX) <= 0.5, x.props["flexGrows"] == "true" else { return nil }
             }
             found += side
             // A box between the scroller and the container has no padding or border at that edge: a gap.
             if p !== c {
                 let content = p.contentBox()
-                if top ? content.minY > 0.5 : p.bounds.height - content.maxY > 0.5 { return nil }
+                if top ? content.minY - p.boxBounds.minY > 0.5 : p.boxBounds.maxY - content.maxY > 0.5 { return nil }
             }
             x = p
         }
         return found
     }
 
-    /// `p`'s content box less the cover a route's containers give it, as
-    /// layout pads it: the whole cover on an edge the route keeps; none on an
-    /// edge it opts out of (`-exact-safe-area`, LLP 1123 D4), which its
-    /// content reaches; and on an edge whose padding clears its own inset,
-    /// what the cover adds beyond that padding, as layout pads such an edge by
-    /// the larger of the two (D3).
-    private func available(_ p: NodeView) -> CGRect {
-        var room = p.contentBox()
-        if case .edges(let e)? = presenter.navigation.covers[p.id] {
-            let off = RouteGeometry.clearanceOff(p), credit = Int(p.style["inset_credit"]?.number ?? 0)
-            // Each edge by its index, top right bottom left, and its bit in both sets
-            let kept = { (edge: Int, inset: CGFloat) -> CGFloat in
-                let bit = 1 << edge
-                if off & bit != 0 { return 0 }
-                if credit & bit == 0 { return inset }
-                return max(0, inset - ((p.kernelPadding?[edge] ?? nil) ?? 0))
-            }
-            room = room.inset(by: UIEdgeInsets(top: kept(0, e.top), left: kept(3, e.left), bottom: kept(2, e.bottom), right: kept(1, e.right)))
-        }
-        return room
-    }
-
     /// `x`, with its margin, at that edge of `room`.
     private func reaches(_ x: NodeView, _ room: CGRect, top: Bool) -> Bool {
-        top ? x.frame.minY - x.number("margin_top") - room.minY <= 0.5 : room.maxY - x.frame.maxY - x.number("margin_bottom") <= 0.5
+        let frame = Self.laid(x)
+        return top ? frame.minY - x.number("margin_top") - room.minY <= 0.5 : room.maxY - frame.maxY - x.number("margin_bottom") <= 0.5
     }
 
     /// Lift the bars above their scrollers' content and give each UIKit's edge

@@ -152,8 +152,9 @@ extension Runtime {
     /// layout: `edges` add to a box's padding; `whole` lays it out as
     /// `display: none`; nil clears.
     package func covers(_ covers: [(UInt32, HostCover?)]) -> Batch { self.covers(covers, owners: []) }
-    /// And content owners' values (LLP 1123 D9), nil taking one back.
-    func covers(_ covers: [(UInt32, HostCover?)], owners: [(UInt32, OwnerValues?)]) -> Batch {
+    /// And content owners' values (LLP 1123 D9), nil taking one back, and the
+    /// routes whose top edge moves (PROTO, rule 4).
+    func covers(_ covers: [(UInt32, HostCover?)], owners: [(UInt32, OwnerValues?)], movingTops: [(UInt32, Bool)] = []) -> Batch {
         return on(layout: true) {
             var bytes = Data(capacity: covers.count * 24 + owners.count * 188)
             func append(_ words: [UInt32]) {
@@ -170,6 +171,8 @@ extension Runtime {
                 }
                 append([view, kind] + floats(edges))
             }
+            // PROTO (rule 4): kind 24, a route whose top edge moves (1) or no longer does (0)
+            for (view, on) in movingTops { append([view, 24] + floats([on ? 1 : 0, 0, 0, 0])) }
             // Kind 21, a content owner's values; 22 takes them back (exact.h).
             for (view, values) in owners {
                 guard let v = values else { append([view, 22, 0, 0, 0, 0]); continue }

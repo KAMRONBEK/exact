@@ -40,6 +40,11 @@ final class RouteController: UIViewController, UIScrollViewDelegate {
     #endif
     weak var host: NavigationHost?
     let safeArea = RouteSafeArea()
+    /// UIKit has announced a safe area its layout has yet to apply. It can announce a transition's end before opening
+    /// that transition's animation and laying the view out inside it, as a view constrained to the safe area moves
+    /// then: read now, the content would jump to its end, so a report keeps what it last told until the layout.
+    private(set) var safeAreaNeedsLayout = false
+    var restingTop: CGFloat = 0, placedEdge: Double? // PROTO (rule 4, `EdgeFramesIOS.swift`)
 
     /// Whether the route turns off `edge`'s native clearance: by
     /// `-exact-safe-area`, or at the top under a transparent bar, whose
@@ -106,9 +111,14 @@ final class RouteController: UIViewController, UIScrollViewDelegate {
     // The bar's height changed (a push to an inline title, a rotation, a
     // hatch): the route's content area follows (LLP 1075.003 §3.5).
     override func viewSafeAreaInsetsDidChange() {
+        let started = ExactSession.protoLive ? ApplyPhases.cpu() : 0 // PROTO (UIKit-first measurement)
+        safeAreaNeedsLayout = true
         super.viewSafeAreaInsetsDidChange()
         rideBars()
-        host?.coversChanged()
+        safeArea.sync(self)
+        view.setNeedsLayout()
+        host?.presenter.placeEdge(self) // PROTO (rule 4)
+        if ExactSession.protoLive { NSLog("PROTO live edge %@ cpu %.0f µs top %.2f", ExactSession.protoMode.rawValue, ApplyPhases.cpu() - started, view.safeAreaInsets.top) } // PROTO (UIKit-first measurement)
     }
     // Back on a screen whose list pushed the one leaving: the row that was
     // tapped fades with the transition (LLP 1115.000 D11.3).
@@ -146,6 +156,10 @@ final class RouteController: UIViewController, UIScrollViewDelegate {
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         fitContentViewport()
+        if safeAreaNeedsLayout {
+            safeAreaNeedsLayout = false
+            host?.coversChanged()
+        }
         host?.presenter.owners.publish()
         if scrollEdgesOwed { host?.settleScrollEdges() }
         #if os(iOS)
@@ -293,12 +307,12 @@ final class RouteController: UIViewController, UIScrollViewDelegate {
         scroll.keyboardDismissMode = viewportKeyboardDismissal
         scroll.scrollsX = pageScrollAxes?.x ?? true
         scroll.scrollsY = pageScrollAxes?.y ?? true
-        let extent = CGSize(width: max(node.bounds.width, node.style["overflow_x"]?.string == "visible" || node.style["overflow_x"] == nil ? node.content.width : 0),
-                            height: max(node.bounds.height, node.style["overflow_y"]?.string == "visible" || node.style["overflow_y"] == nil ? node.content.height : 0))
+        let extent = CGSize(width: max(node.boxBounds.width, node.style["overflow_x"]?.string == "visible" || node.style["overflow_x"] == nil ? node.content.width : 0),
+                            height: max(node.boxBounds.height, node.style["overflow_y"]?.string == "visible" || node.style["overflow_y"] == nil ? node.content.height : 0))
         // An axis the root does not scroll keeps its extent: CSS `overflow: hidden` still
         // scrolls programmatically (a fragment, `scrollIntoView`). The person's drag
         // cannot move it (`scrollViewDidScroll`).
-        let size = CGSize(width: max(allocation.width, node.frame.minX + extent.width), height: max(allocation.height, node.frame.minY + extent.height))
+        let size = CGSize(width: max(allocation.width, node.boxFrame.minX + extent.width), height: max(allocation.height, node.boxFrame.minY + extent.height))
         if scroll.contentSize != size { scroll.contentSize = size }
         // Keep drawing under the keyboard while the content clears its occupied area
         var overlap = max(0, frame.maxY - allocation.maxY)
@@ -416,6 +430,10 @@ final class RouteController: UIViewController, UIScrollViewDelegate {
 
     /// An app's selection; Exact's own goes through `projectContentScrollView`.
     override func setContentScrollView(_ scrollView: UIScrollView?, for edge: NSDirectionalRectEdge) {
+        // Read the view a single edge leaves: `contentScrollView(for:)` takes one edge, and a write that moves
+        // both edges off a view leaves no edge still using it
+        let leaving = edge == .top || edge == .bottom ? contentScrollView(for: edge) : nil
+        defer { observeAgain(leaving, leftFrom: edge, for: scrollView) }
         let edges = edge.intersection([.top, .bottom])
         if let scrollView {
             let changed = !nativeContentScrollEdges.isSuperset(of: edges)

@@ -5702,6 +5702,32 @@
         }
       },
       {
+        "_comment": "PROTO (rule 4): a box's frame with its route's top edge at the far end of its range, as `frame`",
+        "name": "far",
+        "fields": {
+          "x": {
+            "member": "x",
+            "codec": "number"
+          },
+          "y": {
+            "member": "y",
+            "codec": "number"
+          },
+          "w": {
+            "member": "w",
+            "codec": "number"
+          },
+          "h": {
+            "member": "h",
+            "codec": "number"
+          },
+          "property": {
+            "member": "property",
+            "codec": "string"
+          }
+        }
+      },
+      {
         "name": "content",
         "fields": {
           "x": {

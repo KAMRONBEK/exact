@@ -44,7 +44,6 @@ struct GroupedListModel: Equatable {
     /// How a text is set where its author said so (`TextLook`, LLP 1116.003
     /// D7: author > platform); the defaults leave it the platform's.
     struct Look: Equatable {
-        /// A font as the text's computed rows have it (`TextFont`).
         /// What its author said of its font, each part nil where they said
         /// nothing: that part stays UIKit's own (LLP 1115.000 D2).
         struct Font: Equatable {
@@ -240,8 +239,8 @@ final class GroupedListHost: GroupedLists {
 
     /// After a batch. `changed` is the touched views and their ancestors; a
     /// list outside it keeps its model and only carries its rows again.
-    func sync(changed: Set<UInt32>? = nil) {
-        var live = Set<UInt32>()
+    @discardableResult func sync(changed: Set<UInt32>? = nil) -> [NodeView] {
+        var live = Set<UInt32>(), moved: [NodeView] = []
         // A live edit of the theme's roles (LLP 1121 stage 5) changes no row,
         // but every list draws from them: each one updates.
         let rethemed = theme != ThemeRoles.generation
@@ -253,16 +252,22 @@ final class GroupedListHost: GroupedLists {
             let turned = lists[owner.id].map { $0.direction != GroupedListView.direction(of: owner) } ?? false
             if let list = lists[owner.id], list.owner === owner, let changed, !changed.contains(owner.id), !rethemed, !turned {
                 list.mount(looks: false)
+                moved.append(owner)
                 continue
             }
             guard let model = model(owner.id) else { continue }
-            if let old = lists[owner.id], old.owner !== owner || turned { old.remove(); lists[owner.id] = nil }
+            if let old = lists[owner.id], old.owner !== owner || turned { old.remove(); moved.append(old.owner); lists[owner.id] = nil }
             let list = lists[owner.id] ?? GroupedListView(owner: owner, host: self)
             lists[owner.id] = list
             list.update(model)
+            moved.append(owner)
         }
-        for id in Array(lists.keys) where !live.contains(id) && !presenter.slidesOut(id) { lists.removeValue(forKey: id)?.remove(); reads[id] = nil }
+        for id in Array(lists.keys) where !live.contains(id) && !presenter.slidesOut(id) {
+            if let gone = lists.removeValue(forKey: id) { gone.remove(); moved.append(gone.owner) }
+            reads[id] = nil
+        }
         tell()
+        return moved
     }
 
     func reset() {
@@ -339,7 +344,7 @@ final class GroupedListHost: GroupedLists {
         var at: UIView? = node
         while let view = at {
             if let row = view as? NodeView, let list = lists.values.first(where: { $0.model.sections.contains { $0.rows.contains { $0.view == row.id && $0.custom } } }) {
-                return list.reveal(row.id, inner: node.convert(node.bounds, to: row), port: port(list.collection))
+                return list.reveal(row.id, inner: node.convert(node.boxBounds, to: row), port: port(list.collection))
             }
             at = view.superview
         }
@@ -572,10 +577,11 @@ final class GroupedListView: NSObject, UICollectionViewDelegate {
     init(owner: NodeView, host: GroupedListHost) {
         self.owner = owner; self.host = host
         direction = Self.direction(of: owner)
-        let collection = GroupedCollectionView(frame: owner.bounds, collectionViewLayout: UICollectionViewFlowLayout())
+        let collection = GroupedCollectionView(frame: owner.scrollFrame, collectionViewLayout: UICollectionViewFlowLayout()) // PROTO
         collection.listNode = owner
         self.collection = collection
         super.init()
+        owner.addSubview(collection) // PROTO: attach before the layout and snapshot read their environment
         followDirection()
         collection.card = { [weak self] index in
             guard let self, let section = section(at: index), section.card else { return nil }
@@ -934,7 +940,7 @@ final class GroupedListView: NSObject, UICollectionViewDelegate {
             if let control = accessory(row.view) { return control.convert(control.bounds, to: collection) }
             return source.indexPath(for: row.view).flatMap { collection.layoutAttributesForItem(at: $0)?.frame }
         }
-        if node.isDescendant(of: collection) { return node.convert(node.bounds, to: collection) }
+        if node.isDescendant(of: collection) { return node.convert(node.boxBounds, to: collection) }
         var at: UIView? = node
         while let view = at {
             if let n = view as? NodeView, let row = rows[n.id] {
@@ -945,7 +951,7 @@ final class GroupedListView: NSObject, UICollectionViewDelegate {
                 if row.custom {
                     // The same row x used by carry; nested scroll offsets are
                     // already represented by this descendant-in-row conversion.
-                    return node.convert(node.bounds, to: n).offsetBy(dx: frame.minX + n.frame.minX, dy: frame.minY)
+                    return node.convert(node.boxBounds, to: n).offsetBy(dx: frame.minX + n.frame.minX, dy: frame.minY)
                 }
                 return frame
             }
@@ -1040,16 +1046,10 @@ final class GroupedListView: NSObject, UICollectionViewDelegate {
     }
 
     #if os(iOS)
-    /// How far past each side the list's edge meets the collection reaches,
-    /// a safe area there, where nothing between the list and the window
-    /// transforms or clips it away. The window's side safe area: Exact's
-    /// layout keeps a route's content inside it (LLP 1123), where UIKit puts
-    /// an inset-grouped list's cards 20 in, and 16 past it when the list
-    /// spans the screen, as a hand-built one does. Half a fold's band (LLP
-    /// 1078): a hand-built split view's column reaches the band's middle,
-    /// that half its safe area, and its card ends 20 short of the band, where
-    /// a list ending at the band has its card run into it (iPhone Duo, iOS
-    /// 27.1, `~/audits/exact2-no-tells-2026-10-11/duo-fold-probe/`).
+    /// Extend to a window's side safe area or a fold band's middle where the list meets it,
+    /// unless an ancestor transforms or clips that extension (LLP 1078, LLP 1123).
+    /// UIKit places inset-grouped cards 20 points inside a safe edge and 16 past it when
+    /// the collection spans the screen; a fold's half band keeps the card clear of the band.
     private func sideReach() -> (left: CGFloat, right: CGFloat) {
         foldReach = (0, 0)
         guard let window = owner.window else { return (0, 0) }
@@ -1369,7 +1369,7 @@ final class GroupedListView: NSObject, UICollectionViewDelegate {
         if row.style["box_sizing"]?.string == "border-box" { return least }
         // A percentage padding is of the containing block's width, the card's (CSS 2.2 §8.4)
         let card = host.presenter.logicalParent(of: id).flatMap { host.presenter.views[$0] }
-        let basis = card?.contentBox().width ?? row.bounds.width
+        let basis = card?.contentBox().width ?? row.boxBounds.width
         return ["padding_top", "padding_bottom", "border_width_top", "border_width_bottom"]
             .reduce(least) { $0 + (row.style[$1]?.length(basis: basis) ?? 0) }
     }

@@ -357,6 +357,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         guard primaryOwner == nil else { return }
         // Find the containing controller before installing our child.
         guard let parent = ViewPresentation.controller(for: p.root, layout: true) else { return }
+        defer { primaryOwner?.view.layoutIfNeeded() } // UIKit must mount retained routes in a replacement container too.
         if let tabs = p.tabs {
             installTabs(p, tabs, first: first, in: parent)
             return
@@ -414,7 +415,6 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         #endif
         let parts = NavigationRules.segments(presentations: p.routes[...p.selected].map { $0.props["navigationPresentation"] })
         ApplyProfile.time("nav.primary") { installPrimary(p, first: Array(p.chosen[parts[0]])) }
-        ApplyProfile.time("nav.layout") { primaryOwner?.view.layoutIfNeeded() }
         // The content area the bar leaves reaches layout in this turn, before
         // the first frame (LLP 1075.003 Q3 (c)).
         ApplyProfile.time("nav.covers") { reportCovers() }
@@ -480,6 +480,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
             syncing = false; settleScrollEdges()
             presenter.flushPendingFocus(); presenter.elementScrolls.flush()
         }
+        presenter.owners.publish() // PROTO: covers must find a block before deriving child styles.
         guard let p = projection(batch) else {
             if bootOwner != nil || transferringBootOwner != nil { reset(clearFocus: false) }
             settled = true; return
@@ -550,7 +551,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
                 if inspecting == nil, split.inspecting != nil, mounted.count <= common { placeInspector(nil) }
                 let animated = owners.count == 1 && mounted.count == boundaries.count && !ExactEnv.agentFreezes && !unanimated && split.controller.view.window != nil
                 syncSplit(split, stack, animated: animated)
-                split.controller.view.layoutIfNeeded()
+                if !split.columnsAboutToMove { split.controller.view.layoutIfNeeded() }
                 continue
             }
             let stack = Array(wanted[parts[index]])
@@ -594,7 +595,6 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
                 // A press that pushed may hand its control's focus to the arriving route's first autofocus (PressHandoffIOS).
                 if pushOrPop || arrives { presenter.pressShows((stack.last as? RouteController)?.node) }
             }
-            ApplyProfile.time("nav.layout") { nav.view.layoutIfNeeded() }
         }
         if held {
             pendingSync = true
@@ -637,12 +637,10 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
             presenter.modalHost.present(route, navigation: nav, from: background,
                                      preceding: preceding, owner: owner)
         }
-        // A presented navigation fills its sheet; the primary owner the root,
-        // which no presentation resizes (LLP 1123 D1)
-        if let top = primaryOwner {
+        // A presented navigation fills its sheet; the primary owner fills the root, which no presentation resizes (LLP 1123 D1).
+        if primaryOwner != nil {
             fitOwner()
             placeOwner()
-            top.view.layoutIfNeeded()
         }
         for (id, c) in controllers where !routeIDs.contains(id) { end(c) }
         controllers = controllers.filter { routeIDs.contains($0.key) }
@@ -650,10 +648,9 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         if p.tabs != nil { replayTabs() }
         // Before the covers, run the edge passes owed (a route hatch's selection may owe some), unless a transition holds them
         runOwedScrollEdges()
+        if !presenter.awaitingFrame.isEmpty, split?.columnsAboutToMove != true { window?.layoutIfNeeded() } // Lay out new views before reporting their geometry
         reportCovers()
         refitForBars()
-        // A route that left every stack gives its block back (LLP 1123 D2)
-        presenter.owners.publish()
         settled = true
     }
 

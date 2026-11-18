@@ -86,7 +86,7 @@ final class RestartListIOSTests: XCTestCase {
         // listed, and the replay ran once, in order, after the committed batch.
         guard case let .reset(entered, held)? = seen.first else { return XCTFail("no reset seen: \(seen)") }
         XCTAssertEqual(entered, 0, "a call reached the runtime inside the reset")
-        XCTAssertTrue(held.contains("covers(_:owners:)"), "\(held)")
+        XCTAssertTrue(held.contains("covers(_:owners:movingTops:)"), "\(held)")
         let listed = Set(ResetGate.replayed.keys).union(ResetGate.dropped.keys)
         XCTAssertEqual(held.filter { !listed.contains($0) }, [], "a held call ResetGate doesn't list")
         XCTAssertEqual(seen.dropFirst().map { if case let .replayed(r, _) = $0 { r } else { [] } }, [ResetGate.replays(held)], "replayed once, after")

@@ -84,7 +84,9 @@ final class KeyboardFormIOSTests: XCTestCase {
         try XCTUnwrap(session?.presenter.views.values.first { $0.props["testId"] == testId }, "no \(testId)")
     }
 
-    private func box(_ v: UIView) -> CGRect { v.convert(v.bounds, to: nil) }
+    /// Where `v` is in the window; for a node, its laid-out box. PROTO (safe-area design r2 §2.1): a node's view reaches
+    /// past its box to the safe area's edges it touches (`SafeReach`), as a pinned bar's background does.
+    private func box(_ v: UIView) -> CGRect { v.convert((v as? NodeView)?.boxBounds ?? v.bounds, to: nil) }
 
     private func hit(atCenterOf view: UIView) -> UIView? {
         let center = CGPoint(x: view.bounds.midX, y: view.bounds.midY)

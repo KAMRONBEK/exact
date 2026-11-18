@@ -367,6 +367,9 @@ final class ElementScrollTests: XCTestCase {
         window.addSubview(p.viewport)
         window.makeKeyAndVisible()
         let sv = try XCTUnwrap(p.views[1]?.scrollView)
+        // A scroller Exact makes keeps UIKit's adjustment, and this viewport lies under the window's status bar: the
+        // reveals are measured without that inset
+        sv.contentInsetAdjustmentBehavior = .never
         sv.contentSize = CGSize(width: 200, height: 1000)
         return (p, sv, window)
     }
@@ -465,6 +468,9 @@ final class ElementScrollTests: XCTestCase {
         window.makeKeyAndVisible()
         defer { window.isHidden = true }
         let outer = try XCTUnwrap(p.views[1]?.scrollView), inner = try XCTUnwrap(p.views[2]?.scrollView)
+        // A scroller Exact makes keeps UIKit's adjustment, and this viewport lies under the window's status bar: the
+        // reveals are measured without that inset
+        for sv in [outer, inner] { sv.contentInsetAdjustmentBehavior = .never }
         outer.contentSize = CGSize(width: 200, height: 1000)
         inner.contentSize = CGSize(width: 200, height: 600)
         var ended: [UInt32] = []

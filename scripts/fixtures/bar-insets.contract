@@ -1,5 +1,7 @@
-// LLP 1123 D9 (LocalInsetsIOSTests): a route's content reads its own safe area,
-// the bars included, as `var(--exact-safe-area-inset-*)`. Inside the route a
+// LLP 1123 D9 (LocalInsetsIOSTests): a route's content reads the part of its own
+// safe area it lies in as `var(--exact-safe-area-inset-*)` (the prototype lays the
+// route's root out below its bars, so 0 there, and a sheet's above its home
+// indicator). Inside the route a
 // sidebar's background reaches up under the navigation bar and its content
 // starts below it, without a hard-coded bar height (expo/exact#36); the list
 // beside it already clears the bar and stays. A box outside every route reads

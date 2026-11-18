@@ -117,7 +117,7 @@ extension NavigationHost: NavigationHosting {
         // root, as on the web; the routes end at its edge, not under it.
         if owner === tabOwner, ExactEnv.authoredChrome, let list = adoptedTablist.flatMap({ presenter.views[$0] }),
            list.style["display"]?.string != "none", list.isDescendant(of: root) {
-            let rect = list.convert(list.bounds, to: root)
+            let rect = list.convert(list.boxBounds, to: root)
             if rect.height > 0, rect.minY >= frame.midY {
                 frame.size.height = max(0, min(frame.maxY, rect.minY) - frame.minY)
             } else if rect.height > 0, rect.maxY <= frame.midY {
@@ -165,13 +165,14 @@ extension NavigationHost: NavigationHosting {
         guard let target else { return nil }
         var node = start
         while node !== target {
-            guard node.scrollView == nil, !node.bounds.isEmpty, node.transform.isIdentity,
+            guard node.scrollView == nil, !node.boxBounds.isEmpty, node.transform.isIdentity,
                   CATransform3DIsIdentity(node.layer.transform),
                   !node.overflowClips, node.clipPath == nil,
                   node.contentBox().minY <= 0.5 else { return nil }
             let children = node.container.subviews.compactMap { $0 as? NodeView }.filter(flowingTopContent)
-            guard let first = children.first, abs(first.frame.minY - node.contentBox().minY) < 1,
-                  children.allSatisfy({ $0 === first || $0.frame.minY >= first.frame.maxY - 0.5 }) else { return nil }
+            // Compare laid-out boxes: a child's frame also holds the safe area it reaches into (`SafeReach`)
+            guard let first = children.first, abs(first.boxFrame.minY - node.contentBox().minY) < 1,
+                  children.allSatisfy({ $0 === first || $0.boxFrame.minY >= first.boxFrame.maxY - 0.5 }) else { return nil }
             node = first
         }
         return target.scrollView == nil ? nil : target

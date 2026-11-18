@@ -188,7 +188,7 @@ extension Presenter {
         guard let ids = flats.children(of: parent) else { return nil }
         return ids.map { id in
             if let leaf = flats.leaves[id] { return (id, leaf.layout.width > 0 && leaf.layout.height > 0 ? leaf.layout : nil) }
-            return (id, views[id].flatMap { shown($0) ? $0.frame : nil })
+            return (id, views[id].flatMap { shown($0) ? $0.boxFrame : nil })
         }
     }
 }

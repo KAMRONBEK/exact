@@ -583,26 +583,34 @@ fn measured(kernel: &mut Kernel, id: u32) -> ((f32, f32), (f32, f32), f32) {
 #[test]
 fn an_inline_image_follows_its_owners_size() {
     let mut kernel = Kernel::with_monospace();
-    let mut ops = vec![Op::CreateView {
-        id: 1,
+    let view = |id| Op::CreateView {
+        id,
         node_type: NodeType::View,
-    }];
+    };
+    let mut ops = vec![view(1), view(9)];
     ops.extend(paragraph_with_image(2));
     ops.extend([
         Op::SetChildren {
-            id: 1,
+            id: 9,
             children: vec![2],
+        },
+        Op::SetChildren {
+            id: 1,
+            children: vec![9],
         },
         Op::AttachRoot { id: 1 },
     ]);
     kernel.apply(0, 1, &ops).unwrap();
-    // The image stands on the baseline, 3.84 above the line's bottom.
-    kernel.set_owner_values(1, Some(tall(200.0))).unwrap();
+    // The image stands on the baseline, 3.84 above the line's bottom. Its
+    // owner's host fixes the block its container units read (D16).
+    kernel.set_owner_values(9, Some(tall(200.0))).unwrap();
+    kernel.set_host_block(9, Some(fixed_block(400.0, 200.0))).unwrap();
     assert_eq!(
         measured(&mut kernel, 2),
         ((20.0, 20.0), (20.0, 20.0), 23.84)
     );
-    kernel.set_owner_values(1, Some(tall(400.0))).unwrap();
+    kernel.set_owner_values(9, Some(tall(400.0))).unwrap();
+    kernel.set_host_block(9, Some(fixed_block(400.0, 400.0))).unwrap();
     assert_eq!(
         measured(&mut kernel, 2),
         ((40.0, 40.0), (40.0, 40.0), 43.84)
@@ -642,6 +650,8 @@ fn an_inline_image_moved_to_another_owner_is_measured_by_it() {
     kernel.apply(0, 1, &ops).unwrap();
     kernel.set_owner_values(2, Some(tall(300.0))).unwrap();
     kernel.set_owner_values(3, Some(tall(100.0))).unwrap();
+    kernel.set_host_block(2, Some(fixed_block(200.0, 300.0))).unwrap();
+    kernel.set_host_block(3, Some(fixed_block(200.0, 100.0))).unwrap();
     // The image on the baseline, 3.84 above the line's bottom.
     assert_eq!(
         measured(&mut kernel, 5),

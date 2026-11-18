@@ -51,7 +51,10 @@ extension CollectionHost {
         #endif
         guard let node = presenter?.views[id], let scroll = node.scroll, !hidden(node) else { return nil }
         // Layout's box, not the one drawn on the pixel grid (`PixelGridIOS.swift`): the runner lays rows to it.
-        let bounds = node.layoutBounds, insets = scroll.adjustedContentInset, band = node.pageBand
+        // A reached node includes the safe-area extent. Its scroll view also includes control bands,
+        // which the port calculation below adds separately.
+        let bounds = node.reach == .zero ? node.layoutBounds : node.bounds
+        let insets = scroll.adjustedContentInset, band = node.pageBand
         let records = rowRecords(id)
         let key = CollectionRecords.Port(bounds: bounds, insets: insets, band: band)
         let horizontal = entries[id]?.snapshot.horizontal ?? false

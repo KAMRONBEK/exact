@@ -194,7 +194,7 @@ extension NodeView {
         }
         func visit(_ view: UIView) {
             for case let node as NodeView in view.subviews where !node.isHidden {
-                if let found = area(node.id, node.style, node.convert(node.bounds, to: scrollView)),
+                if let found = area(node.id, node.style, node.convert(node.boxBounds, to: scrollView)),
                    let target, target === node || target.isDescendant(of: node) { held.append(found) }
                 // A nested scroll container captures its own snap areas, `hidden`
                 // included without a UIScrollView; `clip` does not (CSS Overflow 3 §3.1).

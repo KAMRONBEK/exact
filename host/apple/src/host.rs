@@ -266,6 +266,13 @@ pub struct Host<D: DataSource> {
     /// Routes whose `navigationDetent` names `fit-content` (LLP 1075.003
     /// §9.11), each with its width, resolved padding, border and bottom cover when last measured.
     fit_routes: Vec<(ViewId, Option<[f32; 10]>)>,
+    /// PROTO (rule 4): routes whose clearance's top edge moves (`Host::emit_far`).
+    moving_tops: Vec<ViewId>,
+    far_owed: bool,
+    /// PROTO (rule 4): for each route with a moving top, the scrollers its last far pass froze
+    far_frozen: IdMap<ViewId, Vec<ViewId>>,
+    /// PROTO (rule 4): boxes whose absolute frame changed since the last emission
+    pending_changed: Vec<NodeKey>,
     /// Each sticky node's constraint as the presenter last heard it (LLP 1083).
     stickies: IdMap<ViewId, exact_kernel::StickyConstraint>,
     /// The scrollers scroll and view timelines read (LLP 1057.003 D5).
@@ -644,6 +651,10 @@ impl<D: DataSource> Host<D> {
             layout_owed: false,
             inert_entry: false,
             fit_routes: Vec::new(),
+            moving_tops: Vec::new(),
+            far_owed: false,
+            far_frozen: Default::default(),
+            pending_changed: Vec::new(),
             stickies: IdMap::default(),
             timeline_scrolls: Default::default(),
             fragments: IdMap::default(),

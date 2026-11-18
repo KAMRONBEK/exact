@@ -28,7 +28,8 @@ final class RouteSafeArea {
     /// The edges `route` turns off (`RouteGeometry.clearanceOff`), and the top under a transparent bar.
     private func policy(_ route: RouteController) -> UIRectEdge {
         let off = RouteGeometry.clearanceOff(route.node)
-        var edges: UIRectEdge = []
+        // The root's own `-exact-safe-area-ignore` leaves the edges it takes uncleared too (LLP 1123 D4)
+        var edges = RouteGeometry.ignoredEdges(route.node, rtl: route.viewIfLoaded?.effectiveUserInterfaceLayoutDirection == .rightToLeft)
         for (bit, edge) in [(1, UIRectEdge.top), (2, .right), (4, .bottom), (8, .left)] where off & bit != 0 { edges.insert(edge) }
         // Under a transparent bar the content starts at the top edge (`NavigationHost.collapse`).
         return RouteGeometry.transparentBar(route.node) ? edges.union(.top) : edges
@@ -45,8 +46,7 @@ final class RouteSafeArea {
         pass()
     }
 
-    /// Hands `scroll` back without its correction before its owner stops UIKit
-    /// insetting it (`.never`); a later pass corrects it again while it is a target.
+    /// PROTO: release this route's correction when its primary scroller changes; UIKit keeps its adjustment
     func release(_ scroll: UIScrollView?) {
         guard let scroll, let state = states.first(where: { $0.scroll === scroll }) else { return }
         states.removeAll { $0 === state }

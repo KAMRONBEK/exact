@@ -13,6 +13,9 @@
 import UIKit
 
 extension NodeView {
+    /// `-exact-background-extension="auto"` (LLP 1123).
+    package var extendsBackground: Bool { props["backgroundExtension"] == "auto" }
+
     /// Each image's extension view, out of `NodeView`'s stored properties,
     /// which every view pays for.
     private static let extensions = NSMapTable<NodeView, UIView>.weakToStrongObjects()
@@ -25,8 +28,9 @@ extension NodeView {
     package func syncBackgroundExtension() {
         let held = Self.extensions.object(forKey: self)
         // A flight shows the whole image on its own layer (LLP 1013.000 D4).
-        guard #available(iOS 26.0, tvOS 26.0, *), kind == "image", props["backgroundExtension"] == "auto", !cssVisibilityHidden,
+        guard #available(iOS 26.0, tvOS 26.0, *), kind == "image", extendsBackground, !cssVisibilityHidden,
               flightLook == nil, window != nil, let image = raster?.image else { return removeBackgroundExtension() }
+        if let route = ViewPresentation.controller(for: self) as? RouteController, route.safeAreaNeedsLayout { return }
         let kept = (held as? ExtensionView).flatMap { $0.laidOut == boxLayout ? $0.sides : nil } ?? []
         guard let (frame, sides) = extensionFrame(keeping: kept) else {
             // Inside UIKit's animation, the safe areas are already its end's

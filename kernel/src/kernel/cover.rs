@@ -126,6 +126,11 @@ impl Kernel {
             return Ok(());
         }
         self.arena.set_cover(slot, cover);
+        // PROTO: a block root's clearance moves its frames' origin whether or
+        // not its layout changes (`clearance`): publish it again.
+        if self.arena.blocks.holds(slot) {
+            self.arena.layout_dirty.insert(slot);
+        }
         if let Some(r) = &mut self.region {
             r.intrinsic(slot);
         }
@@ -409,6 +414,10 @@ pub(crate) fn settle_chain<'a>(
         let HostCover::Edges([_, _, bottom, _]) = cover else {
             continue;
         };
+        // PROTO: a block root's clearance is no chain's (`clearance`).
+        if arena.blocks.holds(covered) {
+            continue;
+        }
         if bottom <= 0.0 || !arena.is_live(covered) || !scroller_insets_bottom(arena, covered) {
             continue;
         }
@@ -519,7 +528,7 @@ pub(crate) fn side_reach(arena: &NodeArena, slot: u32) -> [f32; 2] {
 /// The scrollers that may reach past `slot`'s sides when it is covered
 /// (`side_reach`): the first `scroll` on each path down from it, which
 /// `apply` derives again when the cover changes.
-fn reaching(arena: &NodeArena, slot: u32) -> Vec<u32> {
+pub(super) fn reaching(arena: &NodeArena, slot: u32) -> Vec<u32> {
     let mut out = Vec::new();
     let mut stack: Vec<u32> = arena.children(slot).to_vec();
     while let Some(c) = stack.pop() {
@@ -687,11 +696,30 @@ fn positioned(arena: &NodeArena, slot: u32) -> bool {
 /// right, bottom and left: the host's sizing, not the box's CSS padding.
 pub(crate) fn added_padding(arena: &NodeArena, slot: u32) -> [f32; 4] {
     match arena.cover(slot) {
+        // PROTO (safe-area design §2.2): a block root's `Edges` is its
+        // clearance, the safe area its root is laid out inside
+        // (`clearance`), never padding added to it.
+        Some(HostCover::Edges(_)) if arena.blocks.holds(slot) => [0.0; 4],
         Some(HostCover::Edges(edges)) => {
             let off = arena.style(slot).rare.safe_area;
             std::array::from_fn(|i| if off & (1 << i) != 0 { 0.0 } else { edges[i] })
         }
         _ => [0.0; 4],
+    }
+}
+
+/// PROTO (safe-area design §2.2): the clearance of a block root, top,
+/// right, bottom and left: the owner's safe area as its host reports it
+/// (`Edges`) less the edges the route turns off (`-exact-safe-area`), which
+/// the root is laid out inside until a host gives its band (`block::cleared`). Its frames are published that far in from
+/// the block's origin; its used size is still the block's.
+pub(crate) fn cover_clearance(arena: &NodeArena, slot: u32) -> Option<[f32; 4]> {
+    match arena.cover(slot) {
+        Some(HostCover::Edges(e)) if arena.blocks.holds(slot) => {
+            let off = arena.style(slot).rare.safe_area;
+            Some(std::array::from_fn(|i| if off & (1 << i) != 0 { 0.0 } else { e[i] }))
+        }
+        _ => None,
     }
 }
 

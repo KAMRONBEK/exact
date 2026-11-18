@@ -30,6 +30,10 @@ package protocol RouteSurface: UIViewController {
     var lifted: NodeView? { get }
     /// Control bars that ride the route's bottom edge.
     var ridingBars: [NodeView] { get }
+    /// The top inset UIKit gives the route at rest, which a moving top edge leaves (`EdgeFramesIOS.swift`).
+    var restingTop: CGFloat { get }
+    /// How far toward the block's top the route's top-edge boxes were last placed, 0 at rest (`EdgeFramesIOS.swift`).
+    var placedEdge: Double? { get set }
     /// The text field of the search the route's bar shows, while it shows one.
     var headerSearchEditor: UIView? { get }
     /// Whether UIKit's search field in the route's bar is editing.
@@ -83,6 +87,17 @@ package enum RouteGeometry {
     /// clearance `route` turns off (`-exact-safe-area`).
     package static func clearanceOff(_ route: NodeView) -> Int { Int(route.style["safe_area"]?.number ?? 0) & 0xf }
 
+    /// The edges of the container's safe area `node`'s `-exact-safe-area-ignore` gives it (LLP 1123 D4): those it
+    /// names, every edge where it names none, `start` and `end` under its layout direction; none where it names the
+    /// keyboard region alone (`SafeAreaIgnore`'s bits: container 1, keyboard 2, then top, right, bottom, left, start, end).
+    package static func ignoredEdges(_ node: NodeView, rtl: Bool) -> UIRectEdge {
+        let bits = Int(node.style["safe_area_ignore"]?.number ?? 0)
+        guard bits != 0, bits & 1 != 0 || bits & 2 == 0 else { return [] }
+        let named: [(Int, UIRectEdge)] = [(4, .top), (8, .right), (16, .bottom), (32, .left), (64, rtl ? .right : .left), (128, rtl ? .left : .right)]
+        let edges = named.reduce(into: UIRectEdge()) { if bits & $1.0 != 0 { $0.insert($1.1) } }
+        return edges.isEmpty ? .all : edges
+    }
+
     /// Whether a route asks `navigationBar="transparent"`: its bar shows
     /// with a clear scroll-edge appearance and insets no content.
     package static func transparentBar(_ route: NodeView) -> Bool { route.props["navigationBar"] == "transparent" }
@@ -128,8 +143,8 @@ package enum RouteGeometry {
 
     /// What Exact sets on a node's scroll view and nothing else may (LLP
     /// 1075.003 §3.5) and differs from what Exact writes: no inset (a
-    /// refresh control insets it while it spins), automatic adjustment for a
-    /// route's collapse or bottom-edge scroller and arranged peers, the backend's
+    /// refresh control insets it while it spins), automatic adjustment on a
+    /// route's collapse or bottom-edge scroller and arranged peers (`insetByUIKit`), the backend's
     /// Exact-owned delegate, the node's keyboard dismissal (authored, or
     /// the platform's for what it scrolls, LLP 1115.000 D9.1). The offset
     /// and the content size are Exact's too but are not checked: they move
@@ -149,7 +164,7 @@ package enum RouteGeometry {
             if s.contentInset != expected, s.refreshControl?.isRefreshing != true { out.append("contentInset") } // a band's is the host's
             #endif
         }
-        if s.contentInsetAdjustmentBehavior != (insetByUIKit ? .automatic : .never) { out.append("contentInsetAdjustmentBehavior") }
+        if insetByUIKit, s.contentInsetAdjustmentBehavior != .automatic { out.append("contentInsetAdjustmentBehavior") } // PROTO: otherwise UIKit owns the default
         if s !== node.scrollView || !node.ownsScrollDelegate { out.append("delegate") }
         if s.keyboardDismissMode != node.keyboardDismissal { out.append("keyboardDismissMode") }
         return out
@@ -285,6 +300,8 @@ package protocol NavigationHosting: AnyObject {
     var wantsWholeView: Bool { get }
     func coversChanged()
     func reportCovers()
+    /// Measures the covers again where the authored tablist moved or changed size since they were measured.
+    func followAuthoredTablist()
     func fitOwner()
     func insetByUIKit(_ node: NodeView) -> Bool
     /// Whether the kernel pads `route`'s top by its cover: a route whose title's scroller goes under the bar does not.
@@ -564,6 +581,7 @@ package final class NoNavigation: NavigationHosting {
     /// core's (`ArrangementHost.reportHiddenPanes`).
     package func coversChanged() {}
     package func reportCovers() {}
+    package func followAuthoredTablist() {}
     /// The document stays in the scrolling viewport: no native container takes the whole view.
     package func fitOwner() { presenter.hostDocument(fixed: false) }
     /// An arrangement's scroller is inset by UIKit, as with navigation.

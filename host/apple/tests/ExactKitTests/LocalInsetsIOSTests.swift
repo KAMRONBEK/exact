@@ -68,7 +68,7 @@ final class LocalInsetsIOSTests: XCTestCase {
         let route = try XCTUnwrap(node(session, "route-home"))
         let controller = try XCTUnwrap(p.navigationHost.controllers[route.id])
         let scroll = try XCTUnwrap(node(session, "home-scroll")?.scrollView)
-        XCTAssertEqual(scroll.contentInsetAdjustmentBehavior, .never)
+        XCTAssertEqual(scroll.adjustedContentInset.top, 0, "UIKit insets nothing of the top: the content runs under the bar")
         waitFor("the hero's control clears the bar using the route's inset", facts: {
             "control=\(self.node(session, "hero-control").map(self.onScreen) ?? .zero), hero=\(self.node(session, "hero").map(self.onScreen) ?? .zero), safe=\(controller.view.safeAreaInsets), local=\(p.navigationHost.localInsets.wanted[route.id] ?? []), offset=\(scroll.contentOffset)"
         }) {
@@ -102,7 +102,8 @@ final class LocalInsetsIOSTests: XCTestCase {
         XCTAssertEqual(onScreen(sidebar).minY, 0, accuracy: 0.5, "which is the screen's")
         let first = try XCTUnwrap(node(session, "sidebar-first"))
         XCTAssertEqual(onScreen(first).minY, bars.top, accuracy: 0.5, "its content starts below the bar: \(bars.top) points, read, not written")
-        XCTAssertEqual(onScreen(list).minY, bars.top, accuracy: 0.5, "the list beside it already cleared the bar and stays")
+        // PROTO (safe-area design r2 §2.1): the list's view reaches the top edge (`SafeReach`), where UIKit insets it
+        XCTAssertEqual(list.convert(list.boxBounds, to: nil).minY, bars.top, accuracy: 0.5, "the list beside it already cleared the bar and stays")
         let absolute = try XCTUnwrap(node(session, "absolute-probe"))
         XCTAssertEqual(onScreen(absolute).minY, bars.top, accuracy: 0.5, "the absolute child's local inset clears the route's cover once")
         let probe = try XCTUnwrap(node(session, "root-probe"))
@@ -123,10 +124,10 @@ final class LocalInsetsIOSTests: XCTestCase {
         }
         let sheet = try XCTUnwrap(node(session, "sheet"))
         let c = try XCTUnwrap(session.presenter.navigationHost.controllers[sheet.id])
-        until("the probe reads the sheet's own bottom inset") {
-            guard let probe = self.node(session, "sheet-probe") else { return false }
-            return abs(probe.bounds.height - c.view.safeAreaInsets.bottom) < 0.5
-        }
+        // PROTO (safe-area design r2 §2.1): the sheet's route is laid out above its own bottom inset, so its content,
+        // which lies in none of it, reads 0 there
+        until("the sheet has its bottom inset") { c.view.safeAreaInsets.bottom > 0 }
+        XCTAssertEqual(try XCTUnwrap(node(session, "sheet-probe")).bounds.height, 0, "the probe reads none of the sheet's bottom inset")
     }
 
     /// The sides a sheet's content reads while the sheet moves in are the ones it lands with, so nothing in it moves
@@ -165,7 +166,7 @@ final class LocalInsetsIOSTests: XCTestCase {
         let route = try XCTUnwrap(node(session, "route"))
         let c = try XCTUnwrap(session.presenter.navigationHost.controllers[route.id])
         let list = try XCTUnwrap(node(session, "list")), sv = try XCTUnwrap(list.scrollView)
-        XCTAssertEqual(sv.contentInsetAdjustmentBehavior, .never, "UIKit insets nothing of the top")
+        XCTAssertEqual(sv.adjustedContentInset.top, 0, "UIKit insets nothing of the top")
         let top = c.view.safeAreaInsets.top
         until("the hero's text clears the bar it reads") {
             guard let text = self.node(session, "hero-text") else { return false }

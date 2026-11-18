@@ -139,7 +139,7 @@ extension NodeView {
         }
         let b = holder.bounds
         let anchor = CGPoint(x: b.minX + b.width * holder.anchorPoint.x, y: b.minY + b.height * holder.anchorPoint.y)
-        let o = CGPoint(x: axis(0, bounds.width) - anchor.x, y: axis(1, bounds.height) - anchor.y)
+        let o = CGPoint(x: axis(0, boxBounds.width) - anchor.x, y: axis(1, boxBounds.height) - anchor.y)
         var p = CATransform3DIdentity
         p.m34 = -1 / d
         let t = CATransform3DConcat(CATransform3DConcat(CATransform3DMakeTranslation(-o.x, -o.y, 0), p), CATransform3DMakeTranslation(o.x, o.y, 0))
@@ -263,8 +263,8 @@ extension NodeView {
         while let (child, carried) = below.popLast() {
             guard child.style["display"]?.string != "none", child.props["semanticTag"] != "dialog",
                   child.props["popover"] == nil else { continue }
-            if child.bounds.width > 0, child.bounds.height > 0 {
-                let box = carried ? child.drawnRect(child.bounds, in: document) : child.convertedRect(child.bounds, to: document)
+            if child.boxBounds.width > 0, child.boxBounds.height > 0 {
+                let box = carried ? child.drawnRect(child.boxBounds, in: document) : child.convertedRect(child.boxBounds, to: document)
                 if box.origin.x.isFinite, box.origin.y.isFinite, box.width.isFinite, box.height.isFinite {
                     reach = reach.union(box)
                 }

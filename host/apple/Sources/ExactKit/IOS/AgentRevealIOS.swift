@@ -56,7 +56,7 @@ extension Agent {
         guard v.window != nil else { return scrolled }
         // A hidden scroller (the authored one under a grouped list) shows nothing where it scrolls.
         for case let sv as UIScrollView in sequence(first: rect == nil ? target.superview : target, next: { $0?.superview }).compactMap({ $0 }) where sv.isScrollEnabled && !sv.isHidden {
-            let frame = target.convert(rect ?? target.bounds, to: sv), mid = CGPoint(x: frame.midX, y: frame.midY), i = sv.adjustedContentInset
+            let frame = target.convert(rect ?? (target as? NodeView)?.boxBounds ?? target.bounds, to: sv), mid = CGPoint(x: frame.midX, y: frame.midY), i = sv.adjustedContentInset
             let port = visiblePort(sv, for: target, region: rect, logical: logical)
             // (No band left between the covers: nothing to scroll the middle into, so nothing moves.)
             if port.height <= 0 { continue }
@@ -136,7 +136,7 @@ extension Agent {
         // The target's covers: the sticky box at its middle, then each one at the middle of the band that leaves (a
         // header across from a dock), by the window's hit test, as the tap's.
         if let v {
-            let bounds = region ?? v.bounds, middle = CGPoint(x: bounds.midX, y: bounds.midY)
+            let bounds = region ?? (v as? NodeView)?.boxBounds ?? v.bounds, middle = CGPoint(x: bounds.midX, y: bounds.midY)
             let x = v.convert(middle, to: sv).x, mid = port.midY
             var at = v.convert(middle, to: nil)
             for _ in 0..<4 {

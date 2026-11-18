@@ -1067,6 +1067,9 @@ final class AgentCheckIOSTests: XCTestCase {
             ["op": "frame", "id": 9, "x": 2.0, "y": 740.0, "w": 16.0, "h": 16.0],
         ])
         let p = try XCTUnwrap(session).presenter
+        // A scroller Exact makes keeps UIKit's adjustment, and this viewport lies under the window's insets: the room
+        // is measured without them
+        p.views[2]?.scrollView?.contentInsetAdjustmentBehavior = .never
         p.settlePump()
         p.viewport.layoutIfNeeded()
         let container = _UIFloatingBarContainerView(frame: CGRect(x: 0, y: 0, width: 400, height: 800))

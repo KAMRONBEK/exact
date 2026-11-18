@@ -242,7 +242,7 @@ final class NativeListNavigationIOSTests: XCTestCase {
         XCTAssertTrue(route.contentScrollView(for: .top) === collection, "UIKit follows the actual collection")
         XCTAssertTrue(route.collapseScroll === node)
         XCTAssertTrue(route.collapseScrollView === collection)
-        XCTAssertEqual(plain.contentInsetAdjustmentBehavior, .never)
+        XCTAssertEqual(plain.contentInsetAdjustmentBehavior, .automatic) // PROTO: retiring a backend keeps UIKit's adjustment
         XCTAssertEqual(collection.contentInsetAdjustmentBehavior, .automatic)
         collection.contentInset.bottom = 40
         XCTAssertTrue(RouteGeometry.ownedChanges(collection, of: node, insetByUIKit: true).isEmpty, "the collection retains its Exact-owned delegate and native footer insets")
@@ -256,7 +256,7 @@ final class NativeListNavigationIOSTests: XCTestCase {
         let replacement = mount()
         XCTAssertTrue(route.collapseScroll === node, "the logical owner did not change")
         XCTAssertTrue(route.contentScrollView(for: .top) === replacement, "a new backend on the same node is rebound")
-        XCTAssertEqual(collection.contentInsetAdjustmentBehavior, .never)
+        XCTAssertEqual(collection.contentInsetAdjustmentBehavior, .automatic) // PROTO: replacing a backend keeps UIKit's adjustment
         XCTAssertTrue(route.contentScrollView(for: .bottom) === replacement, "the bottom edge follows the replacement too")
         XCTAssertEqual(replacement.contentInsetAdjustmentBehavior, .automatic)
         XCTAssertEqual(node.scrollOrigin, 0, "the previous backend's title inset is not carried over")
@@ -307,7 +307,9 @@ final class NativeListNavigationIOSTests: XCTestCase {
         XCTAssertTrue(firstNative.scrollsToTop, "a selected native view is enabled even when its flag was false")
         XCTAssertFalse(automatic.scrollsToTop)
         route.view.layoutIfNeeded()
-        XCTAssertNotEqual(topCover(), automaticCover, "the authored list leaves the bar's edge, so the route is covered for the bar")
+        // PROTO (safe-area design r2 §2.1): the route's root is laid out in its safe area whichever scroller UIKit
+        // takes, so its cover stays as the authored list leaves the bar's edge
+        XCTAssertEqual(topCover(), automaticCover, "the route clears the bar whichever scroller UIKit takes")
         p.navigationHost.prepareRoutes([route], in: nav)
         XCTAssertEqual(route.projected?.scroll, ObjectIdentifier(firstNative), "the route hatch receives an app-owned native view")
         XCTAssertEqual(firstNative.contentInsetAdjustmentBehavior, .always, "projection preserves the native bottom selection's inset policy")
@@ -354,13 +356,13 @@ final class NativeListNavigationIOSTests: XCTestCase {
         XCTAssertFalse(automatic.scrollsToTop)
         p.navigationHost.prepareRoutes([route], in: nav)
         p.navigationHost.reportCovers()
-        XCTAssertNotEqual(topCover(), automaticCover)
+        XCTAssertEqual(topCover(), automaticCover, "the route clears the bar whichever scroller UIKit takes")
         syncs = p.navigationHost.syncCalls; projected = route.projected?.scroll
         route.setContentScrollView(nil, for: .all)
         XCTAssertTrue(route.nativeContentScrollEdges.isEmpty)
         XCTAssertEqual(p.navigationHost.syncCalls, syncs, "nil runs no sync in the app's call either")
         XCTAssertEqual(route.projected?.scroll, projected)
-        XCTAssertNotEqual(topCover(), automaticCover, "nor the passes: the covers wait for the route's layout")
+        XCTAssertEqual(topCover(), automaticCover, "nor the passes: the covers stay")
         XCTAssertNil(route.collapseScroll, "and so does the title's scroller")
         XCTAssertFalse(firstNative.scrollsToTop)
         XCTAssertFalse(secondNative.scrollsToTop)
@@ -415,7 +417,8 @@ final class NativeListNavigationIOSTests: XCTestCase {
         XCTAssertTrue(route.scrollEdgesOwed)
         route.viewIsAppearing(false)
         XCTAssertFalse(route.scrollEdgesOwed, "the appearing route runs its owed passes")
-        XCTAssertNotEqual(topCover(), automaticCover, "and the covers follow them")
+        // PROTO (safe-area design r2 §2.1): the route's root is laid out in its safe area whichever scroller UIKit takes
+        XCTAssertEqual(topCover(), automaticCover, "and the covers stay")
     }
 
     func testAPositionCarriedToTheEndLandsInTheLayoutTheCoversBring() throws {
@@ -428,13 +431,15 @@ final class NativeListNavigationIOSTests: XCTestCase {
         let logical = { automatic.contentOffset.y + node.scrollTopInset(automatic) }
         automatic.contentOffset.y = end()
         let top = logical(), height = automatic.bounds.height
-        // The app's selection takes the title from the list at its end; the runtime's answer to the route's new cover
-        // then shrinks the list's port, and the carried position is written in that layout
+        // The app's selection takes the title from the list at its end. PROTO (safe-area design r2 §2.1): the route's
+        // root is laid out in its safe area whichever scroller UIKit takes, so its cover and the list's port stay, and
+        // the carried position is written in that layout
         route.setContentScrollView(native, for: .top)
         route.view.layoutIfNeeded()
-        until("the runtime's answer shrinks the list's port") { automatic.bounds.height < height - 1 }
+        XCTAssertEqual(Agent(session: session).clock(["settle": true])["settled"] as? Bool, true)
+        XCTAssertEqual(automatic.bounds.height, height, accuracy: 0.5, "the list's port stays")
         XCTAssertNil(node.pendingScrollTop)
-        XCTAssertEqual(logical(), min(top, end() + node.scrollTopInset(automatic)), accuracy: 0.5, "the list keeps its place, clamped to its new end")
+        XCTAssertEqual(logical(), min(top, end() + node.scrollTopInset(automatic)), accuracy: 0.5, "the list keeps its place at its end")
     }
 
     func testAPositionCarriedOutsideABatchIsWrittenWhenNoBatchFollows() throws {

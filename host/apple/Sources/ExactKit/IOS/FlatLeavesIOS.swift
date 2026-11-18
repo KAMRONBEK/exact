@@ -310,7 +310,7 @@ package final class FlatLeaves {
             order[parent.id] = presenter.navigation.lifted?.recordedIDs(of: parent) ?? parent.container.subviews.compactMap { ($0 as? NodeView)?.id }
         }
         let leaf = FlatLeaf(id: id, style: view.style, paint: flat)
-        leaf.layout = view.grid?.layout ?? view.frame
+        leaf.layout = view.laidOutFrame
         leaf.content = view.kernelContentBox.map { ($0, view.kernelPadding) }
         leaf.opacity = Float(view.alpha)
         leaf.parent = parent.id

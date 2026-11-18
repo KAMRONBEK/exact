@@ -1054,7 +1054,9 @@ uint32_t exact_intrinsics(ExactRuntime rt, size_t len);
  * kind 22 takes them back. Kind 23 says how a block is shown against its
  * stack's top (LLP 1127): float 1 beside it, live (a split's list column, the
  * detail beside an inspector), 2 under a pane over it, not live (a split's
- * detail under the list that overlays it), 0 in its stack; then three unused. */
+ * detail under the list that overlays it), 0 in its stack; then three unused.
+ * Kind 24 (the safe-area prototype's rule 4) says whether a route's top edge
+ * moves: float 1 while it does, 0 when it no longer does; then three unused. */
 uint32_t exact_host_covers(ExactRuntime rt, size_t len);
 /* What a block's root would measure in another block (a popover's
  * position-area option, LLP 1021 D2): each axis a length and a policy as

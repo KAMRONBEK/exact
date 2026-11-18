@@ -338,7 +338,7 @@ package final class Presenter {
     /// page's area (`pageMargins`, PageEdgesIOS.swift).
     var viewportSize: CGSize { viewport.pageSize }
     /// The first root's frame size, zero before the first batch.
-    var rootSize: CGSize { root.subviews.first?.frame.size ?? .zero }
+    var rootSize: CGSize { root.subviews.first.map { ($0 as? NodeView)?.boxFrame.size ?? $0.frame.size } ?? .zero }
 
     /// An asset's bytes changed (LLP 1030 D10): every image showing it loads
     /// it again — the old picture stays until the new one is decoded, as a
@@ -411,8 +411,8 @@ package final class Presenter {
         let m = pageMargins; var size = viewportSize
         for r in root.subviews {
             let v = r as? NodeView, extent = v.flatMap { $0.scrollView == nil && !$0.overflowClips && !$0.isHidden ? $0.content : nil }
-            let reach = extent.flatMap { _ in v?.documentOverflow(in: root) } ?? .zero
-            size = CGSize(width: max(size.width, r.frame.maxX, reach.maxX), height: max(size.height, r.frame.maxY, reach.maxY))
+            let reach = extent.flatMap { _ in v?.documentOverflow(in: root) } ?? .zero, frame = v?.boxFrame ?? r.frame
+            size = CGSize(width: max(size.width, frame.maxX, reach.maxX), height: max(size.height, frame.maxY, reach.maxY))
         }
         let frame = CGRect(origin: CGPoint(x: m.left, y: m.top), size: size)
         if root.frame != frame { root.frame = frame }
@@ -796,14 +796,21 @@ package final class Presenter {
     package var onCovers: (([(UInt32, HostCover?)], [(UInt32, OwnerValues?)]) -> Void)?
     /// The border box a person dragged a box's `resize` grip to; nil keeps an axis (ResizeGrip.swift).
     var onResizeBox: ((UInt32, CGFloat?, CGFloat?) -> Void)?
+    // PROTO (rule 4, `EdgeFramesIOS.swift`): routes whose top edge moves, as told; each one's boxes' two frames
+    var onMovingTops: (([(UInt32, Bool)]) -> Void)?
+    var movingTops = Set<UInt32>(), deliveredMovingTops = Set<UInt32>()
+    let geometry = GeometryOnlyState() // PROTO (UIKit-first measurement, `GeometryOnlyIOS.swift`)
+    /// PROTO (rule 4): routes whose top edge UIKit moved though nothing configured said it would (`noteUnforeseenMove`)
+    var movedTops = Set<UInt32>()
+    var edgeFrames: [UInt32: [UInt32: [(t: Double, frame: CGRect)]]] = [:]
     /// In `reset`: host state its views would move with no runtime to tell stays as it was (FocusEvents' focus,
     /// OwnersIOS' blocks, ExactView `fit`'s geometry; ResetGate).
     private(set) var resetting = false
     /// Work for after the batch being applied, or now: a hatch's act on an
     /// authored element never lands inside a batch (LLP 1075.003 §3.4).
     package func afterBatch(_ work: @escaping () -> Void) { if applying { waiting.append((nil, work)) } else { work() } }
-    /// Symbols and projected controls report after the batch that creates
-    /// them: all sizes from a turn reach the runner under one layout.
+    /// PROTO: drain a batch's projected sizes before its first frame; the
+    /// queued callback also covers changes made outside a batch.
     private struct QueuedIntrinsic { weak var view: NodeView?; let generation: Int; let size: CGSize? }
     private var intrinsicSizes: [QueuedIntrinsic] = []
     package func queueIntrinsicSize(_ view: NodeView, generation: Int, _ size: CGSize?) {
@@ -812,7 +819,8 @@ package final class Presenter {
         }
         intrinsicSizes.append(QueuedIntrinsic(view: view, generation: generation, size: size))
     }
-    private func flushIntrinsicSizes() {
+    func flushIntrinsicSizes() {
+        guard !intrinsicSizes.isEmpty else { return } // PROTO: the report drain may have consumed the queued callback's sizes
         let queued = intrinsicSizes
         intrinsicSizes = []
         var latest: [UInt32: CGSize?] = [:], order: [UInt32] = []
@@ -858,6 +866,7 @@ package final class Presenter {
         defer { applyLanguage(batch); applyWakeLock(batch); applyOrientationLock(batch) }
         if applySnapshots(batch) { return }
         takeRootTabs(batch)
+        let geometryOnly = geometryOnly(batch) // PROTO (UIKit-first measurement)
         PaintOrder.begin(); let schemes = ColorSchemes.begin(); defer { schemes.end() }
         let post = Self.signpostLog.signpostsEnabled ? Self.signposts.beginInterval("apply") : nil
         let phase = HostPhases.shared.begin(.apply)
@@ -883,7 +892,8 @@ package final class Presenter {
         modals.prepare(batch)
         navigation.prepare(batch)
         anchorChanges.reset()
-        let capturedScrolls = !rowFill
+        // PROTO (UIKit-first measurement): leave scroll offsets to UIKit while the edge moves
+        let capturedScrolls = !rowFill && !geometryOnly
         let anchorFocus = scrollers.isEmpty ? nil : focusedNode
         if capturedScrolls { for id in scrollers where !collections.owns(id) { views[id]?.captureScrollPosition(focused: anchorFocus) } }
         if let e = batch.error { FileHandle.standardError.write(Data("exact: \(e)\n".utf8)) }
@@ -1087,6 +1097,7 @@ package final class Presenter {
             case .roots:
                 root.subviews.forEach { $0.removeFromSuperview() }
                 ApplyProfile.time("roots.attach") { accent.attach(op.ids.compactMap { views[UInt32($0)] }) { for r in $0 { root.addSubview(r); regrid(r) } } }
+            case .far: farFrame(op)
             case .frame, .content, .fieldContent:
                 if flats.isFlat(id) {
                     if kind == .frame { flats.frame(id, CGRect(x: op.x, y: op.y, width: op.w, height: op.h)) }
@@ -1116,6 +1127,7 @@ package final class Presenter {
             default: dialogs.applied(op); owners.applied(op)
             }
         }
+        let protoOps = ApplyPhases.cpu() // PROTO (UIKit-first measurement)
         for op in batch.ops {
             let kind = op.op
             let opBegan = ApplyProfile.on ? CACurrentMediaTime() : 0
@@ -1146,6 +1158,7 @@ package final class Presenter {
             if animating { moveOrPlace(kind == .create ? nil : views[id] ?? leaving[id]?.view) { applyOp(op, kind, id) } } else { applyOp(op, kind, id) }
         }
         for id in placedAnew[anewFrom...] { views[id]?.promotedLayoutHit?.finishTransfers() }
+        ApplyPhases.ops += ApplyPhases.cpu() - protoOps; let protoRegrid = ApplyPhases.cpu() // PROTO
         schemes.end(); regridMoved() // every override and move made: the traits before anything reads them
         #if os(iOS)
         // A reference changes default corners and shadow even when the material stays the same.
@@ -1160,11 +1173,17 @@ package final class Presenter {
         // A view the flush promoted and mounted may have moved its children.
         while !gridMoved.isEmpty { regridMoved(); flats.flush() }
         navigation.lifted?.place()
-        if rowFill, pageGeometryOwed || listRowDependencies?.scrollers != scrollers { rowFill = false }
-        if !rowFill {
-            pageGeometryOwed = false
-            fitDocument(); reachPageEdges(); paintCanvas()
+        ApplyPhases.regrid += ApplyPhases.cpu() - protoRegrid; let protoReach = ApplyPhases.cpu() // PROTO
+        if geometryOnly { reachMovingTops(); verifyMovingTops(); paintCanvas() } else {
+            if rowFill, pageGeometryOwed || listRowDependencies?.scrollers != scrollers { rowFill = false }
+            if !rowFill {
+                pageGeometryOwed = false
+                fitDocument(); placeEdgesAfterBatch() // PROTO (rule 4): test reach at the placed edge, not the resting frame.
+                reachSafeEdges(); reachPageEdges(); paintCanvas()
+            }
         }
+        ApplyPhases.reach += ApplyPhases.cpu() - protoReach // PROTO
+        if geometryOnly { deferGeometry(touchedIDs + geometryApplied); geometryApplied = []; return } // PROTO (UIKit-first measurement)
         let first = root.subviews.first as? NodeView
         let widget = first?.props["interactiveWidget"]
         if widget != interactiveWidget {
@@ -1173,15 +1192,16 @@ package final class Presenter {
         }
         let fit = first?.props["viewportFit"]
         if fit != viewportFit { viewportFit = fit; onViewportFit?() }
+        applyProtoMode(first) // PROTO (UIKit-first measurement)
         session?.canvases.cancelMovedControls()
         PaintOrder.flush()
-        let changed = touchedAndAbove(touchedIDs + geometryApplied)
+        let deferredIDs = takeDeferredGeometry(), changed = touchedAndAbove(touchedIDs + geometryApplied + deferredIDs) // PROTO (UIKit-first measurement): merge views deferred by geometry batches
         geometryApplied = []
         for id in touchedAndAbove(pressChanged) { views[id]?.endPressCrossFade() }
         swipeActions.sync(changed: changed, reshaped: touchedAndAbove(reshapedIDs)); rowCells.sync(changed: changed)
-        groupedLists?.sync(changed: changed)
+        let carried = groupedLists?.sync(changed: changed) ?? []
         if rowFill, pageGeometryOwed || listRowDependencies?.scrollers != scrollers { rowFill = false }
-        if !rowFill { pageGeometryOwed = false; reachPageEdges() } // a list mounted now reaches its bands too
+        if !rowFill { pageGeometryOwed = false; reachSafeEdges(holding: carried); reachPageEdges() } // a list mounted now reaches its bands too
         if !flightHost.isEmpty { flightHost.batchApplied() }
         #if os(tvOS)
         menuKey.sync()
@@ -1215,7 +1235,7 @@ package final class Presenter {
         NodeView.inkPlaced(placedAnew[anewFrom...].compactMap { views[$0] })
         placedAnew.removeSubrange(anewFrom...)
         // What a node's name, state and focus read: not its box (an autofocus waiting for one is indexed).
-        let named = touchedAndAbove(batch.ops.compactMap { [.create, .props, .style, .children, .paragraph, .flow].contains($0.op) ? $0.id : nil })
+        let named = touchedAndAbove(batch.ops.compactMap { [.create, .props, .style, .children, .paragraph, .flow].contains($0.op) ? $0.id : nil } + deferredIDs) // PROTO (UIKit-first measurement): include deferred names and states
         // Finish controls and frames before UIKit synchronously lays out the destination.
         if navigation.syncOwed { rowFill = false; listRowDependencies = nil }
         navigation.batchApplied(batch, rowsOnly: rowsOnly)
@@ -1319,7 +1339,7 @@ package final class Presenter {
 
     /// The views a batch touched and every view above them, as the batch
     /// left the hierarchy: what a pass reading a subtree must revisit.
-    private func touchedAndAbove(_ ids: [UInt32]) -> Set<UInt32> {
+    func touchedAndAbove(_ ids: [UInt32]) -> Set<UInt32> {
         var seen = Set<UInt32>()
         for id in ids {
             var view: UIView? = views[id]

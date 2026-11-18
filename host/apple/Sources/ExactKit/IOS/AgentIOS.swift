@@ -278,7 +278,7 @@ extension Agent {
     /// presentation transform applied (UIKit's conversion carries `transform`),
     /// as the web's `getBoundingClientRect` includes CSS transforms.
     package func box(_ v: UIView, region: CGRect? = nil) -> CGRect {
-        Self.box(region ?? v.bounds, of: v, viewport: presenter.viewport)
+        Self.box(region ?? (v as? NodeView)?.boxBounds ?? v.bounds, of: v, viewport: presenter.viewport)
     }
 
     static func box(_ bounds: CGRect, of v: UIView, viewport: UIScrollView) -> CGRect {
@@ -382,7 +382,7 @@ extension Agent {
             return reply
         }
         if presenter.inlineText(UInt32(id)) == nil {
-            node["radii"] = v.effectiveCornerSizes(in: v.bounds).map { [Double($0.width), Double($0.height)] }
+            node["radii"] = v.effectiveCornerSizes(in: v.boxBounds).map { [Double($0.width), Double($0.height)] }
         }
         let host = v.paragraphOwner
         // @ref LLP 1043.000 §3 D7 — diagnose actual painted fragments, not a replay.
@@ -391,7 +391,7 @@ extension Agent {
         }
         let vp = presenter.viewport
         let rect = { (r: CGRect) -> [String: Any] in ["x": Agent.r2(r.origin.x), "y": Agent.r2(r.origin.y), "w": Agent.r2(r.width), "h": Agent.r2(r.height)] }
-        let local = presenter.inlineText(UInt32(id)).map { host.inlineBounds($0) ?? .zero } ?? host.bounds
+        let local = presenter.inlineText(UInt32(id)).map { host.inlineBounds($0) ?? .zero } ?? host.boxBounds
         let shift = PresentedScrolls(vp).shift(of: host) // a running scroll shows it there (LLP 1012 `layout`)
         let b = (presenter.inlineFrame(UInt32(id)) ?? box(host, region: local)).offsetBy(dx: shift.x, dy: shift.y)
         var space: [String: Any] = ["viewport": rect(b), "local": ["w": Agent.r2(local.width), "h": Agent.r2(local.height)],
@@ -404,7 +404,7 @@ extension Agent {
         node["geometry"] = geometry(host, region: local)
         if let scroll = host.scroll { node["scrollGeometry"] = Self.scrollGeometry(scroll) }
         node["space"] = space
-        let visibility = visibility(of: host, region: host.bounds, box: b, hidden: presenter.inlineText(UInt32(id))?.hidden == true)
+        let visibility = visibility(of: host, region: host.boxBounds, box: b, hidden: presenter.inlineText(UInt32(id))?.hidden == true)
         node.merge(visibility.facts) { _, new in new }
         var native: [String: Any] = ["view": String(describing: Swift.type(of: v)), "sheet": presenter.modals.active]
         if presenter.inlineText(UInt32(id)) != nil { native["inline"] = true }
@@ -756,9 +756,9 @@ extension Agent {
             guard let handle = next as? NodeView, let clipID = presenter.drags.transformClip(handle.id), let clip = presenter.views[clipID] else {
                 return ["error": "no photo binding (transformDragFor) at view \(v.id)"]
             }
-            let offset = (req["at"] as? [Double]).map { CGPoint(x: $0[0], y: $0[1]) } ?? CGPoint(x: handle.bounds.midX, y: handle.bounds.midY)
+            let offset = (req["at"] as? [Double]).map { CGPoint(x: $0[0], y: $0[1]) } ?? CGPoint(x: handle.boxBounds.midX, y: handle.boxBounds.midY)
             let point = handle.convert(offset, to: clip)
-            if let error = DragLink.installed?.recognizedPinch(handle, scale: scale, focal: CGPoint(x: point.x - clip.bounds.midX, y: point.y - clip.bounds.midY)) { return ["error": error] }
+            if let error = DragLink.installed?.recognizedPinch(handle, scale: scale, focal: CGPoint(x: point.x - clip.boxBounds.midX, y: point.y - clip.boxBounds.midY)) { return ["error": error] }
             return delivered(["tapped": Int(handle.id), "pinch": scale, "at": at, "delivery": "recognized"], hit)
         }
         if req["hover"] as? Bool == true {

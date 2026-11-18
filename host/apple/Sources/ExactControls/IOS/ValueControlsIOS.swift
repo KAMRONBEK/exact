@@ -147,9 +147,9 @@ extension ControlHost {
         let before: [CGRect]
         if let children = presenter.laidOutChildren(of: parent.id, shown: seen) {
             before = children.prefix { $0.id != owner.id }.compactMap(\.frame)
-        } else { before = parent.container.subviews.compactMap { $0 as? NodeView }.prefix { $0 !== owner }.filter(seen).map { $0.frame } }
+        } else { before = parent.container.subviews.compactMap { $0 as? NodeView }.prefix { $0 !== owner }.filter(seen).map { $0.boxFrame } }
         guard !before.isEmpty else { return nil }
-        let box = owner.frame
+        let box = owner.boxFrame
         return before.contains { $0.maxX <= box.minX + 0.5 || $0.minX >= box.maxX - 0.5 ? $0.minY < box.maxY && $0.maxY > box.minY : false }
     }
     #endif

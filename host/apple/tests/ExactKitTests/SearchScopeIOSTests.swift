@@ -66,7 +66,8 @@ final class SearchScopeIOSTests: XCTestCase {
         XCTAssertTrue(p.navigationHost.hiddenForBar(filter))
         XCTAssertFalse(p.segments.projects(filter.id), "no segmented control of its own")
         XCTAssertTrue(route.collapseScroll === list, "the list after it is the bar's collapse scroller")
-        until("it takes no room: the list starts where the tablist did") { abs(list.frame.minY - filter.frame.minY) < 0.5 }
+        // PROTO (safe-area design r2 §2.1): the list's view reaches the top edge (`SafeReach`); its laid-out box is compared
+        until("it takes no room: the list starts where the tablist did") { abs(list.boxFrame.minY - filter.boxFrame.minY) < 0.5 }
         // D4: the agent aims at a scope segment (its test id, read with accessibility on, below).
         XCTAssertNotNil(p.segments.drawn(try node(session, "filter-done")), "a tap aims at the scope segment")
         let tab = try node(session, "filter-done"), agent = Agent(session: session)

@@ -1,7 +1,9 @@
 // Which batches touch only the rows of a virtualized list or the content of a
 // scroll view (iOS, tvOS): a fling's fills build, move and drop rows many
 // times a second, a playhead redraws its strip eight, and the route and bar
-// projection reads nothing in them.
+// projection reads nothing in them. PROTO (UIKit-first measurement): nor in a
+// batch of geometry alone, which a moving edge sends every frame, or in the
+// rows of the route's named scroller, which stays the scroll view the bar follows.
 #if os(iOS) || os(tvOS)
 import UIKit
 
@@ -116,8 +118,7 @@ extension Presenter {
         /// Read with everything under it: a header's items and title, a
         /// tab's face, a tablist's segments, the Back control's title.
         func readsInside(_ node: NodeView) -> Bool {
-            node.props["semanticTag"] == "header" || ["tab", "tablist", "radiogroup"].contains(node.props["accessibilityRole"] ?? "")
-                || (node.props["accessibilityRole"] == "radio" && node.props["type"] != "radio")
+            node.props["semanticTag"] == "header" || ["tab", "tablist"].contains(node.props["accessibilityRole"] ?? "")
                 || (back != nil && node.props["id"] == back)
         }
         // The nodes the batch creates, and those of them the projection
