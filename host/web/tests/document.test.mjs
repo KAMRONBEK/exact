@@ -920,6 +920,7 @@ browserCheck('date and time controls take the field look', async () => {
 // the accent (near black under teal in light, near white under indigo in
 // dark). An authored `background-color` is the track's, as it is UIKit's
 // `trackTintColor` on iOS, and paints nothing of the box around the track.
+// The track is its own layer, so an authored border and shadow stay the box's.
 browserCheck('a determinate progress is the accent over the system fill in light and dark', async () => {
   const shell = SHIPPED;
   // As both targets write a role's accent: `accent-color` and the custom property beside it. A role is Apple's pair
@@ -933,7 +934,8 @@ browserCheck('a determinate progress is the accent over the system fill in light
   // A box of the look's `-exact-fill` over the same ground as the bars beside it: what a track is drawn in.
   const fill = (id) => `<div style="width:160px;margin:8px"><div id="${id}" style="height:16px;background-color:var(--exact-fill)"></div></div>`;
   const html = shell.replace('<div id="exact-root"></div>', `<div id="exact-root"><div style="color-scheme:light;background:#fff;padding:8px">${
-    bar('teal-light', teal)}${bar('indigo-light', indigo)}${bar('authored', teal + 'background-color:rgb(255, 0, 0)')}${fill('fill-light')}</div><div style="color-scheme:dark;background:#000;padding:8px">${
+    bar('teal-light', teal)}${bar('indigo-light', indigo)}${bar('authored', teal + 'background-color:rgb(255, 0, 0)')}${
+    bar('decorated', teal + 'box-sizing:border-box;height:16px;border:2px solid rgb(0, 0, 255);box-shadow:0 6px 0 rgb(0, 128, 0);background-color:rgb(255, 0, 0)')}${fill('fill-light')}</div><div style="color-scheme:dark;background:#000;padding:8px">${
     bar('teal-dark', teal)}${bar('indigo-dark', indigo)}${fill('fill-dark')}</div></div>`).replace('<script type="module" src="./glue.js"></script>', '');
   await withDocument('/', async tab => {
     const page = await tab(true);
@@ -957,6 +959,10 @@ browserCheck('a determinate progress is the accent over the system fill in light
     near(at('authored', 120, 8), [255, 0, 0], 'the authored background is the track');
     near(at('authored', 120, 2), [255, 255, 255], 'and none of the box above it');
     near(at('authored', 20, 8), rgb(tealPair[0]), 'the bar over it');
+    near(at('decorated', 120, 8), [255, 0, 0], 'a bordered bar has its track');
+    near(at('decorated', 120, 4), [255, 255, 255], 'and no box inside its border');
+    for (const y of [1, 15]) near(at('decorated', 120, y), [0, 0, 255], `the authored border at ${y}`);
+    near(at('decorated', 120, 19), [0, 128, 0], 'the authored shadow under the box');
   }, {html});
 });
 
