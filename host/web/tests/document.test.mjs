@@ -918,7 +918,8 @@ browserCheck('date and time controls take the field look', async () => {
 // accent's over a track of the system fill, the same fill whatever the
 // accent, in light and dark. Chrome's own takes its track by contrast with
 // the accent (near black under teal in light, near white under indigo in
-// dark). An authored background is the box's, under the track, as on iOS.
+// dark). An authored `background-color` is the track's, as it is UIKit's
+// `trackTintColor` on iOS, and paints nothing of the box around the track.
 browserCheck('a determinate progress is the accent over the system fill in light and dark', async () => {
   const shell = SHIPPED;
   // As both targets write a role's accent: `accent-color` and the custom property beside it. A role is Apple's pair
@@ -930,9 +931,9 @@ browserCheck('a determinate progress is the accent over the system fill in light
   const teal = accent('system-teal', tealPair), indigo = accent('system-indigo', indigoPair);
   const bar = (id, style) => `<progress id="${id}" value="0.25" max="1" style="width:160px;margin:8px;${style}"></progress>`;
   // A box of the look's `-exact-fill` over the same ground as the bars beside it: what a track is drawn in.
-  const fill = (id, under = '') => `<div style="width:160px;margin:8px;${under}"><div id="${id}" style="height:16px;background-color:var(--exact-fill)"></div></div>`;
+  const fill = (id) => `<div style="width:160px;margin:8px"><div id="${id}" style="height:16px;background-color:var(--exact-fill)"></div></div>`;
   const html = shell.replace('<div id="exact-root"></div>', `<div id="exact-root"><div style="color-scheme:light;background:#fff;padding:8px">${
-    bar('teal-light', teal)}${bar('indigo-light', indigo)}${bar('authored', teal + 'background-color:rgb(255, 0, 0)')}${fill('fill-light')}${fill('fill-red', 'background-color:rgb(255, 0, 0)')}</div><div style="color-scheme:dark;background:#000;padding:8px">${
+    bar('teal-light', teal)}${bar('indigo-light', indigo)}${bar('authored', teal + 'background-color:rgb(255, 0, 0)')}${fill('fill-light')}</div><div style="color-scheme:dark;background:#000;padding:8px">${
     bar('teal-dark', teal)}${bar('indigo-dark', indigo)}${fill('fill-dark')}</div></div>`).replace('<script type="module" src="./glue.js"></script>', '');
   await withDocument('/', async tab => {
     const page = await tab(true);
@@ -944,17 +945,17 @@ browserCheck('a determinate progress is the accent over the system fill in light
     const at = (id, dx, dy) => { const [x, y] = boxes[id], i = (Math.round(y + dy) * shot.width + Math.round(x + dx)) * 4; return [...shot.data.slice(i, i + 3)]; };
     const near = (seen, want, what) => expect(seen.every((c, i) => Math.abs(c - want[i]) <= 3), `${what}: ${seen} for ${want}`).toBe(true);
     for (const id of Object.keys(boxes)) expect(boxes[id].slice(2)).toEqual([160, 16]);
-    // The fill over white, over black and over the authored red, as the boxes of it show; it is a fill, so neither ground.
-    const [light, dark, red] = ['fill-light', 'fill-dark', 'fill-red'].map((id) => at(id, 80, 8));
-    expect([light.join() === '255,255,255', dark.join() === '0,0,0', red.join() === '255,0,0']).toEqual([false, false, false]);
+    // The fill over white and over black, as the boxes of it show; it is a fill, so neither ground.
+    const [light, dark] = ['fill-light', 'fill-dark'].map((id) => at(id, 80, 8));
+    expect([light.join() === '255,255,255', dark.join() === '0,0,0']).toEqual([false, false]);
     for (const id of ['teal-light', 'indigo-light']) { near(at(id, 120, 8), light, `${id} track`); near(at(id, 120, 2), [255, 255, 255], `${id} above its track`); }
     for (const id of ['teal-dark', 'indigo-dark']) { near(at(id, 120, 8), dark, `${id} track`); near(at(id, 120, 2), [0, 0, 0], `${id} above its track`); }
     near(at('teal-light', 20, 8), rgb(tealPair[0]), 'teal bar in light');
     near(at('indigo-light', 20, 8), rgb(indigoPair[0]), 'indigo bar in light');
     near(at('teal-dark', 20, 8), rgb(tealPair[1]), 'teal bar in dark');
     near(at('indigo-dark', 20, 8), rgb(indigoPair[1]), 'indigo bar in dark');
-    near(at('authored', 120, 2), [255, 0, 0], 'the authored background is the box');
-    near(at('authored', 120, 8), red, 'the track over it');
+    near(at('authored', 120, 8), [255, 0, 0], 'the authored background is the track');
+    near(at('authored', 120, 2), [255, 255, 255], 'and none of the box above it');
     near(at('authored', 20, 8), rgb(tealPair[0]), 'the bar over it');
   }, {html});
 });

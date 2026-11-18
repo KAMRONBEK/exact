@@ -1,0 +1,33 @@
+component LabelButtons
+  state sets = 3
+  state editing = false
+  action edit
+    editing = !editing
+  action remove
+    sets = sets - 1
+  view
+    column width="100%" height="100%"
+      list appearance="auto" listStyle="inset-grouped" flex=1 min-height=0 testId="list"
+        section
+          header
+            text "Série 1"
+            button press=edit testId="edit"
+              text (editing ? "Done" : "Edit")
+            button press=remove aria-label="Delete série 1" testId="delete"
+              image "symbol:delete"
+          text "Run"
+          footer
+            text `${sets} left`
+            button press=remove testId="fewer"
+              text "Fewer"
+        section
+          header
+            text "Laps"
+          for i in range(30) key=i
+            text `Lap ${i}`
+        section
+          header
+            text "Last"
+            button press=remove testId="far"
+              text "Far"
+          text "Walk"

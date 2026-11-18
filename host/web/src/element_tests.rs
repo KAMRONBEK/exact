@@ -124,7 +124,7 @@ fn a_progress_with_a_value_is_htmls_progress_element() {
     // gives the element the intrinsic size the kernel measures, `10em` by
     // `1em`, and no automatic minimum (LLP 1115.000 D10.2).
     assert!(include_str!("../index.html").contains(
-        "progress { display: block; appearance: none; border: none; background: none; contain: size; contain-intrinsic-size: 10em 1em; min-width: 0; }"
+        "progress { display: block; appearance: none; border: none; background: var(--exact-fill); clip-path: inset(calc(50% - 2px) 0 round 2px); contain: size; contain-intrinsic-size: 10em 1em; min-width: 0; }"
     ));
 }
 

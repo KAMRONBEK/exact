@@ -2504,7 +2504,11 @@ own: `UIProgressView` (`.default`) on iOS, tinted by `accent-color` (UIKit's
 tint where none is said); a determinate `NSProgressIndicator` bar on macOS
 (small, regular where the box holds its 20 points; AppKit gives it no tint);
 the browser's `<progress>` on the web; and on Linux a painted bar, a 4-pixel
-track filled with the accent. `max` is 1 unless said (a number above 0), and
+track filled with the accent. A `background-color` on it is its track's colour
+(UIKit's `trackTintColor`; the platform's track where none is said) and paints
+no box around the bar: write it where the bar stands on a coloured ground the
+platform's track does not show against. AppKit's bar takes no colour, so on
+macOS the background paints the element's box as on any other element. `max` is 1 unless said (a number above 0), and
 `value` is held to 0 and `max`, as HTML holds it; both take numbers, bound or
 literal. It is as wide as what holds it and `1em` tall: the compiler gives it
 `width: 100%`, as it gives `input type="range"`, since neither platform control

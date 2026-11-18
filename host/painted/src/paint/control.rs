@@ -698,18 +698,35 @@ fn material_spinner(
     }
 }
 
+/// The track colour a determinate `progress` takes from its box: its
+/// authored `background-color` as the box presents it (a transition's value
+/// included), which the box then does not paint, as UIKit's
+/// `trackTintColor` colours the track alone. `None` leaves the look's track.
+pub(super) fn track(node: &NodeRef<'_>, background: &mut [u8; 4]) -> Option<[u8; 4]> {
+    let bar = node.node_type == exact_kernel::NodeType::Control
+        && node.props.str(PropId::Type) == Some("progress")
+        && node.props.get(PropId::Value).is_some();
+    (bar && node
+        .style
+        .written
+        .has(exact_kernel::StyleId::BackgroundColor))
+    .then(|| std::mem::take(background))
+}
+
 /// A determinate `progress` (LLP 1116 D8): UIKit's progress view, drawn as
 /// the range's track is here — a 4 px pill across the content box, centred,
-/// in the system fill, and the accent to the value from the leading edge.
+/// in the system fill or the author's `track`, and the accent to the value
+/// from the leading edge.
 pub(super) fn progress_bar(
     backend: &mut dyn Backend,
     node: &NodeRef<'_>,
     content: Rect4,
     ts: Transform,
     dark: bool,
+    track: Option<[u8; 4]>,
 ) {
     if look::neutral() {
-        return neutral::progress_bar(backend, node, content, ts, dark);
+        return neutral::progress_bar(backend, node, content, ts, dark, track);
     }
     let (x, y, w, h) = content;
     let t = 4f32.min(h);
@@ -721,11 +738,11 @@ pub(super) fn progress_bar(
         == exact_kernel::Direction::Rtl;
     let filled = w * fraction;
     let bar = |from: f32, width: f32| Shape::new((from, y + (h - t) / 2.0, width, t), [t / 2.0; 4]);
-    let rest = if dark {
+    let rest = track.unwrap_or(if dark {
         [0x78, 0x78, 0x80, 0x5c]
     } else {
         [0x78, 0x78, 0x80, 0x33]
-    };
+    });
     backend.fill(&bar(x, w), rest, ts);
     if filled > 0.0 {
         let from = if rtl { x + w - filled } else { x };

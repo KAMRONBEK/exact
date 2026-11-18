@@ -128,6 +128,7 @@ mod glass_tint;
 mod grouped_action;
 mod grouped_card;
 mod grouped_choice;
+mod grouped_label_buttons;
 mod grouped_list;
 mod grouped_margins;
 mod grouped_page;

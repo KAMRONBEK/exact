@@ -7,7 +7,9 @@
 // "In progress"), named by the node's `aria-label`.
 // @ref LLP 1116 D8 — with a `value`, it is UIKit's progress view instead
 // (`.default`), across the content box at its own height, tinted by the
-// node's `accent-color` (none leaves UIKit's tint), at HTML's fraction.
+// node's `accent-color` (none leaves UIKit's tint), at HTML's fraction. A
+// `background-color` on it is its track's (`trackTintColor`), not its box's
+// (`applyBoxLayer`); none leaves UIKit's track.
 #if os(iOS) || os(tvOS)
 import UIKit
 
@@ -95,6 +97,7 @@ extension ControlHost {
         let live = Set(owners.map(\.id))
         for id in Array(bars.keys) where !live.contains(id) && !leaving.contains(id) {
             bars.removeValue(forKey: id)?.removeFromSuperview()
+            presenter.views[id]?.applyBoxLayer() // a box again, which paints its background
         }
         for owner in owners {
             let fresh = bars[owner.id] == nil
@@ -111,6 +114,8 @@ extension ControlHost {
             assign(bar, \.frame, CGRect(x: box.minX, y: box.midY - height / 2, width: box.width, height: height))
             // UIKit draws the progress in the bar's tint and dims it; a share of it is the progress's colour
             assign(bar, \.progressTintColor, owner.accentShare)
+            assign(bar, \.trackTintColor, owner.uiColor("background_color"))
+            if fresh { owner.applyBoxLayer() }
             assign(bar, \.isHidden, owner.cssVisibilityHidden)
             assign(bar, \.accessibilityIdentifier, owner.props["testId"])
             assign(bar, \.accessibilityLabel, owner.props["accessibilityLabel"])

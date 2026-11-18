@@ -1347,7 +1347,9 @@ opacity and transforms remain admitted. `accent-color` tints the styles that sup
 
 A settings screen is a grouped list: a `list` whose `appearance` is the literal
 `auto`. Its children are `section`s. A section's first child may be a `header`
-and its last a `footer`, each holding a `text`; everything between is its rows.
+and its last a `footer`, each holding a `text` and, after it, any `button`s the
+list shows at the label's trailing edge (an Edit beside a section's title);
+everything between is its rows.
 A row is read by its shape: an optional leading `image "symbol:…"`, a `text`
 title, an optional second `text` (a value) or a `column` of two texts (a
 subtitle), and an optional trailing accessory — a `forward-chevron` or

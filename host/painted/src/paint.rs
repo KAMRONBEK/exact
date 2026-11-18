@@ -1080,6 +1080,7 @@ impl Painter {
         if self.bare(node) {
             paint.background = [0; 4];
         }
+        let track = control::track(node, &mut paint.background);
         self.clipped = Some((node.id, paint.background));
         let mut geometry = paint.geometry(rect);
         // @ref LLP 1063 — a layout transition's size is the surface's alone.
@@ -1206,7 +1207,8 @@ impl Painter {
             }
             NodeType::Control if node.props.str(PropId::Type) == Some("progress") => {
                 if node.props.get(PropId::Value).is_some() {
-                    control::progress_bar(self.backend.as_mut(), node, content, ts, self.dark)
+                    let backend = self.backend.as_mut();
+                    control::progress_bar(backend, node, content, ts, self.dark, track)
                 } else {
                     control::progress(self.backend.as_mut(), node, content, ts, self.dark)
                 }

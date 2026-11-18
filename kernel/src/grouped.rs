@@ -67,6 +67,12 @@ pub struct GroupedSection {
     pub header_look: TextLook,
     /// How its footer's text is set where its author said so.
     pub footer_look: TextLook,
+    /// The buttons its `header` shows after its text, in order: the
+    /// author's own controls, which the platform's list seats at the
+    /// header's trailing edge.
+    pub header_buttons: Vec<ViewId>,
+    /// The buttons its `footer` shows after its text.
+    pub footer_buttons: Vec<ViewId>,
     /// Its rows, in order.
     pub rows: Vec<GroupedRow>,
     /// Whether its rows sit on a card: false when the section's group has a
@@ -381,6 +387,19 @@ impl Kernel {
             nodes(n)
                 .iter()
                 .find_map(|t| text_of(t).map(|text| (text, TextLook::of(t))))
+                .map_or((None, TextLook::default()), |(t, l)| (Some(t), l))
+        };
+        // A label's shown children that are not its text: Contract admits
+        // only buttons there (`contract/lower/src/grouped/label.rs`).
+        let buttons = |n: &NodeRef<'_>| -> Vec<ViewId> {
+            let shown = nodes(n);
+            let button = |c: &&NodeRef<'_>| c.node_type != NodeType::Text;
+            shown.iter().filter(button).map(|c| c.id).collect()
+        };
+        // A label of buttons whose text is blank is still a label: the
+        // platform's list makes one only where a section has the text.
+        let named = |text: Option<String>, buttons: &[ViewId]| {
+            text.or_else(|| (!buttons.is_empty()).then(String::new))
         };
         let shown = nodes(&list);
         let sections = shown
@@ -394,12 +413,16 @@ impl Kernel {
                 for part in nodes(section) {
                     match part.props.str(PropId::SemanticTag) {
                         Some("header") => {
-                            (out.header, out.header_look) = label(&part)
-                                .map_or((None, TextLook::default()), |(t, l)| (Some(t), l))
+                            out.header_buttons = buttons(&part);
+                            let (text, look) = label(&part);
+                            (out.header, out.header_look) =
+                                (named(text, &out.header_buttons), look);
                         }
                         Some("footer") => {
-                            (out.footer, out.footer_look) = label(&part)
-                                .map_or((None, TextLook::default()), |(t, l)| (Some(t), l))
+                            out.footer_buttons = buttons(&part);
+                            let (text, look) = label(&part);
+                            (out.footer, out.footer_look) =
+                                (named(text, &out.footer_buttons), look);
                         }
                         _ => {
                             out.card_view = part.id;

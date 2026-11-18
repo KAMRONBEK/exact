@@ -5,7 +5,7 @@ use contract_syntax::{Attr, Expr, Node};
 
 /// LLP 1116.014 D1: the edit that puts a `header` or `footer` where UIKit
 /// draws one. Its words may change (`text (on ? "A" : "B")`); what comes and
-/// goes is a section, since a `header` holds one `text` and nothing else.
+/// goes is a section, since a `header` holds one `text` before its buttons.
 pub(super) fn stray_message(stray: &Stray) -> String {
     let (tag, place) = (
         &stray.tag,
@@ -46,7 +46,7 @@ fn texts_chosen(node: &Node) -> Option<usize> {
 }
 
 /// LLP 1116.018: the edit for a `header` or `footer` that holds more than one
-/// `text`. A repair told only the rule moved or dropped the status a chain of
+/// `text` before its buttons. A repair told only the rule moved or dropped the status a chain of
 /// texts showed; this names the edit that keeps every arm.
 pub(super) fn label(tag: &str, children: &[Node]) -> String {
     match children {
@@ -57,10 +57,10 @@ pub(super) fn label(tag: &str, children: &[Node]) -> String {
             None if matches!(chain, Node::When { otherwise, .. } if otherwise.is_empty()) => format!(
                 "a `{tag}` shown only while a condition holds is two `section`s under that `if`, the same rows in each and the `{tag}` in one: UIKit draws a section's `{tag}` as one string, and a section with one is spaced differently"
             ),
-            None => format!("a section's `{tag}` holds one `text`, the words UIKit draws there"),
+            None => format!("a section's `{tag}` holds one `text`, the words UIKit draws there, before any `button` it shows at its trailing edge"),
         },
         _ => format!(
-            "a section's `{tag}` holds one `text`, the words UIKit draws there: join its texts into one, or move the others into the section's rows"
+            "a section's `{tag}` holds one `text`, the words UIKit draws there, and after it only `button`s, which it shows at its trailing edge: join its texts into one and write it first, or move the others into the section's rows"
         ),
     }
 }

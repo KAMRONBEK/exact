@@ -340,13 +340,17 @@ extension NodeView {
         return max(1, (width * scale + 0.001).rounded(.down)) / scale
     }
 
+    /// Whether its `background-color` is its control's own, not its box's:
+    /// a segmented control's ground, a progress bar's track.
+    var backgroundIsControls: Bool { presenter?.segments.control(of: id) != nil || presenter?.controls.bars[id] != nil }
+
     /// The box onto the layer, or `boxDrawn` when `draw(_:)` must paint it.
     /// The web's box: background and border inside the border box, a
     /// uniform border following the curve, the radius clipping children only
     /// where the overflow clips.
     func applyBoxLayer() {
         defer { syncEllipticalClip(); applyColorRanges() }
-        let authored = presenter?.segments.control(of: id) == nil && !groundIsSheets ? cgColor("background_color") : nil
+        let authored = !backgroundIsControls && !groundIsSheets ? cgColor("background_color") : nil
         let ground = authored == nil ? fieldGround : nil
         let background = authored ?? ground
         let fill = background.flatMap { $0.alpha > 0 ? $0 : nil }

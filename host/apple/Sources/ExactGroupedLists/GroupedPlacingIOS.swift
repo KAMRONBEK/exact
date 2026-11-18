@@ -45,8 +45,8 @@ extension GroupedListHost {
     }
 
     func cellFrame(of view: NodeView, at place: GridPlace) -> CGRect? {
-        guard presenter.views[view.id] === view, lists.values.contains(where: { $0.carried[view.id] != nil }) else { return nil }
-        return GroupedListView.cellFrame(place, scale: presenter.gridScale)
+        guard presenter.views[view.id] === view, let list = lists.values.first(where: { $0.carried[view.id] != nil }) else { return nil }
+        return list.seatFrame(of: view, at: place) ?? GroupedListView.cellFrame(place, scale: presenter.gridScale)
     }
 }
 

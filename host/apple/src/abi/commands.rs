@@ -611,7 +611,8 @@ impl<D: DataSource> Bridge<D> {
 
     /// A grouped list's sections and rows (`exact_grouped_list`, LLP 1084
     /// D4), as JSON in the output buffer: `{"style","sections":[{"view",
-    /// "header","footer","headerLook","footerLook","card","spaceAbove","rows":[{"view","custom","symbol",("symbolPath","symbolViewBox": an
+    /// "header","footer","headerLook","footerLook","headerButtons","footerButtons" (the views after each label's
+    /// text),"card","spaceAbove","rows":[{"view","custom","symbol",("symbolPath","symbolViewBox": an
     /// svg-only icon's, `icon_path::push_json`),"title",
     /// "secondary","subtitle","accessory","accessoryView","target","pressable","action",
     /// "checked","destructive","disabled","authoredEdge","nextAuthoredTop","titleLook","secondaryLook"}]}],"spaceBelow"}`,
@@ -689,6 +690,10 @@ impl<D: DataSource> Bridge<D> {
                     opt(&s.footer, &mut json);
                     look(",\"headerLook\":", &s.header_look, &mut json);
                     look(",\"footerLook\":", &s.footer_look, &mut json);
+                    json.push_str(&format!(
+                        ",\"headerButtons\":{:?},\"footerButtons\":{:?}",
+                        s.header_buttons, s.footer_buttons
+                    ));
                     json.push_str(&format!(
                         ",\"card\":{},\"cardView\":{}",
                         s.card, s.card_view

@@ -954,10 +954,12 @@ mod tests {
     /// LLP 1116 D8: a determinate progress is painted as UIKit's progress
     /// view: a 4 px track across its box, centred, filled with the accent
     /// to its value; as wide as its column and `1em` tall (LLP 1115.000
-    /// D10.2: 160 by 16 before, HTML's box); a press is its ancestor's.
+    /// D10.2: 160 by 16 before, HTML's box); a press is its ancestor's. An
+    /// authored `background-color` is the track's and paints none of the box
+    /// (expo/exact#836).
     #[test]
     fn a_progress_bar_paints_its_value_in_the_accent_and_takes_no_press() {
-        let app = "component App\n  view\n    column width=200 height=100 background-color=\"#ffffff\" align-items=\"flex-start\"\n      progress testId=\"bar\" value=3 max=4 accent-color=\"#ff0000\"\n";
+        let app = "component App\n  view\n    column width=200 height=100 background-color=\"#ffffff\" align-items=\"flex-start\"\n      progress testId=\"bar\" value=3 max=4 accent-color=\"#ff0000\"\n      progress testId=\"tracked\" value=3 max=4 accent-color=\"#ff0000\" background-color=\"#0000ff\"\n";
         let (mut p, error) = super::Presenter::boot_with(
             &crate::test_plan(app),
             (),
@@ -987,6 +989,10 @@ mod tests {
         let rest = at(180.0, 8.0);
         assert!(rest[0] < 0xff && rest[0] == rest[1], "the track: {rest:?}");
         assert_eq!(at(60.0, 2.0), [0xff, 0xff, 0xff], "above the track");
+        // The second bar, a box below the first.
+        assert_eq!(at(60.0, h + 8.0), [0xff, 0, 0], "its value");
+        assert_eq!(at(180.0, h + 8.0), [0, 0, 0xff], "its authored track");
+        assert_eq!(at(180.0, h + 2.0), [0xff; 3], "none of its box");
         let now = p.host().now();
         assert!(
             !p.toggle_control(bar, now),

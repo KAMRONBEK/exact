@@ -236,6 +236,28 @@ final class ProgressIOSTests: XCTestCase {
         XCTAssertNotNil(p.controls.spinners[2], "no value: the indicator")
     }
 
+    /// A `background-color` on a determinate `progress` is its track's
+    /// (`UIProgressView.trackTintColor`), not its box's; none leaves UIKit's
+    /// track. Without its value the node is a box again, which paints it
+    /// (expo/exact#836).
+    func testABackgroundColourIsTheTrackNotTheBox() throws {
+        let blue: [String: Any] = ["accent_color": [255, 255, 255, 255], "background_color": [0, 0, 255, 255]]
+        let p = presenter(box(1) + bar(2, ["value": "0.25"]) + bar(3, ["value": "0.5"], y: 40)
+                          + [["op": "style", "id": 2, "style": blue],
+                             ["op": "children", "id": 1, "ids": [2, 3]], ["op": "roots", "ids": [1]]])
+        let tracked = try XCTUnwrap(p.controls.bars[2]), node = try XCTUnwrap(p.views[2])
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        try XCTUnwrap(tracked.trackTintColor).getRed(&r, green: &g, blue: &b, alpha: &a)
+        XCTAssertEqual([r, g, b, a], [0, 0, 1, 1])
+        XCTAssertEqual(node.layer.backgroundColor?.alpha ?? 0, 0, "the box paints none of it")
+        XCTAssertNil(try XCTUnwrap(p.controls.bars[3]).trackTintColor, "unsaid: UIKit's track")
+        p.apply(wireBatch([["op": "style", "id": 2, "style": ["accent_color": [255, 255, 255, 255]]]]))
+        XCTAssertNil(tracked.trackTintColor, "taken away: UIKit's track again")
+        p.apply(wireBatch([["op": "style", "id": 2, "style": blue], ["op": "props", "id": 2, "clear": ["value"]]]))
+        XCTAssertNil(p.controls.bars[2])
+        XCTAssertEqual(node.layer.backgroundColor?.alpha, 1, "an indeterminate progress is a box, which paints its background")
+    }
+
     func testItStopsWhenHiddenOrRemoved() throws {
         try XCTSkipIf(ExactEnv.agentFreezes, "the agent's frozen clock holds every indicator")
         let p = presenter(box(1) + progress(2) + [["op": "children", "id": 1, "ids": [2]], ["op": "roots", "ids": [1]]])

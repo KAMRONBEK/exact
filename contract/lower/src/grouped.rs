@@ -1,10 +1,11 @@
 //! A grouped list (LLP 1084): `list appearance="auto"`. Its children are
 //! `section`s; a section's leading `header` and trailing `footer` are its
-//! texts and everything between them its rows. Contract checks that shape
-//! and writes the list's look as a user-agent sheet: rows prepended to the
-//! author's, so a class or an attribute of the author's replaces any of
-//! them. The web, macOS and Linux draw that sheet; iOS draws the platform's
-//! own list over the same nodes (`GroupedListIOS.swift`).
+//! texts, each with the buttons after it, and everything between them its
+//! rows. Contract checks that shape and writes the list's look as a
+//! user-agent sheet: rows prepended to the author's, so a class or an
+//! attribute of the author's replaces any of them. The web, macOS and Linux
+//! draw that sheet; iOS draws the platform's own list over the same nodes
+//! (`GroupedListIOS.swift`).
 //!
 //! The sheet holds no number of a platform's look (LLP 1115.002 D6, D8.4):
 //! each is a metric of the kernel's schema (`metrics`, a column a
@@ -24,6 +25,7 @@
 pub(crate) mod actions;
 mod cell;
 mod inputs;
+mod label;
 mod lines;
 mod messages;
 pub(crate) use messages::folds;
@@ -426,7 +428,7 @@ fn section(
             stray.span,
         );
     }
-    // UIKit draws a header or footer as one text.
+    // UIKit draws a header or footer as one text, with buttons after it.
     for label in children[..head]
         .iter()
         .chain(&children[children.len() - tail..])
@@ -438,7 +440,7 @@ fn section(
             ..
         } = label
         {
-            if !matches!(children.as_slice(), [only] if is(only, "text")) {
+            if !label::admitted(children) {
                 let message = messages::label(tag, children);
                 return err("lower-grouped-list", message, *span);
             }
@@ -598,12 +600,13 @@ fn section(
         if !footer {
             rows.push(m("font-weight", "header-weight", span));
         }
+        let children = label::beside(children, &mut rows, span);
         rows.extend(attrs.iter().cloned());
         Node::Element {
             tag: tag.clone(),
             positional: positional.clone(),
             attrs: rows,
-            children: children.clone(),
+            children,
             span,
             instance: *instance,
         }

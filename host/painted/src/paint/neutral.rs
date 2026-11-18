@@ -236,14 +236,15 @@ pub(super) fn spinner(
     }
 }
 
-/// A determinate `progress`: a 4 px pill across the box in the fill role,
-/// the accent to the value from the inline start.
+/// A determinate `progress`: a 4 px pill across the box in the fill role
+/// or the author's `track`, the accent to the value from the inline start.
 pub(super) fn progress_bar(
     backend: &mut dyn Backend,
     node: &NodeRef<'_>,
     content: Rect4,
     ts: Transform,
     dark: bool,
+    track: Option<[u8; 4]>,
 ) {
     let (x, y, w, h) = content;
     let t = look::px(metric::RANGE_TRACK, em(node)).min(h);
@@ -252,7 +253,8 @@ pub(super) fn progress_bar(
     }
     let filled = w * exact_kernel::Progress::of(node.props).fraction() as f32;
     let bar = |from: f32, width: f32| Shape::new((from, y + (h - t) / 2.0, width, t), [t / 2.0; 4]);
-    backend.fill(&bar(x, w), role("-exact-fill", dark), ts);
+    let rest = track.unwrap_or_else(|| role("-exact-fill", dark));
+    backend.fill(&bar(x, w), rest, ts);
     if filled > 0.0 {
         let from = if rtl(node) { x + w - filled } else { x };
         let (accent, _) = look::accents(super::control::accent(node, dark), dark);

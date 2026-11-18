@@ -146,6 +146,9 @@ struct GroupedListModel: Equatable {
         /// The space above it when the author changed a margin there (the
         /// web's, collapsed); nil keeps UIKit's gap (`Kernel::grouped_list`).
         var spaceAbove: CGFloat?
+        /// The buttons after its header's and its footer's text (`GroupedLabelButtonsIOS.swift`).
+        var headerButtons: [UInt32] = []
+        var footerButtons: [UInt32] = []
     }
     var style = "inset-grouped"
     var sections: [Section] = []
@@ -182,10 +185,12 @@ struct GroupedListModel: Equatable {
                 known[view] = (json, row)
                 return row
             }
+            let buttons = { (key: String) in (s[key] as? [NSNumber] ?? []).map(\.uint32Value) }
             return Section(view: view, header: s["header"] as? String, footer: s["footer"] as? String,
                            headerLook: Look(json: s["headerLook"]), footerLook: Look(json: s["footerLook"]), rows: rows,
                            card: s["card"] as? Bool ?? true, cardView: id(s["cardView"]),
-                           spaceAbove: (s["spaceAbove"] as? NSNumber).map { CGFloat($0.doubleValue) })
+                           spaceAbove: (s["spaceAbove"] as? NSNumber).map { CGFloat($0.doubleValue) },
+                           headerButtons: buttons("headerButtons"), footerButtons: buttons("footerButtons"))
         }
         spaceBelow = (o["spaceBelow"] as? NSNumber).map { CGFloat($0.doubleValue) }
     }
@@ -333,7 +338,7 @@ final class GroupedListHost: GroupedLists {
             }
             at = view.superview
         }
-        return nil
+        return lists.values.first { $0.labelPath(holding: node) != nil }.map { $0.reveal(label: node, port: port($0.collection)) }
     }
 
     /// Where a real finger aimed at `node` lands, for a row this host draws
@@ -563,10 +568,10 @@ final class GroupedListView: NSObject, UICollectionViewDelegate {
         collection.delegate = self
         collection.accessibilityIdentifier = owner.props["testId"]
         let cell = UICollectionView.CellRegistration<GroupedCell, UInt32> { [unowned self] cell, _, id in configure(cell, id) }
-        let header = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(elementKind: UICollectionView.elementKindSectionHeader) { [unowned self] view, _, path in
+        let header = UICollectionView.SupplementaryRegistration<GroupedLabelCell>(elementKind: UICollectionView.elementKindSectionHeader) { [unowned self] view, _, path in
             label(view, header: true, section: path.section)
         }
-        let footer = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(elementKind: UICollectionView.elementKindSectionFooter) { [unowned self] view, _, path in
+        let footer = UICollectionView.SupplementaryRegistration<GroupedLabelCell>(elementKind: UICollectionView.elementKindSectionFooter) { [unowned self] view, _, path in
             label(view, header: false, section: path.section)
         }
         source = GroupedSource(collectionView: collection) { view, path, id in
@@ -584,8 +589,9 @@ final class GroupedListView: NSObject, UICollectionViewDelegate {
     }
 
     /// A section's header or footer: UIKit's, in the author's colour and
-    /// font where the author gave its text one (LLP 1116.003 D7).
-    private func label(_ view: UICollectionViewListCell, header: Bool, section index: Int) {
+    /// font where the author gave its text one (LLP 1116.003 D7), with the
+    /// buttons after its text at its trailing edge.
+    private func label(_ view: GroupedLabelCell, header: Bool, section index: Int) {
         let s = section(at: index)
         var c = view.defaultContentConfiguration()
         // UIKit's header and footer ink is the secondary label: the theme's where it replaces it.
@@ -604,6 +610,7 @@ final class GroupedListView: NSObject, UICollectionViewDelegate {
         }
         view.contentConfiguration = c
         view.marginsIgnoreSafeArea()
+        seat(view, header: header, section: index)
     }
 
     /// The theme's ground for the list's appearance where it replaces the platform's (LLP 1095 D4): a plain list's is
@@ -778,7 +785,7 @@ final class GroupedListView: NSObject, UICollectionViewDelegate {
         if texts {
             for kind in [UICollectionView.elementKindSectionHeader, UICollectionView.elementKindSectionFooter] {
                 for path in collection.indexPathsForVisibleSupplementaryElements(ofKind: kind) {
-                    guard let view = collection.supplementaryView(forElementKind: kind, at: path) as? UICollectionViewListCell else { continue }
+                    guard let view = collection.supplementaryView(forElementKind: kind, at: path) as? GroupedLabelCell else { continue }
                     label(view, header: kind == UICollectionView.elementKindSectionHeader, section: path.section)
                 }
             }
@@ -840,6 +847,7 @@ final class GroupedListView: NSObject, UICollectionViewDelegate {
             carry(id, into: cell)
             interact(cell, id)
         }
+        seatLabels()
         // A switch shows its control as it now stands, which a batch may
         // change without changing the row.
         #if !os(tvOS)
@@ -880,6 +888,7 @@ final class GroupedListView: NSObject, UICollectionViewDelegate {
             return source.indexPath(for: row.view).flatMap { collection.layoutAttributesForItem(at: $0)?.frame }
         }
         if node.isDescendant(of: collection) { return node.convert(node.bounds, to: collection) }
+        if let label = labelPath(holding: node) { return collection.layoutAttributesForSupplementaryElement(ofKind: label.kind, at: label.path)?.frame }
         var at: UIView? = node
         while let view = at {
             if let n = view as? NodeView, let row = rows[n.id] {
@@ -1026,13 +1035,20 @@ final class GroupedListView: NSObject, UICollectionViewDelegate {
     /// it is measured again after each move, at most three times.
     func reveal(_ id: UInt32, inner: CGRect?, port: CGRect) -> Bool {
         guard let path = source.indexPath(for: id) else { return false }
+        return reveal(port: port) {
+            self.collection.layoutAttributesForItem(at: path).map { CGPoint(x: $0.frame.midX, y: $0.frame.minY + (inner?.midY ?? $0.frame.height / 2)) }
+        }
+    }
+
+    /// `middle`, a point of the list's content as it is laid out now,
+    /// scrolled to the middle of `port` when outside it.
+    func reveal(port: CGRect, middle: () -> CGPoint?) -> Bool {
         // The port as it sits in the bounds, which move as the list scrolls.
         let seen = port.offsetBy(dx: 0, dy: -collection.bounds.minY)
         var scrolled = false
         for _ in 0..<3 {
             collection.layoutIfNeeded()
-            guard let frame = collection.layoutAttributesForItem(at: path)?.frame else { break }
-            let mid = CGPoint(x: frame.midX, y: frame.minY + (inner?.midY ?? frame.height / 2))
+            guard let mid = middle() else { break }
             let now = seen.offsetBy(dx: 0, dy: collection.bounds.minY)
             if now.minY <= mid.y && mid.y < now.maxY { break }
             let i = collection.adjustedContentInset
