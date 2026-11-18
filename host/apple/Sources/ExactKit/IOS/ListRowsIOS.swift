@@ -2,8 +2,9 @@
 // scroll view (iOS, tvOS): a fling's fills build, move and drop rows many
 // times a second, a playhead redraws its strip eight, and the route and bar
 // projection reads nothing in them. PROTO (UIKit-first measurement): nor in a
-// batch of geometry alone, which a moving edge sends every frame, or in the
-// rows of the route's named scroller, which stays the scroll view the bar follows.
+// batch of geometry alone, which a moving edge sends every frame (its edge
+// frames, `far`, excepted: see `canSkipNavigationSync`), or in the rows of the
+// route's named scroller, which stays the scroll view the bar follows.
 #if os(iOS) || os(tvOS)
 import UIKit
 
