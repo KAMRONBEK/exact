@@ -318,6 +318,7 @@ final class NativeButtonMac: NSButton {
     func beginHeldContact() { heldContact = true }
     func cancelHeldContact() { if heldContact { cancelsHeldContact = true } }
     override func sendAction(_ action: Selector?, to target: Any?) -> Bool {
+        // Not re-entry: a contact the agent cancelled sends no action, as AppKit has no cancelled mouse-up
         guard !cancelsHeldContact else { return false }
         clicked = true
         owner?.pointerReleased(nil)

@@ -70,6 +70,7 @@ final class RouteSafeArea {
     }
 
     private func drain() {
+        // Re-entry: a caller sets `pending` first, which the running loop reads again before it ends
         guard !syncing else { return }
         syncing = true
         defer { syncing = false }
