@@ -41,3 +41,39 @@ export const routeAt = () => 0, busy = () => [];\n`);
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('native presentation changes reevaluate startup without a runtime commit', async () => {
+  const directory = mkdtempSync(resolve(ROOT, 'target/marks-dismiss-'));
+  cpSync(resolve(ROOT, 'host/web-js/marks.js'), resolve(directory, 'marks.js'));
+  cpSync(resolve(ROOT, 'host/web-js/held.js'), resolve(directory, 'held.js'));
+  writeFileSync(resolve(directory, 'rt.js'), `export const inflight = { n: 0 }, Resources = [], Mutations = [], clock = { timers: [] }, After = [], Hosts = {}, Routes = [];
+export const pending = ['spinner'], routeAt = () => 0, busy = () => pending;`);
+  const saved = new Map(['document', 'location', 'addEventListener', 'requestAnimationFrame', 'setTimeout', 'PerformanceObserver', 'exact'].map(k => [k, Object.getOwnPropertyDescriptor(globalThis, k)]));
+  const document = new EventTarget(), timers = [];
+  Object.assign(document, { querySelector: () => null, getElementById: () => null });
+  Object.assign(globalThis, {
+    document, location: { pathname: '/', search: '' }, addEventListener() {},
+    requestAnimationFrame: f => { f(performance.now()); },
+    setTimeout: (f, ms = 0) => { if (ms !== 30000) timers.push(f); },
+    PerformanceObserver: class { observe() {} },
+  });
+  const flush = async () => { for (let i = 0; i < 8; i++) { await Promise.resolve(); while (timers.length) timers.shift()(); } };
+  try {
+    const rt = await import(pathToFileURL(resolve(directory, 'rt.js')).href);
+    const { install } = await import(pathToFileURL(resolve(directory, 'marks.js')).href);
+    install([]).mounted();
+    await flush();
+    expect(globalThis.exact.observe().marks.present).toBeDefined();
+    expect(globalThis.exact.observe().outcome).toBeNull();
+    rt.pending.length = 0;
+    document.dispatchEvent(new Event('close'));
+    await flush();
+    expect(globalThis.exact.observe().outcome).toBe('declared');
+  } finally {
+    for (const [key, descriptor] of saved) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

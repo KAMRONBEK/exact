@@ -53,7 +53,7 @@ export function useLinks(l) {
 // The runtime's other parts, each its own file, which import what they share from here.
 import { clock, time, armedAt, agentMode, every, advance, drive, unpark, fire, pauseTimers } from './clock.js';
 import { Resources, Mutations, lateReaders, lateIdle } from './resources.js';
-import { Views } from './tree.js';
+import { Views, viewId } from './tree.js';
 import { KeyEvent, Propagating } from './events.js';
 import { Pres, Present, Sh, Input, pressFeedback } from './pieces.js';
 import { Booting, start, finishTaskScopes } from './mount.js';
@@ -959,9 +959,10 @@ export const inflight = { n: 0 };
 // A development build's only: the dev page's hold asks for it so, as a bundled page serves no rt.js; not on `exact`,
 // which says the runtime is up.
 if (DEVELOPMENT_STORE) globalThis.__exactPressFeedback = pressFeedback;
-// The elements the app marks `aria-busy="true"` (still loading), by test id else id.
+// The DOM owns rendering: closed dialogs, closed popovers and display:none ancestors hold no loading work.
+// Offscreen, transparent and visibility:hidden boxes still render. IDs match tree and layout (LLP 1012).
 export const busy = () =>
-  [...document.querySelectorAll('[aria-busy="true"]')].map(el => el.getAttribute('data-testid') ?? el.id);
+  [...document.querySelectorAll('[aria-busy="true"]')].filter(el => el.checkVisibility()).map(el => el.getAttribute('data-testid') ?? String(viewId(el)));
 export { gridValue } from './grid.js';
 export { Pc } from './lower.js';
 export { svgTransform, svgGeometry } from './svg-transform.js';

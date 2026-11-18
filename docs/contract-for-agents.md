@@ -6134,6 +6134,12 @@ until it equals the JSON literal; a miss fails naming the last value.
 `clock settle` also runs the clock to where the last running finite, unpaused
 transition or animation ends, firing the timers due on the way, so a test on a timer's grid moves with it,
 and on past a task due a commit later (`after(1, …)`, which an input or an answer armed) until none is.
+On Apple and the web's JS build, a rendered `aria-busy=true` element holds
+`clock settle` with `reason: "busy"`. An indeterminate `progress` (no `value`)
+is implicitly busy. The reply names each element by test id, else view id;
+`layout <id>` shows its source line. Closed dialogs, closed popovers and
+`display: none` subtrees do not hold settle or the launch loading ledger.
+An offscreen element still counts. The painted hosts have no busy settle reason.
 `clock data` takes clock ownership, including after `--timing platform`: it freezes
 platform timing at the current instant and leaves the clock held after the reply.
 It lands data without moving that clock: the data module's activation and

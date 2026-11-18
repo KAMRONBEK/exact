@@ -344,7 +344,8 @@ public final class ExactLaunch: NSObject {
               let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any], o["error"] == nil else { return nil }
         var out: [String] = []
         for key in ["requests", "streams", "awaiting", "oneShots", "busy"] {
-            out += (o[key] as? [String] ?? []).map { "\(key):\($0)" }
+            let items = o[key] as? [String] ?? []
+            out += (key == "busy" ? session.presenter.renderedBusy(items) : items).map { "\(key):\($0)" }
         }
         out += session.hostOutstanding.map { "host:\($0)" }
         return (out, o["failed"] as? [String] ?? [], o["poisoned"] as? Bool == true)

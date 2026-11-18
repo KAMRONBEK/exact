@@ -653,7 +653,9 @@ export async function open({
                   ? `clock settle stops at held device requests (${(r.tickets ?? []).map(t => '@' + t).join(' ')}); state shows them under pending; answer with tap @N <choice> or type @N <value>`
                   : r.reason === 'requests'
                     ? 'clock settle gave up on requests still in flight at its bound (20 s native); state shows them under pending, and logs a `request N` with no `fulfil N`'
-                    : `clock settle did not reach quiescence: ${JSON.stringify(r.world ?? r)}; state world:* busy shows moving values and busy reasons; state shows held input; logs shows reload/refusals`;
+                    : r.reason === 'busy'
+                      ? `clock settle stops while an element is aria-busy (still loading): ${(r.busy ?? []).join(', ')}, by test id, else view id. An indeterminate \`progress\` (no \`value\`) is aria-busy; \`layout <id>\` names its line in the source. It settles once the element stops being busy or is no longer rendered; closed dialogs, closed popovers and display:none subtrees do not count`
+                      : `clock settle did not reach quiescence: ${JSON.stringify(r.world ?? r)}; state world:* busy shows moving values and busy reasons; state shows held input; logs shows reload/refusals`;
       // an `after(1, …)` the settle's last commit armed
       const soon = req.settle && r.settled !== false ? await nextCommitTasks(s, r.clock) : [];
       if (soon.length && round < 16) {

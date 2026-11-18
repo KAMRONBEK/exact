@@ -31,6 +31,64 @@ final class ProgressContextsIOSTests: XCTestCase {
         }
     }
 
+    func testOnlyRenderedBusyNodesHoldSettleAndTheLaunchLedger() throws {
+        guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene else { throw missing("scene", "sheets require a scene window") }
+        ExactGroupedLists.install()
+        let s = ExactApp.shared.makeSession(label: "busy-settle")
+        session = s
+        let view = ExactView(session: s), host = UIViewController(), w = UIWindow(windowScene: scene)
+        w.frame = w.screen.bounds; w.rootViewController = host; w.makeKeyAndVisible(); host.view.addSubview(view)
+        window = w
+        XCTAssertNil(s.boot(plan: try fixturePlan("PROGRESS_CONTEXTS"), size: w.bounds.size).error)
+        view.frame = host.view.bounds; view.layoutIfNeeded()
+        if s.firstDrawMs == nil { s.firstDrawMs = ExactEnv.wall() }
+        let p = s.presenter, agent = Agent(session: s)
+        defer { p.menus.reset(); host.dismiss(animated: false) }
+        until("the custom row is carried") { (try? self.node(s, "busy-carried"))?.window != nil }
+        func busy() throws -> [String] {
+            try XCTUnwrap(ExactLaunch.ledger(s)).items.filter { $0.hasPrefix("busy:") }.sorted()
+        }
+        XCTAssertEqual(try busy(), ["busy:busy-carried", "busy:busy-start"])
+        // A carried row still follows display:none on its authored ancestor.
+        let route = try node(s, "route-start")
+        p.apply(wireBatch([["op": "style", "id": route.id, "style": ["display": "none"]]]))
+        XCTAssertEqual(try busy(), [])
+        XCTAssertEqual(agent.clock(["settle": true])["settled"] as? Bool, true)
+
+        p.dialogCommand("showModal", "form")
+        until("the dialog sheet is up") { host.presentedViewController != nil && !p.menus.inTransition }
+        XCTAssertEqual(try busy(), ["busy:busy-dialog"])
+        let opened = agent.clock(["settle": true])
+        XCTAssertEqual(opened["reason"] as? String, "busy", "\(opened)")
+        XCTAssertEqual(opened["busy"] as? [String], ["busy-dialog"])
+        let dialog = try node(s, "busy-dialog").superview as! NodeView
+        p.menus.sheets.close(dialog, animated: true)
+        XCTAssertNotNil(dialog.window)
+        XCTAssertFalse(dialog.isHidden)
+        XCTAssertEqual(try busy(), ["busy:busy-dialog"], "the dismissing sheet still renders its spinner")
+        until("the dialog sheet is gone") { host.presentedViewController == nil && !p.menus.inTransition }
+        XCTAssertEqual(agent.clock(["settle": true])["settled"] as? Bool, true)
+
+        p.dialogCommand("showModal", "form")
+        until("the dialog is ready to retire") { host.presentedViewController != nil && !p.menus.inTransition }
+        let unrelated = NodeView(id: 9000, kind: "view", presenter: p)
+        let finish = p.menus.sheets.retire(over: host, removing: unrelated)
+        XCTAssertEqual(try busy(), ["busy:busy-dialog"])
+        host.dismiss(animated: false)
+        finish()
+        XCTAssertTrue(dialog.isHidden)
+        XCTAssertTrue(p.menus.sheets.isOpen(dialog), "the authored dialog awaits resumption")
+        XCTAssertEqual(try busy(), [], "a retired sheet holds no loading after it is hidden")
+        p.menus.sheets.close(dialog, animated: false)
+
+        p.menus.action("showPopover", ["popup"])
+        until("the popover is up") { (try? self.node(s, "busy-popover"))?.window != nil && !p.menus.inTransition }
+        XCTAssertEqual(try busy(), ["busy:busy-popover"])
+        p.menus.action("hidePopover", ["popup"])
+        until("the popover is gone") { !p.menus.inTransition }
+        XCTAssertEqual(try busy(), [])
+    }
+
     func testPresentedRoutesDialogsPopoversAndCarriedRowsKeepTheirAuthoredAccent() throws {
         guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene else { throw missing("scene", "sheets require a scene window") }
         ExactGroupedLists.install()

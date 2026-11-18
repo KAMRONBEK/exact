@@ -84,7 +84,7 @@ extension ControlHost {
     /// The nearest view above `view` that authors an accent, if one does, by the authored tree
     /// (`Presenter.authoredParent`)
     func authoredAbove(_ view: NodeView) -> NodeView? {
-        sequence(first: view as UIView, next: presenter.authoredParent).dropFirst().lazy.compactMap { $0 as? NodeView }.first(where: Self.authorsAccent)
+        presenter.authoredNodes(from: view).dropFirst().first(where: Self.authorsAccent)
     }
 
     /// The determinate bars (LLP 1116 D8). A change of value eases, as

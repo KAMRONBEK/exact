@@ -59,3 +59,47 @@ extension ExactSession {
     public func moveFocus(backward: Bool) { presenter.moveFocus(backward: backward) }
     #endif
 }
+
+extension Presenter {
+    /// The runner lists mounted busy candidates; the host owns which presentations are open.
+    func renderedBusy(_ names: [String]) -> [String] {
+        guard !names.isEmpty else { return [] }
+        let requested = Set(names)
+        var rendered: [String: Bool] = [:]
+        for node in views.values {
+            let name = node.props["testId"] ?? String(node.id)
+            if requested.contains(name) { rendered[name] = rendered[name] == true || busyIsRendered(node) }
+            for run in node.inlineText {
+                let name = run.props["testId"] ?? String(run.id)
+                if requested.contains(name) { rendered[name] = rendered[name] == true || busyIsRendered(node) }
+            }
+        }
+        // A view not yet applied cannot prove that the runner's work is hidden.
+        return names.filter { rendered[$0] != false }
+    }
+
+    private func busyIsRendered(_ node: NodeView) -> Bool {
+        for box in authoredNodes(from: node) {
+            if box.style["display"]?.string == "none" { return false }
+            if box.props["semanticTag"] == "dialog" || box.props["popover"] != nil {
+                #if os(macOS)
+                if !menus.isOpen(box) && !dialogs.owns(box) && !alerts.isOpen(box) { return false }
+                #else
+                if !menus.isOpen(box) { return false }
+                #endif
+            }
+        }
+        return true
+    }
+
+    /// Node ancestors across the native containers that carry rows, routes and presentations.
+    func authoredNodes(from node: NodeView) -> some Sequence<NodeView> {
+        sequence(first: node as KeyPlatformView, next: {
+            #if os(macOS)
+            self.eventParent(of: $0)
+            #else
+            self.authoredParent(of: $0)
+            #endif
+        }).lazy.compactMap { $0 as? NodeView }
+    }
+}
