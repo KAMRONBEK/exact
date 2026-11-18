@@ -249,7 +249,7 @@ extension RouteController {
         if let split = host?.split, navigationController === split.detail, split.controller.isCollapsed, !split.nested, !split.expanding {
             return false
         }
-        return stack?.stackRoutes.contains { $0 === self } == true
+        return stack?.shownStackRoutes.contains { $0 === self } == true
     }
 
     /// The stack it is in: its plain tab, checked first because under More

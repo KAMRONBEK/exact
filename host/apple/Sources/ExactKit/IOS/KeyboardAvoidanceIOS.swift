@@ -31,6 +31,8 @@ package final class KeyboardInset {
         indicators.bottom += change
         scroll.verticalScrollIndicatorInsets = indicators
     }
+    /// Forgets the contribution: its scroll view is gone or another's.
+    func reset() { amount = 0 }
 }
 
 extension Presenter {
@@ -288,6 +290,8 @@ extension NodeView {
             #if os(iOS)
             let route = ViewPresentation.controllers(for: self, layout: true).lazy.compactMap { $0 as? any RouteSurface }.first
             if route?.searchBarEditing == true { return .onDrag }
+            // A search's results too, while its field edits
+            if let route, presenter?.navigation.searchEdits(over: route) == true { return .onDrag }
             #endif
             return .interactive
         }
@@ -371,4 +375,30 @@ extension Presenter {
     }
 }
 
+#if os(iOS)
+extension Presenter {
+    /// How far above the docked keys the bar of a search field UIKit floats on them while it edits reaches over
+    /// `route` (LLP 1127.000 D9; iOS 26: out of every navigation bar, across the window), which covers what lies under it
+    /// as the keys do. The bar is the field's first container taller than it. UIKit places it above the route's safe
+    /// area, so it is a scroll inset, not safe area: counted there, the bar would rise with every inset it gave.
+    func fieldBarInset(over route: UIViewController) -> CGFloat {
+        guard let top = keyboardTop, let field = keyboardEditor as? UISearchTextField, field.window != nil, field.window === route.view.window,
+              !sequence(first: field as UIView, next: \.superview).contains(where: { $0 is UINavigationBar }),
+              let bar = sequence(first: field as UIView, next: \.superview).first(where: { $0.bounds.height > field.bounds.height + 1 }) else { return 0 }
+        let frame = bar.convert(bar.bounds, to: nil), over = route.view.convert(route.view.bounds, to: nil)
+        return frame.maxY <= top + 1 && frame.minX < over.maxX && frame.maxX > over.minX ? max(0, top - frame.minY) : 0
+    }
+}
+#endif
+
+extension RouteController {
+    /// Whether a presentation covers this route, which then keeps its own safe area under the keys (LLP 1127.000 D9):
+    /// its controller, or one that holds it, presents another, an active search controller aside (UIKit presents one
+    /// over its field's context, covering nothing).
+    var presentedOver: Bool {
+        sequence(first: self as UIViewController, next: \.parent).contains { c in
+            c.presentedViewController.map { !($0 is UISearchController) && !$0.isBeingDismissed } == true
+        }
+    }
+}
 #endif

@@ -26,11 +26,11 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
             if changing { startRevealing() }
         }
     }
-    var primaryRoutes: [RouteController] { primaryStacks.flatMap(\.stackRoutes).compactMap { $0 as? RouteController } }
+    var primaryRoutes: [RouteController] { primaryStacks.flatMap(\.shownStackRoutes).compactMap { $0 as? RouteController } }
     /// A list beside its detail: the primary stack as UIKit's split (SplitIOS.swift).
     var split: SplitIOS?
-    /// The node that had the focus as the split's columns began to collapse or expand (`keepFocusAcrossColumns`).
-    weak var focusAcrossColumns: NodeView?
+    /// A header search's results route drawn in its field's route's controller (`placingResults`).
+    weak var resultsInPlace: RouteController?
     private(set) var presentedNavigations: [UINavigationController] = []
     func isPresented(_ nav: UINavigationController?) -> Bool { presentedNavigations.contains { $0 === nav } }
     /// The theme's title ink each bar was last given (`titleInk`), held no
@@ -42,7 +42,12 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     /// and with a split, either column's.
     func follows(_ nav: UINavigationController) -> Bool { nav === navigation || (modalNavigation == nil && split?.holds(nav) == true) }
     /// The route on top of the stack in front: the one the person sees.
-    var activeRoute: RouteController? { (navigation?.topViewController ?? bootOwner?.route ?? primaryPlain?.route) as? RouteController }
+    var activeRoute: RouteController? {
+        let top = (navigation?.topViewController ?? bootOwner?.route ?? primaryPlain?.route) as? RouteController
+        // Results drawn in the route on top are the route the person sees
+        if let results = resultsInPlace, results.parent === top { return results }
+        return top
+    }
     private(set) var syncing = false
     /// A pop UIKit committed with no call Exact heard is followed in the next turn (`followPopsNextTurn`).
     var followOwed = false
@@ -203,9 +208,10 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     /// The root key last journaled as matching no route, so a refusal is one
     /// line, not one per batch (LLP 1035.001 D6).
     private var refusedKey: String?
-    /// The keys of the stack last shown, through its selected route, and the
-    /// route selected in the root's place while its key matches none (D1).
-    private(set) var shownKeys: [String] = [], fallbackKey: String?
+    /// The keys of the stack last shown, root first, through its selected route.
+    private(set) var shownKeys: [String] = []
+    /// The route selected in the root's place while its key matches none (D1).
+    private(set) var fallbackKey: String?
     /// The key of the selected route: the root's, or while the root's
     /// matches no route, the route left selected of the stack last shown.
     var selectedKey: String? {
@@ -511,7 +517,11 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         if p.tabs != nil { syncTabs(p) }
         // Initial content draws before a presentation covers it.
         if parts.count > 1, let session = presenter.session, session.firstDrawMs == nil { return }
-        guard !changing, !presenter.modalHost.inTransition else {
+        // The search field whose editing this write ends; while UIKit moves its bar into search the write waits for
+        // that move, as it waits for a push (`HeaderSearch.presenting`)
+        let covered = searchCovered(by: Array(wanted[parts[0]]),
+                                    pressed: presenter.pressHandoff?.working == true || pendingPress.map { $0 === presenter.pressHandoff } == true)
+        guard !changing, !presenter.modalHost.inTransition, covered?.presenting != true else {
             pendingSync = true
             owePress()
             reportCovers()
@@ -529,6 +539,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
             if pendingSync { owePress(owed) }
             owed?.settle()
         }
+        covered?.resign()
         let boundaries = parts.dropFirst().map { wanted[$0.lowerBound].node }
         let mounted = presenter.modalHost.routes
         let common = zip(boundaries, mounted).prefix {
@@ -556,13 +567,15 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
                 if !split.columnsAboutToMove { split.controller.view.layoutIfNeeded() }
                 continue
             }
-            let stack = Array(wanted[parts[index]])
+            let wantedStack = Array(wanted[parts[index]])
             // Show the router's tab's route when it is a plain tab (PlainTabIOS)
             guard let nav = owners[index] as? UINavigationController else {
-                setRoutes(stack, in: owners[index])
+                setRoutes(wantedStack, in: owners[index])
                 owners[index].view.layoutIfNeeded()
                 continue
             }
+            let stack = index == 0 ? placingResults(wantedStack, on: nav, inPlace: true) : wantedStack
+            if index == 0, let results = resultsInPlace { prepareRoutes([results], in: nav, firstPushed: true) }
             // Write a stack with a transition UIKit runs there (or left there, off screen) once it is over; one that
             // holds the routes already is projected now
             if let transition = nav.transitionCoordinator, !nav.stackRoutes.elementsEqual(stack, by: ===) {
@@ -654,6 +667,8 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         reportCovers()
         refitForBars()
         settled = true
+        // A search whose results the stack lost closes once UIKit has shown what replaced them
+        DispatchQueue.main.async { [weak self] in self?.settleSearches() }
     }
 
     /// The container standing in for the routes paints where they are in
@@ -781,6 +796,13 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         resync()
     }
 
+    /// A search's bar has moved into search: a write that waited for it runs (`sync`).
+    func searchPresented() {
+        guard pendingSync else { return }
+        pendingSync = false
+        sync(Batch(ops: [], timers: false, motion: false, clock: nil, error: nil))
+    }
+
     func modalDidDismiss() {
         // A presentation or dismissal ended: run the edge passes that a selection made during it owes, when no sync is pending
         guard pendingSync else { return settleScrollEdges() }
@@ -895,6 +917,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
 
     /// A history jump uses navigation; the authored Back control handles the adjacent intent.
     func goBack(from source: String, to destination: String) {
+        endEditingLeavingResults()
         pendingSync = true
         guard let session = presenter.session, let root = container,
               let location = session.runtime.visitLocation(destination) else {
@@ -923,6 +946,8 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         // inspector; the detail under the list that overlays it, and the columns under a sheet, show, not live.
         let split = splitShown
         if split.beside.contains(where: { $0.key == key }) { return false }
+        // A field's route shows under results drawn in it, live: its field is the results' to type in
+        if let results = resultsInPlace, results.key == selected, (results.parent as? RouteController)?.key == key { return false }
         if split.under.contains(where: { $0.key == key }) { return true }
         return key != selected
     }
@@ -1154,6 +1179,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
             // its tablist (§3.7).
             DispatchQueue.main.async { [weak self, weak navigationController] in
                 if let navigationController { self?.settleTablist(navigationController) }
+                self?.settleSearches()
                 self?.presenter.menus.resumeAfterRouteDismissal()
             }
             // At rest: a large title's insets are sampled now (§9.10).
@@ -1180,8 +1206,9 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         // the inspector's route above it (LLP 1127 D14)
         let selected = selectedKey ?? ""
         let topKey = NavigationRules.poppedTop(selected: selected, inspecting: inspectorKey, shownKeys: shownKeys)
-        let dispatches = (viewController as? RouteController).map {
-            NavigationRules.dispatchesBack(shownKey: $0.key, rootKey: topKey, sourceKey: sourceKey,
+        // Results drawn in the route on top are the route the person sees
+        let dispatches = shownKey(of: viewController).map {
+            NavigationRules.dispatchesBack(shownKey: $0, rootKey: topKey, sourceKey: sourceKey,
                                            sourceReplaced: sourceReplaced, modalActive: presenter.modalHost.inTransition)
         } ?? false
         guard dispatches else {

@@ -57,6 +57,14 @@ extension NavigationHost: NavigationHosting {
     func padsTop(_ route: any RouteSurface) -> Bool {
         (route as? RouteController).map { padsTop($0) } ?? false
     }
+    func searchEdits(over route: any RouteSurface) -> Bool {
+        (route as? RouteController).map { searchEditing(over: $0) != nil } ?? false
+    }
+    func resignSearch() -> Bool {
+        guard let search = searchInUseRoute?.search else { return false }
+        search.resign()
+        return true
+    }
     var splitShownSurfaces: (beside: [any RouteSurface], under: [any RouteSurface]) {
         let shown = splitShown
         return (shown.beside, shown.under)
