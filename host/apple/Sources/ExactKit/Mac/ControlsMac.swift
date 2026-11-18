@@ -6,9 +6,12 @@
 #if os(macOS)
 import AppKit
 
+extension NSView {
+    /// The node whose box holds this view.
+    var ownerNode: NodeView? { sequence(first: self, next: \.superview).lazy.compactMap { $0 as? NodeView }.first }
+}
+
 extension NSControl {
-    /// The node whose box holds this control.
-    var ownerNode: NodeView? { sequence(first: self as NSView, next: \.superview).lazy.compactMap { $0 as? NodeView }.first }
     var ariaUnavailableFromNode: Bool { ownerNode?.ariaUnavailable ?? false }
 }
 

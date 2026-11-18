@@ -782,6 +782,180 @@ final class BackSessionMacTests: XCTestCase {
         }
     }
 
+    func testCommandArrowsUseHistoryAndLeaveEditorsAndEmbeddedViewsTheirKeys() throws {
+        _ = NSApplication.shared
+        let previous = (NSApp.servicesMenu, NSApp.windowsMenu, NSApp.helpMenu, DevMenu.session)
+        defer { NSApp.servicesMenu = previous.0; NSApp.windowsMenu = previous.1; NSApp.helpMenu = previous.2; DevMenu.session = previous.3 }
+        let session = ExactApp.shared.makeSession()
+        defer { session.destroy() }
+        let source = source(navigate: true)
+            .replacingOccurrences(of: "  action open", with: "  state commands = 0\n  action command\n    commands = commands + 1\n  action secondCommand\n    commands = commands + 10\n  action open")
+            .replacingOccurrences(of: "      for e in stack(nav)", with: "      button press=command testId=\"command\" -exact-menu=\"help\"\n        text \"Command\"\n      button press=secondCommand testId=\"second-command\" -exact-menu=\"help\"\n        text \"Second Command\"\n      for e in stack(nav)")
+        XCTAssertNil(session.boot(plan: try plan(source), size: CGSize(width: 400, height: 300)).error)
+        let view = ExactView(session: session)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        window.contentView = view
+        window.makeKeyAndOrderFront(nil)
+        let p = session.presenter
+        DevMenu.session = session
+        let bar = DevMenu.makeMenu(shortcuts: p.shortcuts, documents: false, develop: false)
+        let go = try XCTUnwrap(bar.items.first { $0.submenu?.title == "Go" }?.submenu)
+        let back = try XCTUnwrap(go.items.first { $0.action == #selector(GoMenuTarget.back(_:)) })
+        let forward = try XCTUnwrap(go.items.first { $0.action == #selector(GoMenuTarget.forward(_:)) })
+        let root = try XCTUnwrap(p.navigation.root?.node)
+        func keyEvent(_ right: Bool = false, _ flags: NSEvent.ModifierFlags = .command) throws -> NSEvent {
+            let character = right ? "\u{f703}" : "\u{f702}"
+            return try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero,
+                modifierFlags: flags, timestamp: 0, windowNumber: window.windowNumber, context: nil,
+                characters: character, charactersIgnoringModifiers: character, isARepeat: false, keyCode: right ? 124 : 123))
+        }
+        func arrow(_ right: Bool = false, _ flags: NSEvent.ModifierFlags = .command) throws -> Bool {
+            bar.performKeyEquivalent(with: try keyEvent(right, flags))
+        }
+        let pushed = { p.navigation.pushedRoute != nil }
+        XCTAssertFalse(try arrow(), "no visit behind")
+        p.press(try XCTUnwrap(p.views.values.first { $0.props["testId"] == "open" }).id)
+        XCTAssertTrue(pushed())
+        XCTAssertFalse(try arrow(true), "no visit ahead")
+        for flags in [NSEvent.ModifierFlags(), [.command, .shift], [.command, .option], [.command, .control]] {
+            XCTAssertFalse(try arrow(false, flags))
+            XCTAssertTrue(pushed())
+        }
+        XCTAssertTrue(try arrow(false, [.command, .function, .numericPad]), "AppKit's arrow flags do not change the chord")
+        XCTAssertFalse(pushed())
+        XCTAssertTrue(try arrow(true))
+        XCTAssertTrue(pushed())
+
+        for field in [NSTextField(), NSSearchField()] {
+            field.frame = NSRect(x: 0, y: 0, width: 200, height: 30)
+            field.stringValue = "abc"
+            view.addSubview(field)
+            XCTAssertTrue(window.makeFirstResponder(field))
+            let editor = try XCTUnwrap(field.currentEditor() as? NSTextView)
+            XCTAssertTrue(window.firstResponder === editor, "a field's responder is its shared text view")
+            XCTAssertFalse(try arrow())
+            XCTAssertFalse(try arrow(true))
+            XCTAssertTrue(pushed())
+            window.makeFirstResponder(nil)
+            field.removeFromSuperview()
+        }
+        let text = NSTextView(frame: NSRect(x: 0, y: 0, width: 200, height: 50))
+        view.addSubview(text)
+        XCTAssertTrue(window.makeFirstResponder(text))
+        XCTAssertFalse(try arrow(), "the editable text view keeps line motion")
+        XCTAssertTrue(pushed())
+        text.isEditable = false
+        text.isSelectable = true
+        XCTAssertTrue(try arrow(), "selectable prose does not disable history")
+        XCTAssertFalse(pushed())
+        XCTAssertTrue(try arrow(true))
+        XCTAssertTrue(pushed())
+        window.makeFirstResponder(nil)
+        text.removeFromSuperview()
+        // An embedded view owns its input, even when its responder is not an editor.
+        final class EmbeddedKeys: NSView {
+            override var acceptsFirstResponder: Bool { true }
+            var keys: [UInt16] = []
+            override func keyDown(with event: NSEvent) { keys.append(event.keyCode) }
+        }
+        for kind in ["native", "iframe"] {
+            let embedded = NodeView(id: 999, kind: kind, presenter: p)
+            let input = EmbeddedKeys()
+            view.addSubview(embedded)
+            embedded.addSubview(input)
+            XCTAssertTrue(window.makeFirstResponder(input))
+            XCTAssertFalse(try arrow(), kind)
+            window.sendEvent(try keyEvent())
+            XCTAssertEqual(input.keys, [123], "the embedded view receives the arrow")
+            XCTAssertTrue(pushed())
+            window.makeFirstResponder(nil)
+            embedded.removeFromSuperview()
+        }
+        let canvas = NodeView(id: 999, kind: "canvas", presenter: p)
+        view.addSubview(canvas)
+        XCTAssertTrue(window.makeFirstResponder(canvas))
+        XCTAssertTrue(try arrow(), "a focused canvas leaves Command-Left to history")
+        XCTAssertFalse(pushed())
+        XCTAssertTrue(try arrow(true), "a focused canvas leaves Command-Right to history")
+        XCTAssertTrue(pushed())
+        window.makeFirstResponder(nil)
+        canvas.removeFromSuperview()
+
+        for right in [false, true] {
+            if right { XCTAssertTrue(p.navigation.goBack()) }
+            let alert = NSAlert()
+            alert.messageText = "App Info"
+            let modal = NSApp.beginModalSession(for: alert.window)
+            _ = NSApp.runModalSession(modal)
+            XCTAssertTrue(NSApp.modalWindow === alert.window)
+            XCTAssertFalse(try arrow(right), "an app-modal alert blocks history aliases")
+            XCTAssertEqual(pushed(), !right)
+            NSApp.endModalSession(modal)
+            alert.window.orderOut(nil)
+            window.makeKeyAndOrderFront(nil)
+            if !pushed() { XCTAssertTrue(p.navigation.goForward()) }
+        }
+        for item in [back, forward] {
+            if item === forward { XCTAssertTrue(try arrow()) }
+            item.isHidden = true
+            XCTAssertFalse(try arrow(item === forward), "a hidden item has no alias")
+            XCTAssertEqual(pushed(), item === back)
+            item.isHidden = false
+            if item === forward { XCTAssertTrue(try arrow(true)) }
+        }
+        p.apply(wireBatch([["op": "props", "id": root.id, "set": ["menuRemove": "back forward"]]]))
+        XCTAssertFalse(try arrow())
+        XCTAssertTrue(pushed())
+        p.apply(wireBatch([["op": "props", "id": root.id, "set": [:], "clear": ["menuRemove"]]]))
+        p.apply(wireBatch([["op": "props", "id": root.id, "set": ["navigationHistory": "none"]]]))
+        XCTAssertFalse(try arrow())
+        XCTAssertTrue(pushed())
+        p.apply(wireBatch([["op": "props", "id": root.id, "set": [:], "clear": ["navigationHistory"]]]))
+        go.removeItem(back)
+        XCTAssertFalse(try arrow(), "a removed item has no alias")
+        go.insertItem(back, at: 0)
+        XCTAssertTrue(try arrow())
+        go.removeItem(forward)
+        XCTAssertFalse(try arrow(true))
+        go.insertItem(forward, at: 1)
+        XCTAssertTrue(try arrow(true))
+        let command = try XCTUnwrap(p.views.values.first { $0.props["testId"] == "command" })
+        p.apply(wireBatch([["op": "props", "id": command.id, "set": ["accessibilityKeyShortcuts": "Meta+ArrowLeft"]]]))
+        XCTAssertTrue(try arrow(), "an authored arrow command in Help takes precedence over Go")
+        XCTAssertTrue(pushed())
+        let state = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(session.agent(#"{"op":"state"}"#).utf8)) as? [String: Any])
+        XCTAssertEqual((state["slots"] as? [String: Any])?["commands"] as? Int, 1)
+        p.apply(wireBatch([
+            ["op": "create", "id": 998, "kind": "view", "props": ["accessibilityModal": "true"]],
+            ["op": "frame", "id": 998, "x": 0.0, "y": 0.0, "w": 100.0, "h": 100.0],
+        ]))
+        view.addSubview(try XCTUnwrap(p.views[998]))
+        XCTAssertNotNil(p.shortcutModal)
+        XCTAssertTrue(try arrow(), "Help's menu command works outside an accessibility modal")
+        XCTAssertTrue(pushed())
+        let modalState = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(session.agent(#"{"op":"state"}"#).utf8)) as? [String: Any])
+        XCTAssertEqual((modalState["slots"] as? [String: Any])?["commands"] as? Int, 2)
+        p.apply(wireBatch([["op": "destroy", "id": 998]]))
+        let second = try XCTUnwrap(p.views.values.first { $0.props["testId"] == "second-command" })
+        p.apply(wireBatch([["op": "props", "id": second.id, "set": ["accessibilityKeyShortcuts": "Meta+ArrowLeft"]]]))
+        let help = try XCTUnwrap(bar.items.first { $0.submenu?.title == "Help" }?.submenu)
+        // Compare against AppKit's own lookup when Go is not ahead of Help.
+        XCTAssertTrue(help.performKeyEquivalent(with: try keyEvent()))
+        let before = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(session.agent(#"{"op":"state"}"#).utf8)) as? [String: Any])
+        let count = try XCTUnwrap((before["slots"] as? [String: Any])?["commands"] as? Int)
+        XCTAssertTrue(try arrow())
+        let after = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(session.agent(#"{"op":"state"}"#).utf8)) as? [String: Any])
+        XCTAssertEqual((after["slots"] as? [String: Any])?["commands"] as? Int, 2 + 2 * (count - 2))
+        XCTAssertTrue(pushed())
+        p.apply(wireBatch([["op": "props", "id": second.id, "set": [:], "clear": ["accessibilityKeyShortcuts"]]]))
+        p.apply(wireBatch([["op": "props", "id": command.id, "set": ["accessibilityKeyShortcuts": "Meta+["]]]))
+        XCTAssertTrue(back.isHidden, "the app's Back replaces the host's")
+        XCTAssertFalse(try arrow(), "the hidden host item loses its arrow alias too")
+        XCTAssertTrue(pushed())
+    }
+
     /// LLP 1115.000 D5.5: Forward goes where Back left, by Go ▸ Forward ⌘],
     /// the two-finger swipe the other way, and the mouse's forward button;
     /// the mouse's back button goes Back. Each button steps at its release,

@@ -284,7 +284,37 @@ final class ShortcutMenu: NSMenu {
         }
     }
 
+    /// The Go items' arrow aliases leave line motion to editors and keys to embedded views.
+    private func historyArrow(_ event: NSEvent) -> Bool {
+        guard NSApp.modalWindow == nil, event.type == .keyDown, [123, 124].contains(event.keyCode),
+              event.modifierFlags.intersection([.command, .control, .option, .shift]) == .command else { return false }
+        let action = event.keyCode == 123 ? #selector(GoMenuTarget.back(_:)) : #selector(GoMenuTarget.forward(_:))
+        guard let item = items.first(where: { $0.action == action && $0.target is GoMenuTarget }) else { return false }
+        // Leave claimed chords to AppKit, including disabled and app-wide items.
+        func claimsArrow(_ menu: NSMenu) -> Bool {
+            menu.items.contains { candidate in
+                if let menu = menu as? ShortcutMenu, menu.removed.contains(where: { $0.0 === candidate }) { return false }
+                if candidate.keyEquivalent == event.charactersIgnoringModifiers,
+                   candidate.keyEquivalentModifierMask.intersection([.command, .control, .option, .shift]) == .command { return true }
+                return candidate.submenu.map(claimsArrow) ?? false
+            }
+        }
+        if claimsArrow(self) { return false }
+        if let bar = supermenu,
+           let index = bar.items.firstIndex(where: { $0.submenu === self }),
+           bar.items.dropFirst(index + 1).contains(where: { $0.submenu.map(claimsArrow) ?? false }) { return false }
+        let responder = (event.window ?? NSApp.keyWindow)?.firstResponder
+        // AppKit offers the menu a key before an editor's line movement.
+        if let text = responder as? NSTextView, text.isEditable { return false }
+        if let field = responder as? NSTextField, field.isEditable { return false }
+        if let node = (responder as? NSView)?.ownerNode, ["iframe", "native"].contains(node.kind) { return false }
+        guard !item.isHidden, !removed.contains(where: { $0.0 === item }),
+              let target = item.target as? GoMenuTarget, target.validateMenuItem(item) else { return false }
+        return NSApp.sendAction(action, to: target, from: item)
+    }
+
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if historyArrow(event) { return true }
         // A removed item's chord, and its submenu's, is out of the lookup:
         // AppKit sends a hidden item's chord whatever its
         // `allowsKeyEquivalentWhenHidden` (measured, macOS 26.6).
