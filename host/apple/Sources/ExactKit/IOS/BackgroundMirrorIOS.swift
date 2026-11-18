@@ -26,7 +26,6 @@
 // extension's, so the one animation keeps the mirror at the box's edge and at
 // the extension's at every frame.
 #if os(iOS) || os(tvOS)
-import CoreImage
 import UIKit
 
 /// An image's background extension (`NodeView.syncBackgroundExtension`): the image's box, and its mirrors in the
@@ -44,10 +43,13 @@ final class ExtensionView: UIView {
     /// (`NodeView.syncBackgroundExtension`).
     var sides: UIRectEdge = []
     var laidOut: CGRect?
-    /// The blurred pictures the mirrors draw: their source and how blurred each is, in its pixels.
-    private var blurred: (source: CGImage, sigmas: [CGFloat], images: [CGImage])?
+    /// The blurred pictures the mirrors draw, kept with the image across its extension views
+    let blurs: ExtensionBlurs
+    /// The pixels and tint the mirrors were last given, which blurs made off the main thread are shown with
+    private var given: (pixels: CGImage, tint: CGColor?)?
 
-    init() {
+    init(blurs: ExtensionBlurs) {
+        self.blurs = blurs
         super.init(frame: .zero)
         clipsToBounds = true
         isUserInteractionEnabled = false
@@ -59,6 +61,7 @@ final class ExtensionView: UIView {
         box.addSublayer(picture)
         content.layer.addSublayer(box)
         addSubview(content)
+        blurs.landed = { [weak self] in self?.showLevels() }
     }
     required init?(coder: NSCoder) { nil }
 
@@ -68,10 +71,12 @@ final class ExtensionView: UIView {
     /// points, which shows fully from `full` points out, over the level before it; the first from `sharp` points.
     private static let levels: [(sigma: CGFloat, full: CGFloat)] = [(1, 8), (2.5, 18), (6, 42), (15, 100)]
     fileprivate static let sharp: CGFloat = 2
-    /// The box at `shown` in this view, its content box `inner` and the picture at `drawn` in it, with `pixels`, a
-    /// `tint` through their alpha, and `corners` the box's clip; a mirror on each side of `shown` short of this view's
-    /// edges, reaching them. Called inside the animation that moves the image, each layer takes it.
-    func place(_ shown: CGRect, inner: CGRect, drawn: CGRect, pixels: CGImage, tint: CGColor?, corners: CGPath?) {
+    /// The box at `shown` in this view, its content box `inner` and the picture at `drawn` in it, with `pixels` from
+    /// `load` (the image's load that gave them, `NodeView.rasterLoad`, nil for an animated image's frame), a `tint`
+    /// through their alpha, and `corners`
+    /// the box's clip; a mirror on each side of `shown` short of this view's edges, reaching them. Called inside the
+    /// animation that moves the image, each layer takes it.
+    func place(_ shown: CGRect, inner: CGRect, drawn: CGRect, pixels: CGImage, load: Int?, tint: CGColor?, corners: CGPath?) {
         content.frame = shown
         corner(content.layer, corners, shown.size)
         box.frame = inner
@@ -94,11 +99,20 @@ final class ExtensionView: UIView {
             }
         }
         guard !mirrors.isEmpty else { return }
-        let images = blurs(of: pixels, drawn: drawn)
+        // The levels' sigmas in the pixels' own: a picture drawn larger than its pixels blurs less of them
+        let perPoint = drawn.width > 0 ? CGFloat(pixels.width) / drawn.width : 1
+        blurs.want(pixels, load: load, sigmas: Self.levels.map { $0.sigma * perPoint })
+        given = (pixels, tint)
+        for mirror in mirrors { mirror.place(now, from: before, masks: masks, corners: corners) }
+        showLevels()
+    }
+
+    /// Each mirror's levels given their pictures: the sharp level the pixels, each blurred level its blur.
+    private func showLevels() {
+        guard let given, let images = blurs.made?.images else { return }
         for mirror in mirrors {
-            mirror.place(now, from: before, masks: masks, corners: corners)
             for level in mirror.levels {
-                for piece in level.pieces { show(level.index == 0 ? pixels : images[level.index - 1], tint: tint, in: piece.picture, owner: self) }
+                for piece in level.pieces { show(level.index == 0 ? given.pixels : images[level.index - 1], tint: given.tint, in: piece.picture, owner: self) }
             }
         }
     }
@@ -120,33 +134,6 @@ final class ExtensionView: UIView {
         }
         for mirror in mirrors where !mirror.side.extends(placed.shown, in: bounds) { mirror.container.removeFromSuperlayer() }
         mirrors.removeAll { !$0.side.extends(placed.shown, in: bounds) }
-    }
-
-    /// The picture blurred to each level, kept while its source and its scale on screen hold: a blur of a quarter more
-    /// or less than the level's, once the picture is shown at another size, is made again.
-    private func blurs(of pixels: CGImage, drawn: CGRect) -> [CGImage] {
-        let perPoint = drawn.width > 0 ? CGFloat(pixels.width) / drawn.width : 1
-        let sigmas = Self.levels.map { $0.sigma * perPoint }
-        if let kept = blurred, kept.source === pixels, zip(kept.sigmas, sigmas).allSatisfy({ abs($0 - $1) <= 0.25 * $1 }) { return kept.images }
-        let images = sigmas.map { Self.blur(pixels, sigma: $0) ?? pixels }
-        blurred = (pixels, sigmas, images)
-        return images
-    }
-
-    /// Blurs the pixels' encoded values, as UIKit's blur does: blurred in linear light, a detailed picture's mirror came
-    /// out lighter than the picture
-    private static let context = CIContext(options: [.cacheIntermediates: false, .workingColorSpace: NSNull(), .outputColorSpace: NSNull()])
-
-    /// `image` blurred by `sigma` of its pixels, made no larger than that blur needs: at most four of its pixels to
-    /// each of the blur's sigma, which the layer draws at the picture's size.
-    static func blur(_ image: CGImage, sigma: CGFloat) -> CGImage? {
-        let scale = min(1, 4 / max(sigma, 0.001))
-        var input = CIImage(cgImage: image)
-        if scale < 1 { input = input.transformed(by: CGAffineTransform(scaleX: scale, y: scale)) }
-        let extent = input.extent.integral
-        let output = input.clampedToExtent().applyingGaussianBlur(sigma: Double(sigma * scale)).cropped(to: extent)
-        // Tagged with the picture's own colour space, its values untouched
-        return context.createCGImage(output, from: extent, format: .RGBA8, colorSpace: image.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!)
     }
 
     /// A picture's pixels, or with a tint the tint through their alpha (`RasterGeometry.draw`).

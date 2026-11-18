@@ -207,6 +207,82 @@ final class BackgroundExtensionIOSTests: XCTestCase {
         XCTAssertEqual(at(CGPoint(x: 150, y: 25)), [0, 0, 255], "its extension's")
     }
 
+    /// A picture shown at another size (a header's, pulled past its scroller's top) keeps drawing its blurs, scaled
+    /// with it, while those for its new size are made off the main thread; the extension made when the image comes
+    /// back to the window draws the blurs already made.
+    func testTheExtensionKeepsItsBlursAcrossASizeAndTheWindow() throws {
+        let (p, route, image) = try mount(CGRect(x: 0, y: 50, width: 300, height: 100), insets: UIEdgeInsets(top: 50, left: 0, bottom: 0, right: 0))
+        let blurs = try XCTUnwrap((extensions(route).first as? ExtensionView)?.blurs)
+        let first = try XCTUnwrap(blurs.made)
+        p.apply(wireBatch([["op": "frame", "id": 2, "x": 0, "y": 50, "w": 150, "h": 100]]))
+        image.syncBackgroundExtension()
+        XCTAssertTrue(blurs.made?.images.elementsEqual(first.images, by: ===) ?? false, "the picture drawn half as wide keeps its blurs at once")
+        let deadline = Date(timeIntervalSinceNow: 2)
+        while blurs.made?.images.elementsEqual(first.images, by: ===) ?? true, Date() < deadline { RunLoop.main.run(mode: .default, before: Date(timeIntervalSinceNow: 0.02)) }
+        let resized = try XCTUnwrap(blurs.made)
+        XCTAssertTrue(zip(resized.sigmas, first.sigmas).allSatisfy { abs($0 - 2 * $1) < 0.01 }, "then draws those made for its size: \(resized.sigmas), from \(first.sigmas)")
+        let page = try XCTUnwrap(p.views[1])
+        page.removeFromSuperview()
+        XCTAssertTrue(extensions(route).isEmpty, "out of the window, the extension goes")
+        route.view.addSubview(page)
+        image.syncBackgroundExtension()
+        let back = try XCTUnwrap(extensions(route).first as? ExtensionView)
+        XCTAssertTrue(back.blurs.made?.images.elementsEqual(resized.images, by: ===) ?? false, "back in it, a new extension draws the blurs made")
+    }
+
+    /// Another load's pixels (a new `src`, or a package picture that changed), or a decode of another shape (an SVG
+    /// placed anew), are blurred at once and cancel the blurs being made; another decode of the same load and shape is
+    /// blurred off the main thread while the blurs made stand; cancelled, those being made land nowhere.
+    func testAnotherLoadIsBlurredAtOnceAndCancelledBlursLandNowhere() throws {
+        func pixels(_ color: UIColor, _ width: CGFloat, _ height: CGFloat) throws -> CGImage {
+            let format = UIGraphicsImageRendererFormat(); format.scale = 1
+            return try XCTUnwrap(UIGraphicsImageRenderer(size: CGSize(width: width, height: height), format: format).image { context in
+                color.setFill(); context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+            }.cgImage)
+        }
+        let blurs = ExtensionBlurs(), sigmas: [CGFloat] = [1, 2.5, 6, 15]
+        let red = try pixels(.red, 30, 10), blue = try pixels(.blue, 30, 10), larger = try pixels(.blue, 60, 20)
+        blurs.want(red, load: 1, sigmas: sigmas)
+        blurs.want(blue, load: 2, sigmas: sigmas)
+        XCTAssertTrue(blurs.made?.source === blue, "another load's pixels are blurred at once")
+        blurs.want(larger, load: 2, sigmas: sigmas.map { $0 * 2 })
+        XCTAssertTrue(blurs.made?.source === blue, "another decode of the load keeps the blurs made meanwhile")
+        XCTAssertEqual(ExtensionBlurs.inFlight, 1, "the agent's settle waits for the blurs being made")
+        let deadline = Date(timeIntervalSinceNow: 2)
+        while blurs.made?.source !== larger, Date() < deadline { RunLoop.main.run(mode: .default, before: Date(timeIntervalSinceNow: 0.02)) }
+        XCTAssertTrue(blurs.made?.source === larger, "then draws those made for it")
+        XCTAssertEqual(ExtensionBlurs.inFlight, 0, "landed")
+        blurs.want(blue, load: 2, sigmas: sigmas)
+        blurs.cancel()
+        XCTAssertEqual(ExtensionBlurs.inFlight, 0, "cancelled")
+        RunLoop.main.run(mode: .default, before: Date(timeIntervalSinceNow: 0.3))
+        XCTAssertTrue(blurs.made?.source === larger, "cancelled, the blurs being made land nowhere")
+        let wide = try pixels(.blue, 120, 20)
+        blurs.want(wide, load: 2, sigmas: sigmas)
+        XCTAssertTrue(blurs.made?.source === wide, "a decode of another shape is blurred at once")
+        blurs.want(larger, load: 2, sigmas: sigmas)
+        blurs.want(red, load: 3, sigmas: sigmas)
+        RunLoop.main.run(mode: .default, before: Date(timeIntervalSinceNow: 0.3))
+        XCTAssertTrue(blurs.made?.source === red, "another picture blurred at once cancels the blurs being made")
+    }
+
+    /// When an image's picture is replaced, its blurs stay while its extension shows, which draws them until those of
+    /// the new pixels land, and go when it shows none: they are not kept for pixels it no longer holds.
+    func testAReplacedPictureKeepsItsBlursOnlyWhileItsExtensionShows() throws {
+        let (p, route, image) = try mount(CGRect(x: 0, y: 50, width: 300, height: 100), insets: UIEdgeInsets(top: 50, left: 0, bottom: 0, right: 0))
+        let blurs = try XCTUnwrap((extensions(route).first as? ExtensionView)?.blurs)
+        image.extensionRasterReplaced()
+        image.syncBackgroundExtension()
+        XCTAssertTrue((extensions(route).first as? ExtensionView)?.blurs === blurs, "shown, the extension keeps drawing its blurs")
+        p.apply(wireBatch([["op": "frame", "id": 2, "x": 0, "y": 80, "w": 300, "h": 100]]))
+        image.syncBackgroundExtension()
+        XCTAssertTrue(extensions(route).isEmpty, "short of the safe area, the image has no extension")
+        image.extensionRasterReplaced()
+        p.apply(wireBatch([["op": "frame", "id": 2, "x": 0, "y": 50, "w": 300, "h": 100]]))
+        image.syncBackgroundExtension()
+        XCTAssertFalse((extensions(route).first as? ExtensionView)?.blurs === blurs, "replaced with none shown, the blurs went")
+    }
+
     /// A column's animation moves the image's box, and each mirror meets the box's edge at every frame of it, as one
     /// animation moves both: the box's left edge moves from the safe area's old edge to its new one while the mirror
     /// fills what is left of it. UIKit's own extension moved its mirror on another clock, two frames behind the box,

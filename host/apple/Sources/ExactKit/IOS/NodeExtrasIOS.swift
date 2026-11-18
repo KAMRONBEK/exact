@@ -62,6 +62,11 @@ final class NodeAside {
     package var fitContentHeight: CGFloat?
     var image: UIImage?
     var raster: (any ImageLease)?
+    /// The loads asked for the node's picture (`RasterLoader.load`): each is another picture to the background
+    /// extension's blurs, as a changed package picture is, where a decode at another size is not
+    var loadsAsked = 0
+    /// `loadsAsked` when the lease `raster` was asked for: another decode of the same picture keeps it
+    var rasterLoad = 0
     package var imageLayer: CALayer?
     package var imageSource: String?
     package var loadGeneration = 0
@@ -295,11 +300,15 @@ extension NodeView {
     package var raster: (any ImageLease)? {
         get { aside?.raster }
         set {
+            let replaced = newValue != nil && aside?.raster != nil && newValue !== aside?.raster
             if newValue != nil || aside != nil { asideMade.raster = newValue }
             if newValue == nil, let l = imageLayer { l.removeFromSuperlayer(); imageLayer = nil }
+            if newValue == nil { dropExtensionBlurs() } else if replaced { extensionRasterReplaced() }
             if isNativeButton { presenter?.controls.refreshRaster(self) }
         }
     }
+    var rasterLoad: Int { get { aside?.rasterLoad ?? 0 } set { if newValue != 0 || aside != nil { asideMade.rasterLoad = newValue } } }
+    package var loadsAsked: Int { get { aside?.loadsAsked ?? 0 } set { if newValue != 0 || aside != nil { asideMade.loadsAsked = newValue } } }
     /// An image's pixels as a sublayer's contents (`applyImageLayer`).
     package var imageLayer: CALayer? { get { aside?.imageLayer } set { if newValue != nil || aside != nil { asideMade.imageLayer = newValue } } }
     package var imageSource: String? { get { aside?.imageSource } set { if newValue != nil || aside != nil { asideMade.imageSource = newValue } } }

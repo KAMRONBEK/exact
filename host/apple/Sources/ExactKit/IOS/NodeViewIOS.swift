@@ -546,7 +546,7 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
     /// loader to report (`RasterLoader.reconcile`, one report per turn).
     package func acceptRaster(_ lease: any ImageLease, generation: Int) -> CGSize? {
         guard loadGeneration == generation, let presenter, presenter.views[id] === self else { return nil }
-        raster = lease; ImageLink.animated?.attach(self); applyImageLayer()
+        raster = lease; rasterLoad = loadsAsked; ImageLink.animated?.attach(self); applyImageLayer()
         self.setNeedsDisplay()
         if let c = canvasAbove { c.needsCapture = true; canvases?.scheduleCapture() }
         presenter.boxFilters?.changed(self)

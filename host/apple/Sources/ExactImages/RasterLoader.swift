@@ -209,6 +209,9 @@ final class RasterLoader: ImageLoader {
             refuse("invalid raster source"); return false
         }
         refused.removeValue(forKey: view.id)
+        #if os(iOS) || os(tvOS)
+        view.loadsAsked += 1
+        #endif
         // Initial props run before Presenter registers the new view. Reconcile
         // after the batch, when identity checks can distinguish it from removal:
         // at its end, before the transaction commits, so a picture the core
