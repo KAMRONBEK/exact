@@ -928,7 +928,7 @@ export function bakeTarget(platform) {
   // The pinned toolchain's rustc, as the build's: rustup may have no default, and an app's directory names none.
   const result = spawnSync('rustc', ['-vV'], { cwd: ROOT, env: PINNED_RUST ? { ...process.env, RUSTUP_TOOLCHAIN: PINNED_RUST } : process.env, encoding: 'utf8' });
   const host = /^host: (.+)$/m.exec(result.stdout ?? '')?.[1];
-  if (result.status !== 0 || !host) throw new Error(`rustc did not report its host target: ${result.error?.message ?? result.stderr?.trim() ?? `exit ${result.status}`}`);
+  if (result.status !== 0 || !host) throw new Error(`rustc -vV did not report a host target, which the build needs to choose its output folder; install the toolchain that rust-toolchain.toml names, then build again (${result.error?.message ?? (result.stderr?.trim() || `exit ${result.status}`)})`);
   return host;
 }
 /** Cargo's metadata for a development bake, asked once for a lock and a set of
