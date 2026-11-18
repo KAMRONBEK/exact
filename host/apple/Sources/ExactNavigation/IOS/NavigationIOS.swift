@@ -29,6 +29,8 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     var primaryRoutes: [RouteController] { primaryStacks.flatMap(\.stackRoutes).compactMap { $0 as? RouteController } }
     /// A list beside its detail: the primary stack as UIKit's split (SplitIOS.swift).
     var split: SplitIOS?
+    /// The node that had the focus as the split's columns began to collapse or expand (`keepFocusAcrossColumns`).
+    weak var focusAcrossColumns: NodeView?
     private(set) var presentedNavigations: [UINavigationController] = []
     func isPresented(_ nav: UINavigationController?) -> Bool { presentedNavigations.contains { $0 === nav } }
     /// The theme's title ink each bar was last given (`titleInk`), held no
@@ -1054,9 +1056,9 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         // As the swipe begins: an update may remove its source's node while
         // the finger is down. Beneath a split's detail is the list's route.
         let depth = navigationController.viewControllers.count + (split?.detail === navigationController ? 2 : 1)
-        let swipe: Swipe? = transition.initiallyInteractive
-            ? (transition.viewController(forKey: .from) as? RouteController).map { ($0.node, $0.key, depth) }
-            : nil
+        let source = transition.viewController(forKey: .from) as? RouteController
+        let swipe: Swipe? = transition.initiallyInteractive ? source.map { ($0.node, $0.key, depth) } : nil
+        if let split, split.detail === navigationController, let key = inspectorKey, source?.key == NavigationRules.poppedTop(selected: key, inspecting: key, shownKeys: shownKeys) { split.closeInspector(along: transition) }
         transition.animate(alongsideTransition: nil) { [weak self, weak navigationController] context in
             guard let self, let navigationController else { return }
             transitionEnded(navigationController, swipe: swipe, cancelled: context.isCancelled)
@@ -1174,8 +1176,12 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         // was when the swipe began (LLP 1035.001 D2)
         let sourceKey = presenter.views[swipe.node.id] === swipe.node ? swipe.key : nil
         let sourceReplaced = sourceKey == nil && selectedRouteCount == swipe.depth
+        // While the inspector's column shows the selected route, a swipe in the detail takes the detail's top and
+        // the inspector's route above it (LLP 1127 D14)
+        let selected = selectedKey ?? ""
+        let topKey = NavigationRules.poppedTop(selected: selected, inspecting: inspectorKey, shownKeys: shownKeys)
         let dispatches = (viewController as? RouteController).map {
-            NavigationRules.dispatchesBack(shownKey: $0.key, rootKey: selectedKey ?? "", sourceKey: sourceKey,
+            NavigationRules.dispatchesBack(shownKey: $0.key, rootKey: topKey, sourceKey: sourceKey,
                                            sourceReplaced: sourceReplaced, modalActive: presenter.modalHost.inTransition)
         } ?? false
         guard dispatches else {
@@ -1184,7 +1190,11 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         }
         for route in poppedByUIKit() where route.lastStack === navigationController { route.held = false }
         lastTransition = "completed"
-        goBack()
+        if let to = NavigationRules.beneathPoppedTop(selected: selected, inspecting: inspectorKey, shownKeys: shownKeys) {
+            goBack(from: selected, to: to)
+        } else {
+            goBack()
+        }
     }
 
     /// A stack Exact retired: its delegate slot leaves Exact, and its handle

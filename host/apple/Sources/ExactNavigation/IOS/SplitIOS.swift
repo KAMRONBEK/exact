@@ -43,6 +43,9 @@ final class SplitIOS: NSObject, UISplitViewControllerDelegate {
     var inspectorClosed: () -> Void = {}
     /// UIKit is moving the columns, inside its animation (`moveAlong`).
     var columnsMove: () -> Void = {}
+    /// UIKit is about to collapse or expand the columns (a fold), and has done so.
+    var columnsWillChange: () -> Void = {}
+    var columnsDidChange: () -> Void = {}
     /// UIKit has said the columns will move and has yet to open its animation. It lays them out itself, inside that
     /// animation, as it does a view constrained to the safe area: nothing here may lay them out before then, or what
     /// the safe area moves jumps to its end.
@@ -50,6 +53,12 @@ final class SplitIOS: NSObject, UISplitViewControllerDelegate {
     /// The list whose rows made the stack a split, which keeps it one while
     /// it has no row to act on (a search that matches nothing).
     var listNode: UInt32?
+    /// The location of the detail's top route: after a Back to the list while collapsed, the next expansion returns
+    /// to it, as UIKit's own split shows the detail the person left (LLP 1127 §1, item 4). The stack at its root on
+    /// a split settled expanded forgets it (`NavigationHost.noteDetail`).
+    var left: String?
+    /// Asks the router for `left`'s location.
+    var returnTo: (String) -> Void = { _ in }
 
     init(list: UINavigationController, detail: UINavigationController) {
         self.list = list
@@ -86,8 +95,15 @@ final class SplitIOS: NSObject, UISplitViewControllerDelegate {
     private var expansion = false
     /// Whether UIKit is collapsing the columns, from asking which column to
     /// put on top until it has: the detail's controller enters the list's
-    /// meanwhile, while the split still reads expanded.
+    /// meanwhile, while the split still reads expanded. UIKit can ask and then
+    /// expand instead, with no word of a collapse (an iPhone Duo unfolding):
+    /// the expansion's question ends the mark, as the collapse's ends
+    /// `expansion`, for a split moves one way at a time. A mark left set held
+    /// every later stack and the inspector back (`show`, `inspect`).
     private var collapsing = false
+    /// Whether the split is expanded and no longer moving between its forms: UIKit reads it expanded before it has
+    /// said so (`splitViewControllerDidExpand`), and a sync can come between.
+    var settledExpanded: Bool { !controller.isCollapsed && !expansion && !collapsing }
     /// Whether the person sees the detail's routes: collapsed, only while
     /// nested, as a pop of the detail's controller leaves its routes in it.
     private var showsDetail: Bool { (controller.isCollapsed ? nested : true) && detail.viewControllers.contains { $0 is RouteController } }
@@ -218,14 +234,39 @@ final class SplitIOS: NSObject, UISplitViewControllerDelegate {
         closing = close
         controller.hide(.inspector)
         moveAlong()
-        let finish = { [weak self, weak nav] in
+        let finish = { [weak self, weak nav] (cancelled: Bool) in
             guard let self, let nav, closing == close else { return }
             closing = nil
+            // A swipe let go takes the column back with its route (`closeInspector`)
+            guard !cancelled else { return }
             empty(nav)
             endSlide()
         }
-        if let coordinator = controller.transitionCoordinator { coordinator.animate(alongsideTransition: nil) { _ in finish() } } else { finish() }
+        if let coordinator = controller.transitionCoordinator { coordinator.animate(alongsideTransition: nil) { finish($0.isCancelled) } } else { finish(false) }
         #endif
+    }
+
+    /// UIKit pops the route the inspector's route is above, which takes the
+    /// inspector's route too (`NavigationRules.poppedTop`): the column closes
+    /// as the pop begins. UIKit's Back slides it away on the split's own
+    /// clock. A swipe's pop carries the column's transition (iOS 27.1): the
+    /// column follows the finger, leaves with the page when the swipe goes
+    /// back, and comes back with the page when it is let go. Closed only as
+    /// the finger lifts or as the pop ends, it would stay until the page had
+    /// gone, as UIKit holds a split's change while a swipe's pop finishes.
+    /// Let go, UIKit still lays the split out as last asked, without the
+    /// column, so the column is shown again at once as the pop ends; asked
+    /// for later, it would vanish and slide in again. `inspect(nil)` keeps the
+    /// route in the column until the column has gone.
+    func closeInspector(along pop: UIViewControllerTransitionCoordinator) {
+        if pop.isInteractive, let nav = inspector, let route = nav.viewControllers.first as? RouteController {
+            pop.animate(alongsideTransition: nil) { [weak self, weak nav, weak route] context in
+                // A batch that took the route while the finger was down left it sliding out: the deferred sync decides
+                guard context.isCancelled, let self, let nav, let route, sliding == nil, nav.viewControllers.first === route else { return }
+                inspect(route, in: nav, animated: false)
+            }
+        }
+        inspect(nil, in: nil)
     }
 
     /// UIKit animates the columns into place from a show or hide: what the
@@ -271,6 +312,7 @@ final class SplitIOS: NSObject, UISplitViewControllerDelegate {
                              topColumnForCollapsingToProposedTopColumn proposedTopColumn: UISplitViewController.Column) -> UISplitViewController.Column {
         expansion = false
         collapsing = true
+        columnsWillChange()
         // Collapsing with its inspector shown, UIKit presents the inspector's
         // column as a sheet of its own: the route goes to the sheet it says
         // instead (LLP 1127 D14), and the column, emptied for it, would be a
@@ -282,27 +324,40 @@ final class SplitIOS: NSObject, UISplitViewControllerDelegate {
     }
     func splitViewController(_ svc: UISplitViewController,
                              displayModeForExpandingToProposedDisplayMode proposedDisplayMode: UISplitViewController.DisplayMode) -> UISplitViewController.DisplayMode {
+        collapsing = false
         expansion = true
+        columnsWillChange()
         return proposedDisplayMode
     }
 
     func splitViewController(_ svc: UISplitViewController, didHide column: UISplitViewController.Column) {
         #if os(iOS)
         guard #available(iOS 26.0, *), column == .inspector, closing == nil, !svc.isCollapsed else { return }
-        DispatchQueue.main.async { self.inspectorClosed() }
+        // A report for a column shown again by then (a swipe let go put it back) is no close of the person's
+        DispatchQueue.main.async { if !svc.isShowing(.inspector) { self.inspectorClosed() } }
         #endif
     }
 
     func splitViewControllerDidCollapse(_ svc: UISplitViewController) {
+        expansion = false
         collapsing = false
         show(stack, animated: false)
-        DispatchQueue.main.async { self.changed() }
+        DispatchQueue.main.async { self.changed(); self.columnsDidChange() }
     }
     func splitViewControllerDidExpand(_ svc: UISplitViewController) {
+        collapsing = false
         expansion = false
         // Collapsed, a pop of the detail's controller left its routes in it.
         show(stack, animated: false)
-        DispatchQueue.main.async { self.changed() }
+        // At the list after a Back while collapsed, the detail goes back to the page the person left. Asked once the
+        // expansion is over, as the router's answer changes the columns.
+        if stack.count == 1, let location = left {
+            DispatchQueue.main.async { [weak self] in
+                guard let self, stack.count == 1, !controller.isCollapsed else { return }
+                returnTo(location)
+            }
+        }
+        DispatchQueue.main.async { self.changed(); self.columnsDidChange() }
     }
     func splitViewController(_ svc: UISplitViewController, willChangeTo displayMode: UISplitViewController.DisplayMode) {
         if let coordinator = svc.transitionCoordinator {
@@ -325,6 +380,17 @@ extension Presenter {
 }
 
 extension NavigationHost {
+    /// The columns collapsed or expanded (a fold or an unfold): the field that had the focus before has it
+    /// again while its route still shows, as the person left it typing; UIKit takes a field moved to another
+    /// column out of its responder chain. Covered (a page over the list on a folded Duo), it keeps none.
+    func keepFocusAcrossColumns() {
+        guard let node = focusAcrossColumns else { return }
+        focusAcrossColumns = nil
+        guard presenter.views[node.id] === node, presenter.focusedNode !== node,
+              !isInactiveRoute(containing: node) else { return }
+        presenter.focusNode(node)
+    }
+
     /// Whether the stack whose first route is `root` shows as UIKit's split:
     /// its list's rows push, by the runner's rule, under the platform's chrome.
     /// An installed split keeps its list while that list has no row to act on.
@@ -346,14 +412,18 @@ extension NavigationHost {
         let split = SplitIOS(list: list, detail: detail)
         split.listNode = first.first.flatMap { presenter.session?.runtime.stackSplit($0.node.id, retaining: nil)?.list }
         split.changed = { [weak self] in self?.splitChanged() }
+        split.returnTo = { [weak self] location in self?.go(to: location) }
         split.inspectorClosed = { [weak self] in self?.inspectorClosed() }
         split.columnsMove = { [weak self] in self?.reportCovers(); self?.presenter.owners.publish() }
+        split.columnsWillChange = { [weak self] in self?.focusAcrossColumns = self?.presenter.focusedNode }
+        split.columnsDidChange = { [weak self] in self?.keepFocusAcrossColumns() }
         self.split = split
         primaryNavigation = list
         prepareRoutes(Array(first.prefix(1)), in: list)
         prepareRoutes(Array(first.dropFirst()), in: detail, firstPushed: true)
         detail.setNavigationBarHidden(false, animated: false)
         split.show(first, animated: false)
+        noteDetail(split, first)
         for nav in [list, detail] { watchPops(nav) }
         parent.addChild(split.controller)
         let mount = ownerMount(p.root)
@@ -371,11 +441,31 @@ extension NavigationHost {
         prepareRoutes(Array(stack.dropFirst()), in: split.detail, firstPushed: true)
         let shown = split.shown
         split.show(stack, animated: animated)
+        noteDetail(split, stack)
         // A sidebar's selected row follows the detail.
         if split.shown != shown, split.showsList, let root = stack.first,
            let list = presenter.session?.runtime.stackSplit(root.node.id, retaining: nil)?.list {
             presenter.groupedLists?.sync(changed: [list])
         }
+    }
+
+    /// The page the detail shows, which the split returns to after a Back to the list while collapsed
+    /// (`SplitIOS.left`). The stack at its root on a split settled expanded leaves none: the router took the page
+    /// away, not a Back the person made from it on the collapsed split.
+    private func noteDetail(_ split: SplitIOS, _ stack: [RouteController]) {
+        guard let root = stack.first, let top = stack.dropFirst().last else {
+            if split.settledExpanded { split.left = nil }
+            return
+        }
+        // Read each time: a `replace` keeps the route and changes its location
+        if let location = presenter.session?.runtime.stackSplit(root.node.id, retaining: nil)?.locations[top.node.id] { split.left = location }
+    }
+
+    /// The router goes to `location`, as a link there takes it: the root's `navigate`, else the runner's own `go`.
+    /// Nothing is asked under a presentation, as the router would push the page onto the presented stack.
+    private func go(to location: String) {
+        guard let session = presenter.session, presenter.modals.routes.isEmpty else { return }
+        if let root = container, root.handlers.contains("navigate") { session.navigate(location, at: root) } else { session.hostGo(location) }
     }
 
     /// UIKit changed what the split shows: the bars' insets, which columns'
@@ -449,6 +539,16 @@ extension NavigationHost {
               batch.ops.contains(where: { $0.op == .destroy && $0.id == route.node.id }) else { return }
         split.endSlide()
         split.sliding = presenter.retire(route.node.id)
+    }
+
+    /// The selected route's key while it is the inspector's (LLP 1127 D14):
+    /// a sheet that says `navigationInspector`, which an expanded split shows
+    /// in its column above the detail's top. The app's stack says so, not the
+    /// column, which a pop under it may already be sliding away
+    /// (`SplitIOS.closeInspector`).
+    var inspectorKey: String? {
+        guard let split, split.inspects, !split.controller.isCollapsed, selectedRoute?.props["navigationInspector"] == "true" else { return nil }
+        return selectedKey
     }
 
     /// The person closed the inspector's column: Back from its route, as a

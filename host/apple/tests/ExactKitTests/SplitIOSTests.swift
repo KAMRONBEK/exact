@@ -218,6 +218,67 @@ final class SplitIOSTests: XCTestCase {
         until("back at the list") { split.shown.count == 1 && !has("notes-a") && !agent.nativeInFlight() }
     }
 
+    /// LLP 1127 §1, item 4: on UIKit's own split, a Back to the list while
+    /// collapsed leaves the detail's controller holding the page, and the next
+    /// expansion shows it beside the list. The router went back with the
+    /// person, so as the split expands (an iPhone Duo opened after a Back on
+    /// its outer display) the router is asked to go to that page again. A page
+    /// the router itself took away while expanded is not shown again.
+    func testExpandingAfterABackToTheListShowsThePageThePersonLeft() throws {
+        let session = try boot()
+        let navigation = session.presenter.navigationHost, agent = Agent(session: session)
+        until("a split") { navigation.split != nil && !agent.nativeInFlight() }
+        let split = try XCTUnwrap(navigation.split)
+        XCTAssertNil(agent.tap(["id": Int(try node(session, "row-a").id)])["error"])
+        until("the book is pushed") { split.shown.count == 2 && !agent.nativeInFlight() }
+        XCTAssertNil(agent.back()["error"])
+        until("back at the list") { split.shown.count == 1 && !has(session, "book-a") && !agent.nativeInFlight() }
+        // On the iPhone Duo a batch lands after UIKit reads the split expanded and before it says so, and its sync
+        // reaches the split's columns.
+        let proxy = SyncBeforeExpanding(split) { navigation.syncSplit(split, split.shown, animated: false) }
+        split.controller.delegate = proxy
+        let window = try XCTUnwrap(self.window)
+        window.frame = CGRect(x: 0, y: 0, width: 1100, height: 800)
+        window.rootViewController?.view.subviews.first?.frame = window.bounds
+        window.traitOverrides.horizontalSizeClass = .regular
+        until("expanded") { !split.controller.isCollapsed && !agent.nativeInFlight() }
+        XCTAssertGreaterThan(proxy.synced, 0, "a sync came between UIKit's expansion and its report of it")
+        until("the book the person left shows beside the list") { split.shown.count == 2 && has(session, "book-a") && !agent.nativeInFlight() }
+        session.navigate("/", at: try XCTUnwrap(session.navigationRoot))
+        until("the router back at the list") { split.shown.count == 1 && !has(session, "book-a") && !agent.nativeInFlight() }
+        window.traitOverrides.horizontalSizeClass = .compact
+        until("collapsed") { split.controller.isCollapsed && !agent.nativeInFlight() }
+        window.traitOverrides.horizontalSizeClass = .regular
+        until("expanded again") { !split.controller.isCollapsed && !agent.nativeInFlight() }
+        waitForMainQueue("the expansion's ask, queued when UIKit said it expanded")
+        XCTAssertEqual(split.shown.count, 1, "the book the router took away stays away")
+        XCTAssertFalse(has(session, "book-a"))
+    }
+
+    /// A sheet over the list stays up through a fold (LLP 1127 §1, item 6). Expanding under it after a Back to the
+    /// list asks for no page, which the router would push onto the sheet's stack.
+    func testExpandingUnderASheetOverTheListAsksForNoPage() throws {
+        guard UIApplication.shared.connectedScenes.first is UIWindowScene else { throw missing("scene", "a sheet is presented only in a scene's window") }
+        let session = try boot()
+        let navigation = session.presenter.navigationHost, agent = Agent(session: session)
+        until("a split") { navigation.split != nil && !agent.nativeInFlight() }
+        let split = try XCTUnwrap(navigation.split)
+        XCTAssertNil(agent.tap(["id": Int(try node(session, "row-a").id)])["error"])
+        until("the book is pushed") { split.shown.count == 2 && !agent.nativeInFlight() }
+        XCTAssertNil(agent.back()["error"])
+        until("back at the list") { split.shown.count == 1 && !has(session, "book-a") && !agent.nativeInFlight() }
+        session.navigate("/share/a", at: try XCTUnwrap(session.navigationRoot))
+        until("a sheet over the list") { has(session, "share-page") && !session.presenter.modals.routes.isEmpty && !agent.nativeInFlight() }
+        let window = try XCTUnwrap(self.window)
+        window.frame = CGRect(x: 0, y: 0, width: 1100, height: 800)
+        window.rootViewController?.view.subviews.first?.frame = window.bounds
+        window.traitOverrides.horizontalSizeClass = .regular
+        until("expanded") { !split.controller.isCollapsed && !agent.nativeInFlight() }
+        waitForMainQueue("the expansion's ask, queued when UIKit said it expanded")
+        XCTAssertFalse(has(session, "book-a"), "no page is pushed onto the sheet's stack")
+        XCTAssertTrue(has(session, "share-page"), "the sheet stays")
+    }
+
     /// An iPhone Duo unfolding: UIKit asks which display mode to expand to
     /// while the split still reads compact, then takes the detail's
     /// controller out of the list's, its `didShow` arriving before the split
@@ -548,13 +609,14 @@ final class SplitIOSTests: XCTestCase {
         XCTAssertEqual(Set(seen), [], "unfolded, the column shows the route at once")
     }
 
-    /// An iPhone Duo unfolding with its inspector in a sheet: a sync the
-    /// expansion starts can find the split collapsing still, UIKit having
-    /// asked which column to put on top and not yet said it collapsed. The
-    /// sheet keeps the route until the column can take it: closed, the
-    /// inspector was gone until a later sync slid the column in. The order is
-    /// UIKit's on the Duo simulator, replayed here by asking before the
-    /// expansion.
+    /// An iPhone Duo unfolding with its inspector in a sheet: UIKit asks which
+    /// column to put on top and then expands, with no word of a collapse. The
+    /// sheet keeps the route until the column can take it, and the column
+    /// takes it once the split has expanded: closed early, the inspector was
+    /// gone until a later sync slid the column in; marked collapsing still,
+    /// the sheet stayed over the expanded split and held every later route
+    /// back. The order is UIKit's on the Duo simulator, replayed here by
+    /// asking before the expansion.
     func testAnInspectorsSheetKeepsItsRouteUntilTheColumnCanTakeIt() throws {
         guard #available(iOS 26.0, *) else { throw XCTSkip("the inspector's column is iOS 26's") }
         guard UIApplication.shared.connectedScenes.first is UIWindowScene else { throw missing("scene", "a sheet is presented only in a scene's window") }
@@ -572,9 +634,34 @@ final class SplitIOSTests: XCTestCase {
         _ = split.splitViewController(split.controller, topColumnForCollapsingToProposedTopColumn: .secondary)
         window.traitOverrides.horizontalSizeClass = .regular
         until("expanded") { !split.controller.isCollapsed }
-        RunLoop.main.run(until: Date().addingTimeInterval(0.3)) // the syncs the expansion starts
-        XCTAssertEqual(session.presenter.modals.routes.map(\.node), [info], "the sheet keeps the route")
+        until("the column takes it from the sheet") {
+            session.presenter.modals.routes.isEmpty && split.inspecting != nil && split.controller.isShowing(.inspector) && !agent.nativeInFlight()
+        }
         XCTAssertTrue(info.window != nil, "and shows it")
+        XCTAssertTrue(split.settledExpanded, "the split is expanded, not collapsing")
+    }
+
+    /// The same order with no sheet: a page in the detail, the iPhone Duo
+    /// closed and opened again. UIKit asks which column to put on top and
+    /// expands; the split is then expanded only, so Info opens its column
+    /// and a row opens its page.
+    func testAnExpansionAfterACollapseQuestionLeavesTheSplitFreeToNavigate() throws {
+        guard #available(iOS 26.0, *) else { throw XCTSkip("the inspector's column is iOS 26's") }
+        let session = try boot(size: CGSize(width: 951, height: 669))
+        let navigation = session.presenter.navigationHost, agent = Agent(session: session)
+        let window = try XCTUnwrap(self.window)
+        window.traitOverrides.horizontalSizeClass = .compact
+        until("a split, collapsed") { navigation.split?.controller.isCollapsed == true && !agent.nativeInFlight() }
+        let split = try XCTUnwrap(navigation.split)
+        XCTAssertNil(agent.tap(["id": Int(try node(session, "row-a").id)])["error"])
+        until("the book is pushed") { split.shown.count == 2 && !agent.nativeInFlight() }
+        _ = split.splitViewController(split.controller, topColumnForCollapsingToProposedTopColumn: .secondary)
+        window.traitOverrides.horizontalSizeClass = .regular
+        until("expanded") { split.settledExpanded && !agent.nativeInFlight() }
+        XCTAssertNil(agent.tap(["id": Int(try node(session, "notes-a").id)])["error"])
+        until("the notes are pushed") { split.shown.count == 3 && !agent.nativeInFlight() }
+        XCTAssertNil(agent.tap(["id": Int(try node(session, "notes-info-a").id)])["error"])
+        until("the notes' info is in the inspector's column") { split.inspecting != nil && split.controller.isShowing(.inspector) && !agent.nativeInFlight() }
     }
 
     /// LLP 1127 D14 on the Landmarks port's iPhone Duo: with the inspector
@@ -620,6 +707,111 @@ final class SplitIOSTests: XCTestCase {
         XCTAssertFalse(Self.moving(try XCTUnwrap(split.controller.view).layer, uikits: true).isEmpty, "the columns move")
     }
 
+    /// LLP 1127 D14 on the Landmarks port's iPhone Duo: the notes' info in
+    /// the inspector's column, UIKit's Back in the detail pops the notes. The
+    /// info is above them in the app's stack, so the pop takes it too: the
+    /// app goes back past both and the column closes, as Apple's Landmarks
+    /// sample closes its inspector when its path shortens, rather than the
+    /// app's stack pushing the notes again.
+    func testABackUnderTheInspectorTakesItsRouteWithIt() throws {
+        guard #available(iOS 26.0, *) else { throw XCTSkip("the inspector's column is iOS 26's") }
+        guard UIApplication.shared.connectedScenes.first is UIWindowScene else { throw missing("scene", "UIKit animates a pop only in a window a scene holds") }
+        let (session, agent, split) = try inspectedNotes()
+        let book = try XCTUnwrap(split.detail.viewControllers.first)
+        split.detail.popViewController(animated: true)
+        closesWithPop(split)
+        try wentBack(to: book, session, agent, split)
+    }
+
+    /// The same as a swipe: the column closes as the swipe begins, so that
+    /// UIKit's own swipe carries the column's transition with the finger (a
+    /// unit test has no touches: the interaction here drives the pop alone).
+    /// Let go, the swipe pops nothing, and the column is back in place as the
+    /// pop ends, rather than gone and sliding in again with a later sync.
+    /// Finished, the swipe takes the notes and their info.
+    func testASwipeUnderTheInspectorClosesItsColumnAsItBeginsAndALetGoKeepsIt() throws {
+        guard #available(iOS 26.0, *) else { throw XCTSkip("the inspector's column is iOS 26's") }
+        guard UIApplication.shared.connectedScenes.first is UIWindowScene else { throw missing("scene", "UIKit animates a pop only in a window a scene holds") }
+        let (session, agent, split) = try inspectedNotes()
+        let navigation = session.presenter.navigationHost, info = try XCTUnwrap(split.inspecting)
+        let pop = InteractivePop()
+        navigation.setAppDelegate(split.detail, pop)
+        defer { navigation.setAppDelegate(split.detail, nil) }
+        pop.interactive = true
+        let book = try XCTUnwrap(split.detail.viewControllers.first)
+        split.detail.popViewController(animated: true)
+        until("UIKit's pop animates the book beneath") { book.viewIfLoaded?.window != nil }
+        pop.interaction.update(0.4)
+        XCTAssertFalse(split.controller.isShowing(.inspector), "the column closes as the swipe begins")
+        pop.interaction.cancel()
+        var showsAsThePopEnds: Bool?
+        split.detail.transitionCoordinator?.animate(alongsideTransition: nil) { _ in showsAsThePopEnds = split.controller.isShowing(.inspector) }
+        until("the swipe let go is over") { split.detail.transitionCoordinator == nil && !agent.nativeInFlight() }
+        XCTAssertEqual(showsAsThePopEnds, true, "the column is back as the pop ends")
+        XCTAssertTrue(has(session, "notes-page") && split.inspecting === info && split.controller.isShowing(.inspector), "the notes and their info stay")
+        XCTAssertEqual(navigation.selectedKey, info.key)
+        split.detail.popViewController(animated: true)
+        until("UIKit's pop animates the book beneath") { book.viewIfLoaded?.window != nil }
+        pop.interaction.update(0.4)
+        XCTAssertFalse(split.controller.isShowing(.inspector), "the column closes as the swipe begins")
+        pop.interaction.finish()
+        pop.interactive = false
+        try wentBack(to: book, session, agent, split)
+    }
+
+    /// The agent's `back` there ends where UIKit's Back does.
+    func testTheAgentsBackUnderTheInspectorEndsWhereUIKitsBackDoes() throws {
+        guard #available(iOS 26.0, *) else { throw XCTSkip("the inspector's column is iOS 26's") }
+        guard UIApplication.shared.connectedScenes.first is UIWindowScene else { throw missing("scene", "UIKit animates a pop only in a window a scene holds") }
+        let (session, agent, split) = try inspectedNotes()
+        let book = try XCTUnwrap(split.detail.viewControllers.first)
+        XCTAssertNil(agent.back()["error"])
+        try wentBack(to: book, session, agent, split)
+    }
+
+    /// The expanded split at the Duo's open width: the book in the detail,
+    /// its notes over it, and the notes' info in the inspector's column.
+    @available(iOS 26.0, *)
+    private func inspectedNotes() throws -> (ExactSession, Agent, SplitIOS) {
+        let session = try boot(size: CGSize(width: 951, height: 669))
+        let navigation = session.presenter.navigationHost, agent = Agent(session: session)
+        until("a split") { navigation.split != nil && !agent.nativeInFlight() }
+        let split = try XCTUnwrap(navigation.split)
+        split.controller.traitOverrides.horizontalSizeClass = .regular
+        until("expanded") { !split.controller.isCollapsed && !agent.nativeInFlight() }
+        XCTAssertNil(agent.tap(["id": Int(try node(session, "row-a").id)])["error"])
+        until("the book is in the detail") { split.shown.count == 2 && !agent.nativeInFlight() }
+        XCTAssertNil(agent.tap(["id": Int(try node(session, "notes-a").id)])["error"])
+        until("the notes are pushed") { split.shown.count == 3 && !agent.nativeInFlight() }
+        XCTAssertNil(agent.tap(["id": Int(try node(session, "notes-info-a").id)])["error"])
+        until("the notes' info is in the inspector's column") { split.inspecting != nil && split.controller.transitionCoordinator == nil && !agent.nativeInFlight() }
+        return (session, agent, split)
+    }
+
+    /// The inspector's column starts to slide away while the detail's pop is
+    /// still under way, not after it.
+    @available(iOS 26.0, *)
+    private func closesWithPop(_ split: SplitIOS) {
+        var closed = false
+        until("the column slides away during the pop") {
+            if !split.controller.isShowing(.inspector), split.detail.transitionCoordinator != nil { closed = true }
+            return closed || split.detail.transitionCoordinator == nil
+        }
+        XCTAssertTrue(closed, "the inspector's column slides away with the pop, not after it")
+    }
+
+    /// The app went back with UIKit's pop to `book`, past the notes and their info, and the inspector's column closed.
+    @available(iOS 26.0, *)
+    private func wentBack(to book: UIViewController, _ session: ExactSession, _ agent: Agent, _ split: SplitIOS) throws {
+        until("the app went back past the notes and their info") {
+            split.detail.transitionCoordinator == nil && split.controller.transitionCoordinator == nil && !agent.nativeInFlight()
+                && !has(session, "notes-page") && !has(session, "info-page")
+        }
+        XCTAssertTrue(split.detail.topViewController === book, "the book, where the person went back to: \(split.detail.viewControllers)")
+        XCTAssertEqual(session.presenter.navigationHost.selectedKey, (book as? RouteController)?.key)
+        XCTAssertFalse(split.controller.isShowing(.inspector), "the inspector's column closed")
+    }
+
     /// What animates in the tree of Exact's own views and layers under
     /// `layer`, and of UIKit's too with `uikits`. The views UIKit makes
     /// inside a scroller (its indicators, the large title it hosts) are
@@ -660,6 +852,20 @@ final class SplitIOSTests: XCTestCase {
         split.list.setViewControllers(split.list.viewControllers + [moving], animated: false)
         split.show(stack, animated: false)
         XCTAssertTrue(split.list.viewControllers.last === moving, "the list's stack is UIKit's while it collapses")
+    }
+}
+
+/// The split's delegate calls forwarded to `split`, with `sync` run as UIKit says the split expanded, before `split`
+/// hears it: the order of the iPhone Duo's unfolding, where a batch lands between.
+private final class SyncBeforeExpanding: NSObject, UISplitViewControllerDelegate {
+    let split: SplitIOS, sync: () -> Void
+    private(set) var synced = 0
+    init(_ split: SplitIOS, sync: @escaping () -> Void) { (self.split, self.sync) = (split, sync) }
+    override func responds(to aSelector: Selector!) -> Bool { super.responds(to: aSelector) || split.responds(to: aSelector) }
+    override func forwardingTarget(for aSelector: Selector!) -> Any? { split.responds(to: aSelector) ? split : nil }
+    func splitViewControllerDidExpand(_ svc: UISplitViewController) {
+        if !svc.isCollapsed { sync(); synced += 1 }
+        split.splitViewControllerDidExpand(svc)
     }
 }
 #endif
