@@ -123,6 +123,8 @@ export function install(modules) {
   const background = () => { record('background'); for (const s of services) s.background(); };
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { background(); if (!outcome && !document.prerendering) { hidden = true; finish('interrupted'); } } });
   addEventListener('pagehide', background);
+  // Native dismissal can change busy membership without an authored event or a commit.
+  for (const kind of ['close', 'toggle']) document.addEventListener(kind, () => { dirty = true; queueMicrotask(evaluate); }, true);
   for (const t of ['pointerup', 'keydown']) addEventListener(t, e => { lastInput = e.timeStamp; }, { capture: true, passive: true });
   setTimeout(() => finish('timeout'), TTI_TIMEOUT_MS);
   // Errors and Contract's observe commands. The commands' arguments end in a
