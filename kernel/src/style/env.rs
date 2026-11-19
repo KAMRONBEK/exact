@@ -468,6 +468,12 @@ pub struct Env {
     /// environment a node's rows resolve against; `None` for the document's
     /// own, outside every owner. `env()` never reads them.
     pub owner: Option<std::sync::Arc<super::owner::OwnerValues>>,
+    /// What `env(safe-area-inset-<edge>)` reads at one node, top right bottom
+    /// left: the remainder of its context, the document's insets outside
+    /// every owner, an owner's own inside one, and 0 in a scroller's padding
+    /// and content on the edges it takes (`kernel::context`). Set, as `local`
+    /// is, only in an environment made for that node; `None`: the document's.
+    pub context: Option<[f32; 4]>,
 }
 
 /// The segments a node reads by `--exact-viewport-segment-*` (LLP 1123 D16).
@@ -569,6 +575,7 @@ impl Env {
             segments_held: None,
             rtl: false,
             owner: None,
+            context: None,
         }
     }
 
@@ -648,6 +655,14 @@ impl Env {
     pub fn root_inset(&self, edge: Edge) -> f32 {
         self.root_local
             .map_or_else(|| self.inset(edge), |l| l[edge as usize])
+    }
+
+    /// What `env(safe-area-inset-<edge>)` reads: the node's context's
+    /// remainder where the environment was made for a node, else the
+    /// document's inset.
+    pub fn safe_inset(&self, edge: Edge) -> f32 {
+        self.context
+            .map_or_else(|| self.inset(edge), |c| c[edge as usize])
     }
 
     /// The inset at an edge.
@@ -864,7 +879,7 @@ pub fn linked() -> bool {
 /// region's (the safe area's on a host that reports none), plus its own.
 pub(crate) fn resolve_inset(d: Dimension, env: &Env) -> Dimension {
     let (base, plus) = match d {
-        Dimension::Env(edge, plus) => (env.inset(edge), plus),
+        Dimension::Env(edge, plus) => (env.safe_inset(edge), plus),
         Dimension::Region(region, edge, plus) => (env.region_inset(region, edge), plus),
         other => return other,
     };

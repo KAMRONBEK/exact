@@ -1301,6 +1301,14 @@ pub fn taffy_style(arena: &NodeArena, slot: u32) -> taffy::style::Style {
     let style = arena.effective_style(slot);
     let env = crate::kernel::owner::env_for(arena, slot, &style);
     let mut s = style.to_taffy(arena.node_type(slot), &env);
+    // Read a scroller's padding as its content: it lies inside the scroller's content inset (`kernel::context`)
+    let (vertical, horizontal) = crate::kernel::context::scroll_axes(arena, slot);
+    if env.context.is_some() && (vertical || horizontal) {
+        let mut padded = env.as_ref().clone();
+        padded.local = (padded.local).map(|l| crate::kernel::context::inside(arena, slot, l));
+        padded.context = Some(crate::kernel::context::context_at(arena, slot, true));
+        s.padding = style.to_taffy(arena.node_type(slot), &padded).padding;
+    }
     arena.alert_layout(slot, &mut s);
     arena.bar_symbol_layout(slot, &mut s);
     // HTML's button layout, which Exact's reset of a `<button>` keeps: its

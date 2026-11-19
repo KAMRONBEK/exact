@@ -377,7 +377,7 @@ fn a_box_in_a_dialog_in_an_owner_reads_the_documents_values_and_the_owners_conta
 }
 
 #[test]
-fn a_sticky_inset_in_an_owner_reads_the_owners_values() {
+fn a_sticky_inset_in_an_owners_scroller_reads_what_the_scroller_leaves() {
     let mut kernel = laptop();
     kernel.set_owner_values(2, Some(route_values())).unwrap();
     let scroller = vec![
@@ -429,9 +429,10 @@ fn a_sticky_inset_in_an_owner_reads_the_owners_values() {
     let sticky = kernel
         .sticky_constraint(kernel.arena().key_of(13).unwrap())
         .unwrap();
-    // `var(--exact-safe-area-inset-top)` is main's local inset, the window's
-    // 82 where no host reports the route's own.
-    assert_eq!(sticky.insets[0], Some(86.0));
+    // The scroller insets its content's top, past which its host sticks the
+    // box, so `var(--exact-safe-area-inset-top)` reads 0 there, not the
+    // route's 82
+    assert_eq!(sticky.insets[0], Some(4.0));
 }
 
 #[test]

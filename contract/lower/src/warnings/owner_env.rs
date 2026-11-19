@@ -1,11 +1,11 @@
 //! `lower-env-in-owner` (LLP 1123 D9): a route reads the window's
-//! `env(safe-area-inset-*)`, `env(-exact-<region>-inset-*)` or
-//! `env(viewport-segment-*)`. A route is a content owner whose safe area,
-//! layout regions and segments are its own, read as `var(--exact-…)`:
-//! under a navigation bar the window's top inset clears the status bar a
-//! second time, and a pane placed on the window's segment misses the fold
-//! by the bar's height. A dialog or a popover is the document's (D9), so
-//! `env()` is right inside one. A computed value is given the benefit.
+//! `env(-exact-<region>-inset-*)` or `env(viewport-segment-*)`. A route is a
+//! content owner whose layout regions and segments are its own, read as
+//! `var(--exact-…)`: a pane placed on the window's segment misses the fold by
+//! the bar's height. `env(safe-area-inset-*)` reads what its context leaves
+//! (`exact_kernel`'s inset rule), so it is the route's already. A dialog or a
+//! popover is the document's (D9), so `env()` is right inside one. A computed
+//! value is given the benefit.
 
 use crate::LowerError;
 use contract_checking::Visit;
@@ -61,7 +61,7 @@ fn warn(row: &Attr, seen: &mut BTreeSet<(u32, u32, u32)>, out: &mut Vec<LowerErr
     let name = &row.name;
     out.push(LowerError {
         id: "lower-env-in-owner",
-        message: format!("`{name}=\"{value}\"` reads the window's `env()` inside a route, which has a safe area, layout regions and fold segments of its own, measured from where its content starts (LLP 1123 D9): under a navigation bar the window's top inset clears the status bar twice, and a pane on the window's segment misses the fold by the bar's height. Write the route's: `{name}=\"{owned}\"`. In a dialog or a popover, which are the window's, `env()` is right"),
+        message: format!("`{name}=\"{value}\"` reads the window's `env()` inside a route, which has layout regions and fold segments of its own, measured from where its content starts (LLP 1123 D9): a pane on the window's segment misses the fold by the bar's height. Write the route's: `{name}=\"{owned}\"`. In a dialog or a popover, which are the window's, `env()` is right"),
         span: row.span,
     });
 }
@@ -87,23 +87,14 @@ fn owner_spelling(value: &str) -> Option<String> {
                 }
                 _ => None,
             }
-        } else if name.starts_with("safe-area-inset-") {
-            Some(format!("--exact-{name}"))
         } else {
             name.strip_prefix("-exact-")
                 .filter(|n| n.contains("-inset-"))
                 .map(|n| format!("--exact-{n}"))
         };
-        // An owner's value, or its safe area's own (the local inset, `EnvTerm::Local`)
-        let local = |n: &str| {
-            n.strip_prefix(exact_kernel::style::env::LOCAL_PREFIX)
-                .and_then(exact_kernel::style::Edge::from_name)
-                .is_some()
-        };
-        match owned.filter(|n| exact_kernel::OwnerVar::from_name(n).is_some() || local(n)) {
+        match owned.filter(|n| exact_kernel::OwnerVar::from_name(n).is_some()) {
             Some(n) => {
-                // The local inset takes no fallback: every host defines it
-                out.push_str(&match fallback.filter(|_| !local(&n)) {
+                out.push_str(&match fallback {
                     Some(f) => format!("var({n}, {f})"),
                     None => format!("var({n})"),
                 });
@@ -137,10 +128,8 @@ mod tests {
 
     #[test]
     fn each_owner_value_is_spelled_as_its_var() {
-        assert_eq!(
-            owner_spelling("calc(env(safe-area-inset-top) + 8px)").as_deref(),
-            Some("calc(var(--exact-safe-area-inset-top) + 8px)")
-        );
+        // The safe area's inset reads the route's remainder already
+        assert_eq!(owner_spelling("calc(env(safe-area-inset-top) + 8px)"), None);
         assert_eq!(
             owner_spelling("env(viewport-segment-left 1 0)").as_deref(),
             Some("var(--exact-viewport-segment-left-1-0)")
@@ -151,11 +140,7 @@ mod tests {
         );
         assert_eq!(owner_spelling("env(keyboard-inset-height)"), None);
         assert_eq!(owner_spelling("env(titlebar-area-x)"), None);
-        // The local inset takes no fallback; an owner's value keeps one, a function in it whole.
-        assert_eq!(
-            owner_spelling("env(safe-area-inset-top, 0px)").as_deref(),
-            Some("var(--exact-safe-area-inset-top)")
-        );
+        // An owner's value keeps its fallback, a function in it whole
         assert_eq!(
             owner_spelling("calc(env(viewport-segment-width 0 0, calc(50% - 1px)) + 2px)")
                 .as_deref(),

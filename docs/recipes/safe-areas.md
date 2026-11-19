@@ -40,5 +40,6 @@ column navigationKey="inbox" position="absolute" inset=0 display="flex" flex-dir
   `var(--exact-safe-area-inset-bottom)`.
 - `start` and `end` are the leading and trailing sides and right to left mirrors them.
   Positions and the values are physical: `-left` goes with `padding-left`.
-- Padding by `env(safe-area-inset-*)` inside a route clears the safe area twice (warning
-  `lower-env-in-owner`).
+- `env(safe-area-inset-*)` is what is left of the safe area where the box is: 0 on an edge
+  the route clears, and in a scroller on the edges it scrolls, which the platform insets.
+  `max(16px, env(safe-area-inset-top))` there is 16 past that inset.

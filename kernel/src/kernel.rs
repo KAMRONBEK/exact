@@ -25,6 +25,7 @@ mod alert;
 pub(crate) mod area;
 pub(crate) mod bar;
 pub(crate) mod block;
+pub(crate) mod context;
 pub use block::{take_trial_phases, ClearanceTrial}; // PROTO (rule 4)
 mod cover;
 mod document;
