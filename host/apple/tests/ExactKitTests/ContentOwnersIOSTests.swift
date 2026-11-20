@@ -1387,8 +1387,7 @@ final class ContentOwnersIOSTests: XCTestCase {
         XCTAssertEqual(agent.clock(["settle": true])["settled"] as? Bool, true)
         let nav = try XCTUnwrap(p.navigationHost.primaryNavigation)
         let route = try XCTUnwrap(nav.topViewController as? RouteController)
-        // Where viewport-info-open starts in the route's view, the root's own place counted (PROTO): a left cover moves
-        // it right, inside a scroller that reaches under the cover too.
+        // Where viewport-info-open starts in the route's view (PROTO): a left cover moves it right, in a scroller under it
         let target = try node(session, "viewport-info-open").id
         func left() -> CGFloat? {
             var x: CGFloat = 0, at: UInt32? = target
@@ -1399,9 +1398,7 @@ final class ContentOwnersIOSTests: XCTestCase {
             }
             return nil
         }
-        func wantedLeft() -> CGFloat {
-            if case .edges(let edges)? = p.navigationHost.covers[route.node.id] { edges.left } else { 0 }
-        }
+        func wantedLeft() -> CGFloat { if case .edges(let edges)? = p.navigationHost.covers[route.node.id] { edges.left } else { 0 } }
         let uncovered = try XCTUnwrap(left()) - wantedLeft()
         let insets = route.additionalSafeAreaInsets, frame = route.view.frame
         for extra in [CGFloat(31), 0] {
@@ -1414,9 +1411,7 @@ final class ContentOwnersIOSTests: XCTestCase {
                     XCTAssertNotEqual(wantedLeft(), previous, "the native change produces a different cover inside the served callback")
                 }
             }
-            until("the runner applies the sampled left cover \(wantedLeft()); the target starts at \(String(describing: left()))") {
-                left().map { abs($0 - uncovered - wantedLeft()) < 0.5 } == true
-            }
+            until("the runner applies the sampled left cover \(wantedLeft()); the target starts at \(String(describing: left()))") { left().map { abs($0 - uncovered - wantedLeft()) < 0.5 } == true }
             XCTAssertEqual(p.navigationHost.delivered[route.node.id], p.navigationHost.covers[route.node.id])
         }
     }

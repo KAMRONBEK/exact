@@ -380,7 +380,7 @@ const REENTRY_UNREAD = new Set([
   'host/apple/Sources/ExactKit/Mac/CoversMac.swift delivering',
   'host/apple/Sources/ExactKit/Mac/PresenterMac.swift applying',
   'host/apple/Sources/ExactKit/Mac/PresenterMac.swift drainingGeometry',
-  'host/apple/Sources/ExactKit/Mac/SidebarMac.swift syncing',
+  'host/apple/Sources/ExactNavigation/Mac/SidebarMac.swift syncing',
   'host/apple/Sources/ExactKit/SessionIdleWork.swift draining',
   'host/apple/Sources/ExactMarkdown/MarkupEditor.swift styling',
 ]);

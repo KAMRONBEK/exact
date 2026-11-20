@@ -8,32 +8,29 @@ sheet's list: write nothing.
 
 ```text
 column navigationKey="inbox" position="absolute" inset=0 display="flex" flex-direction="column" -exact-preserves-superview-layout-margins="true"
-  // Content at the platform's margins (16 on an iPhone, 20 beside a sidebar): the route's
-  // root and the scroller preserve their superview's, as a view in a controller's view
-  // must in UIKit; the list still spans the screen and UIKit draws its indicator at the
-  // display's edge
+  // Content at the platform's margins (16 on an iPhone, 20 beside a sidebar): the root and
+  // the scroller preserve their superview's; the list still spans the screen
   scroll flex=1 -exact-preserves-superview-layout-margins="true" padding-left="var(--exact-layout-margins-inset-left)" padding-right="var(--exact-layout-margins-inset-right)"
-    // A carousel: nothing to write. It spans the screen and scrolls under the sidebar
+    // A carousel: nothing to write; it spans the screen, under the sidebar
     list display="flex" overflow-x="scroll" overflow-y="hidden" gap=12
       …
-  // A composer: in flow after the list, it follows the keyboard
+  // A composer after the list follows the keyboard
   row gap=8
     input …
     button …
 ```
 
 - **Content at the platform's margins**: pad the scroller by the values, as above, never the
-  route's root: padding there keeps the list and its carousels off the edges. A box reads its
-  own margins, UIKit's 8 points plus its safe area, unless it and each box above it to the
-  route's root write `-exact-preserves-superview-layout-margins="true"`, which reads the
-  controller view's. A carousel in
-  the scroller spans the screen; rows whose colour should span it pad themselves.
+  route's root, which keeps the list and its carousels off the edges. A box reads its
+  own margins (UIKit's 8 points plus its safe area) unless it and each box up to the route's
+  root preserve their superview's, as above. A carousel in the scroller spans the screen;
+  rows whose colour should span it pad themselves.
   `--exact-readable-content-inset-left` and `-right` give a readable width.
 - **Two panes side by side**: pad the left one's left and the right one's right by the
   values; the space between them is your `gap`.
 - **Keep a box off the edges**: a margin on it, or padding on the route's root. A card with
   a corner radius or a border stays in its box.
-- **Lay a box out under the bars or a sidebar** (a map, a photo, a dimming scrim):
+- **Lay a box out under the bars or a sidebar** (a map, a photo, a scrim):
   `-exact-safe-area-ignore="container"` takes every edge; `container start` only the leading
   side, `container top` only the top. MapKit keeps its controls clear.
 - **Keep an image's size but let it seem to continue** under a sidebar:
@@ -43,7 +40,7 @@ column navigationKey="inbox" position="absolute" inset=0 display="flex" flex-dir
 - **Turn a route's own clearance off on an edge**, to draw that edge yourself:
   `-exact-safe-area="bottom"` on the route's root (`none` for every edge), then pad by
   `var(--exact-safe-area-inset-bottom)`.
-- `start` and `end` are the leading and trailing sides and right to left mirrors them.
+- `start` and `end` are the leading and trailing sides, mirrored right to left.
   Positions and the values are physical: `-left` goes with `padding-left`.
 - `env(safe-area-inset-*)` is what is left of the safe area where the box is: 0 on an edge
   the route clears, and in a scroller on the edges it scrolls, which the platform insets.

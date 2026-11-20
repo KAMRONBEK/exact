@@ -1015,7 +1015,18 @@ fn styled(node: &Node, separated: bool, swiped: bool, class: ClassRows<'_>) -> N
             )
         });
     let row_height = mv("row-min-height", span);
-    let row_padding = cell::row_padding(attrs, children, class, span);
+    // The subtitle-shaped column the row holds alone, whose box its padding yields to
+    let shown = cell::texts(children);
+    let subtitle = match shown.as_slice() {
+        [Node::Element {
+            tag,
+            attrs,
+            children,
+            ..
+        }] if tag == "column" && cell_lines(children) => Some(attrs.as_slice()),
+        _ => None,
+    };
+    let row_padding = cell::row_padding(attrs, subtitle, class, span);
     // A label beside a field: the row wraps, so where both do not fit (the
     // accessibility text sizes) the field goes under the label, as in a
     // SwiftUI `Form`, rather than squeezing the label to nothing.
