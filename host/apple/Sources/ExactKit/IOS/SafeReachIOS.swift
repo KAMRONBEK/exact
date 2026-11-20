@@ -183,6 +183,14 @@ package struct SafeReach {
             default: reach.right = allocation.maxX - r.maxX
             }
         }
+        // A box that ignores the band and that layout placed past the route's safe area into it (LLP 1123 D4) covers
+        // that band already: its ancestors reach the edge too, so UIKit's safe area reaches the views inside it, as
+        // for what a leaf takes
+        let s = self.safe, ignores = Self.ignored(v).intersection(allowed)
+        if ignores.contains(.top), s.minY > allocation.minY + pixel, r.minY < s.minY - pixel { below.insert(.top) }
+        if ignores.contains(.bottom), s.maxY < allocation.maxY - pixel, r.maxY > s.maxY + pixel { below.insert(.bottom) }
+        if ignores.contains(.left), s.minX > allocation.minX + pixel, r.minX < s.minX - pixel { below.insert(.left) }
+        if ignores.contains(.right), s.maxX < allocation.maxX - pixel, r.maxX > s.maxX + pixel { below.insert(.right) }
         if reach.top > 0 || v.take.top > 0 { reachesTop(v) } // PROTO (UIKit-first measurement)
         // What of the reach lies inside the safe area: an enclosing scroller's padding, crossed to reach its edge.
         v.safeReach.own = UIEdgeInsets(top: 0, left: reach.left > 0 ? max(0, safe.minX - self.safe.minX) : 0,
@@ -293,7 +301,10 @@ package struct SafeReach {
     /// scrollable, the inline axis for a row flex container that does not wrap or a column-flowing grid, else the
     /// block axis.
     static func mainAxis(_ v: NodeView) -> Axis {
-        let ox = v.style["overflow_x"]?.string ?? "visible", oy = v.style["overflow_y"]?.string ?? "visible"
+        // A `scroll` or a `list` that says no vertical overflow scrolls vertically, as the kernel lays it out
+        // (`NodeType::scrolls_by_default`)
+        let byDefault = v.kind == "scroll" || v.kind == "list"
+        let ox = v.style["overflow_x"]?.string ?? "visible", oy = v.style["overflow_y"]?.string ?? (byDefault ? "auto" : "visible")
         let sx = ox == "scroll" || ox == "auto", sy = oy == "scroll" || oy == "auto"
         if sx != sy { return sx ? .x : .y }
         let display = v.style["display"]?.string
@@ -309,8 +320,9 @@ package struct SafeReach {
     static func axes(_ v: NodeView) -> (x: Bool, y: Bool) {
         guard let sv = v.scroll else { return (false, false) }
         let main = mainAxis(v), port = v.boxBounds.size
-        let x = sv.scrollsX && (main == .x || sv.contentSize.width > port.width)
-        let y = sv.scrollsY && (main == .y || sv.contentSize.height > port.height)
+        // Content that passes the port by less than half a point is the port's rounding, not overflow
+        let x = sv.scrollsX && (main == .x || sv.contentSize.width > port.width + 0.5)
+        let y = sv.scrollsY && (main == .y || sv.contentSize.height > port.height + 0.5)
         return (x, y)
     }
 
