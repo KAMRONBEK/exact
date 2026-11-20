@@ -54,7 +54,40 @@ test('Duo panes retain state and avoid book and laptop hinges in both reading di
         expect(await page.getByTestId('panes-activity-count').textContent()).toBe('1');
       }
     }
+    // The Arrange screen without UIKit's arrangement: each pane on its own segment, the primary on the leading one, and
+    // the header in the primary, so a pane on the lower segment starts there
+    await page.getByTestId('tab-arrangement').click();
+    const arranged = () => page.evaluate(() => ['primary', 'secondary', 'title'].map(name => {
+      const r = document.querySelector(`[data-testid="arrangement-1-${name}"]`)?.getBoundingClientRect();
+      return r && { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height };
+    }));
+    for (const direction of ['ltr', 'rtl']) {
+      await page.evaluate(direction => { document.documentElement.dir = direction; }, direction);
+      for (const [width, height, orientation, offset] of [[1280, 800, 'vertical', 620], [800, 1000, 'horizontal', 480]]) {
+        await cdp.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false,
+          displayFeature: { orientation, offset, maskLength: 40 } });
+        const leadingIsPrimary = orientation === 'horizontal' || direction === 'ltr';
+        const [start, end] = orientation === 'vertical' ? ['left', 'right'] : ['top', 'bottom'];
+        // Wait for the placement, then assert what it measured, so a failure prints the edges
+        await page.waitForFunction(([leadingIsPrimary, start, end, offset]) => {
+          const [primary, secondary] = ['primary', 'secondary'].map(name => document.querySelector(`[data-testid="arrangement-1-${name}"]`)?.getBoundingClientRect());
+          const [first, second] = leadingIsPrimary ? [primary, secondary] : [secondary, primary];
+          return first && second && first[end] <= offset + 1 && second[start] >= offset + 39;
+        }, [leadingIsPrimary, start, end, offset]).catch(() => {});
+        const [primary, secondary, title] = await arranged();
+        const [first, second] = leadingIsPrimary ? [primary, secondary] : [secondary, primary];
+        expect(first[end]).toBeLessThanOrEqual(offset + 1);
+        expect(second[start]).toBeGreaterThanOrEqual(offset + 39);
+        expect(Math.min(primary.width, primary.height, secondary.width, secondary.height)).toBeGreaterThan(200);
+        expect([title.left - primary.left, primary.right - title.right, title.top - primary.top].every(d => d >= 0)).toBe(true);
+      }
+    }
+    // A pushed Arrange screen on a fold has no bar, so its header draws Back
     await page.evaluate(() => { document.documentElement.dir = 'ltr'; });
+    await page.getByTestId('arrangement-1-next').click();
+    await page.getByTestId('arrangement-2-back').click();
+    await expect(page.getByTestId('arrangement-1-title').textContent()).resolves.toBe('Arrangement');
+    await page.getByTestId('tab-panes').click();
     await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 64, left: 40, right: 24, bottom: 32 } });
     const title = await page.getByTestId('panes-workspace-pane').getByRole('heading', { level: 1 }).boundingBox();
     const activity = await page.getByTestId('panes-activity-pane').getByRole('heading', { name: 'Activity', exact: true }).boundingBox();

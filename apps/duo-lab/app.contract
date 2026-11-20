@@ -82,13 +82,14 @@ style ReadingBody
   padding-bottom=16
   padding-left="max(calc(env(-exact-safe-area-corners-inset-left) + 16px), env(-exact-readable-content-corners-inset-left))"
   padding-right="max(calc(env(-exact-safe-area-corners-inset-right) + 16px), env(-exact-readable-content-corners-inset-right))"
-// The safe area kept clear of the panel's rounded corners (LLP 1123 D10)
+// The safe area kept clear of the panel's rounded corners (LLP 1123 D10), and at
+// least the route's own, which holds UIKit's bars, on a route that clears no edge
 style Safe
   box-sizing="border-box"
-  padding-top="env(-exact-safe-area-corners-inset-top)"
-  padding-right="env(-exact-safe-area-corners-inset-right)"
-  padding-bottom="env(-exact-safe-area-corners-inset-bottom)"
-  padding-left="env(-exact-safe-area-corners-inset-left)"
+  padding-top="max(env(-exact-safe-area-corners-inset-top), var(--exact-safe-area-inset-top))"
+  padding-right="max(env(-exact-safe-area-corners-inset-right), var(--exact-safe-area-inset-right))"
+  padding-bottom="max(env(-exact-safe-area-corners-inset-bottom), var(--exact-safe-area-inset-bottom))"
+  padding-left="max(env(-exact-safe-area-corners-inset-left), var(--exact-safe-area-inset-left))"
 // A header as the agent and the web paint it, clear of the corners; on iOS
 // it is UIKit's navigation bar
 style Head
@@ -165,6 +166,12 @@ component DuoLab
   derive paneRight = twoAcross ? "0px" : gutter
   derive panePadLeft = `max(0px, calc(env(-exact-readable-content-corners-inset-left) - 16px - ${paneLeft}))`
   derive panePadRight = twoAcross ? "env(-exact-safe-area-corners-inset-right)" : `max(0px, calc(env(-exact-readable-content-corners-inset-right) - 16px - ${gutter}))`
+  // Fold's panes pad by the safe area kept clear of the corners where they reach an edge, and by
+  // at least the route's own, which holds UIKit's bars, since the route clears no edge itself
+  derive safeTop = "max(env(-exact-safe-area-corners-inset-top), var(--exact-safe-area-inset-top))"
+  derive safeRight = "max(env(-exact-safe-area-corners-inset-right), var(--exact-safe-area-inset-right))"
+  derive safeBottom = "max(env(-exact-safe-area-corners-inset-bottom), var(--exact-safe-area-inset-bottom))"
+  derive safeLeft = "max(env(-exact-safe-area-corners-inset-left), var(--exact-safe-area-inset-left))"
   action choose(id: number)
     selected = id
   action selectTab(name: string)
@@ -234,7 +241,9 @@ component DuoLab
           column role="tabpanel" id=`panel-${t.name}` position="absolute" inset=0
             for entry, i in t.stack key=entry.id
               if t.name == "keyboard"
-                column navigationKey=`${entry.id}` navigationScroll=`keyboard-scroll-${entry.id}` id=`keyboard-route-${entry.id}` hatch="keyboard-route" data-keyboard-screen=entry.name data-focus-on-show=(entry.name == "keyboard-editor" ? "keyboard-editor" : entry.name == "keyboard" and returnFocus ? "keyboard-return" : "") class=Screen background-color=((entry.name == "keyboard" or entry.name == "keyboard-form") ? "-exact-grouped-background" : "Canvas") testId=`screen-${entry.name}`
+                // The route clears no side: the editor and search screens inset their text by `ReadingBody`, and the
+                // lists' rows keep to UIKit's own safe area and margins, as a full-width list view's do
+                column navigationKey=`${entry.id}` navigationScroll=`keyboard-scroll-${entry.id}` id=`keyboard-route-${entry.id}` hatch="keyboard-route" -exact-safe-area="left right" data-keyboard-screen=entry.name data-focus-on-show=(entry.name == "keyboard-editor" ? "keyboard-editor" : entry.name == "keyboard" and returnFocus ? "keyboard-return" : "") class=Screen background-color=((entry.name == "keyboard" or entry.name == "keyboard-form") ? "-exact-grouped-background" : "Canvas") testId=`screen-${entry.name}`
                   header class=Head display="flex" align-items="center" gap=8
                     text (entry.name == "keyboard" ? "Keyboard Check" : entry.name == "keyboard-form" ? "Far Focus" : entry.name == "keyboard-search" ? "Search" : "Editor") role="heading" aria-level=2
                     if entry.name == "keyboard-form"
@@ -315,11 +324,12 @@ component DuoLab
                         text "Type sample text in the header, then use Back. The previous screen should show the final committed text and one blur. Repeat with a swipe. Check the committed text after Back, then Share from that screen; recording continues through Back." testId="keyboard-search-description"
               // Reflow and Images scroll the whole width under a header that is
               // UIKit's navigation bar, whose large title UIKit takes away as the
-              // scroller immediately following the header moves. Fold, Combinations
-              // and the note screen draw their own headers, which move with their
-              // panes when the device folds (LLP 1115.000 D5.2).
+              // scroller immediately following the header moves. Their rows inset their
+              // sides by `ReadingBody`, so the route clears only its top and bottom.
+              // Fold, Combinations and the note screen draw their own headers, which
+              // move with their panes when the device folds (LLP 1115.000 D5.2).
               if entry.name == "images"
-                column navigationKey=`${entry.id}` navigationScroll="image-list" class=Screen testId="screen-images"
+                column navigationKey=`${entry.id}` navigationScroll="image-list" -exact-safe-area="left right" class=Screen testId="screen-images"
                   header class=Head
                     text "Images" role="heading" aria-level=1 testId="images-title"
                     text `${rows.length} ${rows.length == 1 ? "row" : "rows"} over four pictures; fold mid-scroll.`
@@ -329,7 +339,7 @@ component DuoLab
                         image row.asset aria-label=row.caption width="100%" height=190 border-radius=12 object-fit="cover" background-color="-exact-secondary-background" testId=`image-${row.id}`
                         text row.caption font-size=13 padding-top=6 color="-exact-secondary-label" testId=`image-caption-${row.id}`
               if entry.name == "reflow"
-                column navigationKey=`${entry.id}` navigationScroll="reflow-scroll" class=Screen testId="screen-reflow"
+                column navigationKey=`${entry.id}` navigationScroll="reflow-scroll" -exact-safe-area="left right" class=Screen testId="screen-reflow"
                   header class=Head
                     text "Reflow" role="heading" aria-level=1 testId="reflow-title"
                   scroll id="reflow-scroll" flex=1 min-height=0 width="100%" box-sizing="border-box" testId="reflow-scroll"
@@ -350,37 +360,39 @@ component DuoLab
                 else
                   ArrangementScreen(routeKey=`${entry.id}`, routeName=entry.name, prefix="pushed", title="Pushed panes", nextTitle="Back", openNext=back, nativeArrangement=paneSupport.available)
               if t.name == "arrangement"
-                ArrangementView(routeKey=`${entry.id}`, depth=(match parseNumber(entry.params.depth) { case some(n) => n, case none => i + 1 }), native=paneSupport.available, seed=arrangementSeed, openNext=openArrangement)
+                ArrangementView(routeKey=`${entry.id}`, depth=(match parseNumber(entry.params.depth) { case some(n) => n, case none => i + 1 }), native=paneSupport.available, seed=arrangementSeed, openNext=openArrangement, back=back)
+              // Fold, Combinations and the note screen inset their panes by the safe area, so the route
+              // clears no edge itself: each inset counts once, and a pane's background reaches the
+              // display's edge under the bars and the home indicator.
               if entry.name != "images" and entry.name != "reflow" and t.name != "keyboard" and t.name != "panes" and t.name != "arrangement"
-                column navigationKey=`${entry.id}` navigationBar="none" class=Screen testId=`screen-${entry.name}`
+                column navigationKey=`${entry.id}` navigationBar="none" -exact-safe-area="none" class=Screen testId=`screen-${entry.name}`
                   if entry.name == "fold"
                     // Two segments across: the list on the first, the detail on the
                     // second, each inset on its own side by the safe area kept clear
                     // of the panel's corners (LLP 1123 D10); two down
                     // (the Duo's inner panel upright): the list on the upper, the
-                    // detail on the lower. A pane reaching the bottom ends where the
-                    // route does: under UIKit's tab bar along the bottom by the home
-                    // indicator's inset, which its padding takes; at the bottom beside
-                    // UIKit's rail; above the web's tablist. The band
+                    // detail on the lower. A pane reaching the bottom ends at the
+                    // viewport's, under UIKit's tab bar or beside its rail, its padding
+                    // keeping its content above the bar; above the web's tablist. The band
                     // belongs to neither (LLP 1078 D1, D3); one segment stacks the panes.
                     if twoAcross
-                      column testId="pane-list" width="env(viewport-segment-width 0 0)" height="100%" box-sizing="border-box" padding-top="env(-exact-safe-area-corners-inset-top)" padding-bottom="env(-exact-safe-area-corners-inset-bottom)" padding-left="env(-exact-safe-area-corners-inset-left)"
+                      column testId="pane-list" width="env(viewport-segment-width 0 0)" height="100%" box-sizing="border-box" padding-top=safeTop padding-bottom=safeBottom padding-left=safeLeft
                         Facts(viewport=viewport)
                         ItemList(items=items, selected=selected, choose=choose)
-                      column testId="pane-detail" position="absolute" top=0 left="env(viewport-segment-left 1 0)" width="env(viewport-segment-width 1 0)" height="100%" box-sizing="border-box" padding-top="env(-exact-safe-area-corners-inset-top)" padding-right="env(-exact-safe-area-corners-inset-right)" padding-bottom="env(-exact-safe-area-corners-inset-bottom)" background-color="-exact-secondary-background"
+                      column testId="pane-detail" position="absolute" top=0 left="env(viewport-segment-left 1 0)" width="env(viewport-segment-width 1 0)" height="100%" box-sizing="border-box" padding-top=safeTop padding-right=safeRight padding-bottom=safeBottom background-color="-exact-secondary-background"
                         Detail(items=items, selected=selected)
                     else
                       if twoDown
-                        column testId="pane-list" width="100%" height="env(viewport-segment-height 0 0)" box-sizing="border-box" padding-top="env(-exact-safe-area-corners-inset-top)" padding-right="env(-exact-safe-area-corners-inset-right)" padding-left="env(-exact-safe-area-corners-inset-left)"
+                        column testId="pane-list" width="100%" height="env(viewport-segment-height 0 0)" box-sizing="border-box" padding-top=safeTop padding-right=safeRight padding-left=safeLeft
                           Facts(viewport=viewport)
                           ItemList(items=items, selected=selected, choose=choose)
-                        column testId="pane-detail" position="absolute" left=0 top="env(viewport-segment-top 0 1)" bottom=0 width="100%" box-sizing="border-box" padding-right="env(-exact-safe-area-corners-inset-right)" padding-bottom="env(-exact-safe-area-corners-inset-bottom)" padding-left="env(-exact-safe-area-corners-inset-left)" background-color="-exact-secondary-background"
+                        column testId="pane-detail" position="absolute" left=0 top="env(viewport-segment-top 0 1)" bottom=0 width="100%" box-sizing="border-box" padding-right=safeRight padding-bottom=safeBottom padding-left=safeLeft background-color="-exact-secondary-background"
                           Detail(items=items, selected=selected)
                       else
-                        column testId="pane-list" flex=1 min-height=0 width="100%" box-sizing="border-box" padding-top="env(-exact-safe-area-corners-inset-top)" padding-right="env(-exact-safe-area-corners-inset-right)" padding-left="env(-exact-safe-area-corners-inset-left)"
+                        column testId="pane-list" flex=1 min-height=0 width="100%" box-sizing="border-box" padding-top=safeTop padding-right=safeRight padding-left=safeLeft
                           Facts(viewport=viewport)
                           ItemList(items=items, selected=selected, choose=choose)
-                        column testId="pane-detail" flex=1 min-height=0 width="100%" box-sizing="border-box" padding-right="env(-exact-safe-area-corners-inset-right)" padding-bottom="env(-exact-safe-area-corners-inset-bottom)" padding-left="env(-exact-safe-area-corners-inset-left)" background-color="-exact-secondary-background"
+                        column testId="pane-detail" flex=1 min-height=0 width="100%" box-sizing="border-box" padding-right=safeRight padding-bottom=safeBottom padding-left=safeLeft background-color="-exact-secondary-background"
                           Detail(items=items, selected=selected)
                   if entry.name == "combos"
                     column flex=1 min-height=0 margin-left=paneLeft margin-right=paneRight class=Safe padding-left=panePadLeft padding-right=panePadRight
@@ -393,7 +405,7 @@ component DuoLab
                   if entry.name == "note"
                     column flex=1 min-height=0 margin-left=paneLeft margin-right=paneRight class=Safe padding-left=panePadLeft padding-right=panePadRight
                       row align-items="center" gap=12 padding-left=16 padding-right=16 padding-top=12
-                        button press=back testId="note-back" padding=8 border-radius=8 background-color="-exact-tertiary-fill"
+                        button press=back testId="note-back" padding=8 min-width=44 min-height=44 box-sizing="border-box" display="flex" align-items="center" justify-content="center" border-radius=8 background-color="-exact-tertiary-fill"
                           text "Back" font-size=14 font-weight=600 color="AccentColor"
                         text "Note" font-size=20 font-weight=700 testId="note-title"
                       text "This pushed route hides the tab bar on purpose, to test a route without one; Back shows it again. The sheet below holds a textarea; its keyboard shortens the viewport (resizes-content)." class=Note padding-top=8
@@ -410,10 +422,10 @@ component DuoLab
                         text "Note" font-size=18 font-weight=600
                         text "Drag to resize" font-size=11 color="-exact-secondary-label"
                       row gap=12 align-items="center"
-                        button press=dismiss testId="note-dismiss" padding=10 border-radius=8 background-color="-exact-tertiary-fill"
+                        button press=dismiss testId="note-dismiss" padding=10 min-height=44 box-sizing="border-box" display="flex" align-items="center" border-radius=8 background-color="-exact-tertiary-fill"
                           text "Dismiss the keyboard" font-size=14 font-weight=600
                         text (noteFocused ? "editing" : "idle") testId="note-state" font-size=13 color="-exact-secondary-label"
-                      input appearance="none" value=title input=writeTitle focus=focusIn blur=focusOut placeholder="Title" testId="note-title-input" aria-label="Title" width="100%" box-sizing="border-box" padding=10 border-width=1 border-style="solid" border-color="-exact-separator" border-radius=10 font-size=16
+                      input appearance="none" value=title input=writeTitle focus=focusIn blur=focusOut placeholder="Title" testId="note-title-input" aria-label="Title" width="100%" min-height=44 box-sizing="border-box" padding=10 border-width=1 border-style="solid" border-color="-exact-separator" border-radius=10 font-size=16
                       textarea appearance="none" value=draft input=write focus=focusIn blur=focusOut placeholder="Write, then fold" testId="note-textarea" aria-label="Note" width="100%" min-height=96 box-sizing="border-box" padding=12 border-width=1 border-style="solid" border-color="-exact-separator" border-radius=10 font-size=16 line-height="22px"
       // Hidden on the note screen, an editor, as the guide hides a route's tab bar
       // (docs/contract-for-agents.md, "Hide the tab bar on a route"). On a book

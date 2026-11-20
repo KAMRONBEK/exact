@@ -26,7 +26,7 @@
 // `--only insets,keyboard-bar,lab,arrangement,reading,navigation,navigation-gestures,host-navigation,host,rotate,resize,web` runs the named legs; the keyboard checks
 // run only when a probe shows a software keyboard on this simulator.
 import { spawn, spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { appleArtifacts } from '../host/apple/build.mjs';
@@ -333,9 +333,8 @@ async function suite({ open: openSession, check: record }, reset) {
    * its route starts at the viewport's top and ends at the keyboard's top while one shows, else at the viewport's bottom;
    * under the agent's chrome it ends at the viewport's bottom. iOS's layout lists only views in the window, so its sheet
    * is listed only while it shows. Under UIKit's bars the authored
-   * tablist has no box. Beside UIKit's tab bar along the bottom a tab's route ends below the bar's top by the home
-   * indicator's inset (34 points on the whole panel), which the panes' padding takes; beside its rail, at the viewport's
-   * bottom. Under the agent's own chrome (the web leg) the tablist is laid out below the routes, as the web does,
+   * tablist has no box. Fold's route clears no edge, so it ends at the viewport's bottom under UIKit's tab bar along
+   * the bottom and beside its rail alike, its panes' padding keeping their content off the bar. Under the agent's own chrome (the web leg) the tablist is laid out below the routes, as the web does,
    * ending at the viewport's bottom, and they end at its top. */
   const routesEnd = async (s, l, tag, native) => {
     const bar = box(l, 'tab-bar'), laid = bar?.w > 0 && bar?.h > 0, uikit = s.chrome !== 'agent';
@@ -354,7 +353,7 @@ async function suite({ open: openSession, check: record }, reset) {
       if (!check(f, `${tag}: UIKit's tab bar is visible`)) return l.viewport.h;
       if (f.h > f.w) return l.viewport.h; // a rail at the side
       check(near(f.x, 0) && near(f.w, l.viewport.w) && near(f.y + f.h, l.viewport.h), `${tag}: UIKit's tab bar runs along the viewport's bottom: ${JSON.stringify(f)} in ${JSON.stringify(l.viewport)}`);
-      return f.y + l.env['safe-area-inset-bottom'];
+      return l.viewport.h;
     }
     check(laid && onGrid(bar.y + bar.h, l.viewport.h), `${tag}: the agent's chrome lays the tablist out at the viewport's bottom: ${JSON.stringify(bar)} in ${JSON.stringify(l.viewport)}`);
     return laid ? bar.y : l.viewport.h;
@@ -410,6 +409,12 @@ async function suite({ open: openSession, check: record }, reset) {
     const on = (pane, r, full) => pane && (full ? near(pane.x, r[0]) && near(pane.w, l.viewport.w) && onGrid(pane.y, r[1]) && onGrid(pane.h, Math.min(r[1] + r[3], end) - r[1]) : onGrid(pane.x, r[0]) && onGrid(pane.w, r[2]) && near(pane.y, r[1]) && near(pane.h, end - r[1]));
     if (segs?.length === 2 && (h === 2 || v === 2)) check(on(list, segs[0], v === 2) && on(detail, segs[1], v === 2), `${tag}: the panes sit on the segments ${JSON.stringify(segs)} (${h}×${v}) above ${end}: list ${JSON.stringify(list)} detail ${JSON.stringify(detail)}`);
     else check(list && detail && near(list.w, l.viewport.w) && near(detail.w, l.viewport.w) && detail.y >= list.y + list.h - 0.01 && onGrid(detail.y + detail.h, end), `${tag}: one pane, the list above the detail, ending with the routes at ${end}: list ${JSON.stringify(list)} detail ${JSON.stringify(detail)}`);
+    // The panes reach under UIKit's tab bar along the bottom, and their scrollers stop at its top
+    const bar = s.chrome !== 'agent' ? await tabBarFrame(s) : undefined;
+    if (bar && bar.w > bar.h) for (const id of ['item-list', 'detail-scroll']) {
+      const scroller = box(l, id);
+      check(scroller && scroller.y + scroller.h <= bar.y + 0.5, `${tag}: ${id} ends above UIKit's tab bar at ${bar.y}: ${JSON.stringify(scroller)}`);
+    }
     check(text('detail-title') === chosen, `${tag}: the selection survived: ${text('detail-title')} (was ${chosen})`);
   };
   /** At a fold, layout `l` has two segments, and no control of the screen shown lies on the band between them, the
@@ -476,9 +481,10 @@ async function suite({ open: openSession, check: record }, reset) {
   // The insets fixture serves its leg and the keyboard probe, which the legs that type need
   const probe = leg('insets') || leg('keyboard-bar') || leg('lab') || leg('rotate') || leg('web') || leg('navigation') || leg('navigation-gestures') || leg('secondary-navigation') || leg('host-navigation');
   const plans = {};
-  const compile = (name, source) => {
+  /** Compile `source` to `<name>.plan`, or, given `text`, that text as though it were `source`. */
+  const compile = (name, source, text) => {
     const plan = resolve(out, `${name}.plan`);
-    const c = spawnSync('cargo', ['run', '-q', '--profile', HOST_DEV, '-p', 'contract', '--', 'build', source, '-o', plan], { cwd: ROOT, encoding: 'utf8' });
+    const c = spawnSync('cargo', ['run', '-q', '--profile', HOST_DEV, '-p', 'contract', '--', 'build', source, ...(text == null ? [] : ['--stdin']), '-o', plan], { cwd: ROOT, encoding: 'utf8', input: text });
     if (check(c.status === 0, `the ${name} fixture did not compile: ${c.stderr}`)) plans[name] = plan;
   };
   for (const name of [probe ? 'insets' : null, leg('keyboard-bar') ? 'keyboard-bar' : null].filter(Boolean)) compile(name, resolve(ROOT, `contract/corpus/${name}.contract`));
@@ -492,11 +498,9 @@ async function suite({ open: openSession, check: record }, reset) {
   if (leg('rotate') || leg('web')) {
     const source = readFileSync(resolve(lab.dir, 'app.contract'), 'utf8'), tall = source.replace('state sheetPx = 400', 'state sheetPx = 600');
     if (check(tall !== source, 'duo-lab no longer declares `state sheetPx = 400`, which the rotate and web legs raise to 600')) {
-      // The copy compiles beside duo-lab's `app.json`, which declares the `data` names and hatches it uses
-      const fixture = mkdtempSync(resolve(out, 'duo-lab-tall-'));
-      copyFileSync(resolve(lab.dir, 'app.json'), resolve(fixture, 'app.json'));
-      writeFileSync(resolve(fixture, 'app.contract'), tall);
-      compile('duo-lab-tall', resolve(fixture, 'app.contract'));
+      // The variant compiles as duo-lab's own `app.contract`, so its `use` lines, symbols, colours and `app.json`
+      // resolve as the app's do
+      compile('duo-lab-tall', resolve(lab.dir, 'app.contract'), tall);
     }
   }
   const labBundle = appleArtifacts(lab, { destination: 'ios-simulator' }).bundle;

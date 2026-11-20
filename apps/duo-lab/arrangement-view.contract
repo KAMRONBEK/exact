@@ -27,6 +27,7 @@ component ArrangementView
     native: bool
     seed: ArrangementSettings
     openNext: action
+    back: action
   resource viewport = exactViewport() as shape PaneViewport
   // Each screen keeps its own settings, starting from those the last Next carried
   state settings = seed
@@ -37,6 +38,11 @@ component ArrangementView
   derive key = `arrangement-${routeKey}`
   derive prefix = `arrangement-${depth}`
   derive title = depth == 1 ? "Arrangement" : `Arrangement ${depth}`
+  derive across = viewport.horizontalViewportSegments == 2
+  derive down = viewport.verticalViewportSegments == 2
+  // Without UIKit's arrangement a fold puts each pane on its own segment and the header in the first pane, so
+  // the panes' container starts at the viewport's origin, which segments are measured from (docs/recipes/foldables.md)
+  derive anchored = not native and (across or down)
   action layout(value: string)
     settings = ArrangementSettings(settings, layout=value)
   action titleDisplay(value: string)
@@ -48,16 +54,9 @@ component ArrangementView
   action contentScroll(value: string)
     settings = ArrangementSettings(settings, contentScroll=value)
   view
-    column navigationKey=routeKey testId=`${prefix}-screen` data-title-display=settings.titleDisplay data-bar-minimization=settings.barMinimization data-safe-area-adjustment=settings.safeAreaAdjustment data-content-scroll=(settings.contentScroll == "automatic" ? "" : `${key}-${settings.contentScroll}`) position="absolute" inset=0
-      header display="flex" align-items="center" gap=8 padding="8px 16px"
-        text title role="heading" aria-level=2 flex=1 testId=`${prefix}-title`
-        if native
-          button popovertarget=`${key}-layout` aria-label="Layout" testId=`${prefix}-layout-button`
-            image "symbol:icon.split"
-          button popovertarget=`${key}-options` aria-label="Options" testId=`${prefix}-options-button`
-            image "symbol:more"
-        button press=openNext(settings, depth + 1) aria-label="Next" testId=`${prefix}-next`
-          image "symbol:icon.next"
+    column navigationKey=routeKey navigationBar=(anchored ? "none" : "auto") testId=`${prefix}-screen` data-title-display=settings.titleDisplay data-bar-minimization=settings.barMinimization data-safe-area-adjustment=settings.safeAreaAdjustment data-content-scroll=(settings.contentScroll == "automatic" ? "" : `${key}-${settings.contentScroll}`) position="absolute" inset=0
+      if not anchored
+        ArrangementHeader(title=title, prefix=prefix, menus=key, native=native, pushed=false, openNext=openNext(settings, depth + 1), back=back)
       if native
         column id=`${key}-layout` popover="auto" role="menu" position="absolute"
           Choice(menu=`${key}-layout`, group=`${prefix}-layout`, label="Split Automatic", value="split", chosen=settings.layout, choose=layout)
@@ -87,9 +86,37 @@ component ArrangementView
           Choice(menu=`${key}-options`, group=`${prefix}-safe-area`, label="Enabled", value="enabled", chosen=settings.safeAreaAdjustment, choose=safeAreaAdjustment)
           Choice(menu=`${key}-options`, group=`${prefix}-safe-area`, label="Disabled", value="disabled", chosen=settings.safeAreaAdjustment, choose=safeAreaAdjustment)
       // UIKit lays out the two panes where it supports arrangements; elsewhere CSS puts them side by side or stacked
-      column hatch="arranged-panes" data-pane-layout=(native ? settings.layout : "css") testId=`${prefix}-container` flex=1 min-height=0 flex-direction=paneDirection(viewport)
-        ArrangementPane(id=`${key}-primary`, name=`${prefix}-primary`, label="Primary", ground="pane.primary", stripe="pane.primary.stripe", band="pane.primary.band")
-        ArrangementPane(id=`${key}-secondary`, name=`${prefix}-secondary`, label="Secondary", ground="pane.secondary", stripe="pane.secondary.stripe", band="pane.secondary.band")
+      column hatch="arranged-panes" data-pane-layout=(native ? settings.layout : "css") testId=`${prefix}-container` flex=1 min-height=0 position="relative" flex-direction=(anchored ? "column" : paneDirection(viewport))
+        ArrangementPane(id=`${key}-primary`, name=`${prefix}-primary`, label="Primary", ground="pane.primary", stripe="pane.primary.stripe", band="pane.primary.band", anchored=anchored, leading=true, across=across, down=down)
+          if anchored
+            ArrangementHeader(title=title, prefix=prefix, menus=key, native=native, pushed=depth > 1, openNext=openNext(settings, depth + 1), back=back)
+        ArrangementPane(id=`${key}-secondary`, name=`${prefix}-secondary`, label="Secondary", ground="pane.secondary", stripe="pane.secondary.stripe", band="pane.secondary.band", anchored=anchored, leading=false, across=across, down=down)
+
+// The screen's header: UIKit's navigation bar where it is the route's first child. The Layout and Options
+// buttons open the menus the route declares beside it. In a pane it draws the Back a pushed screen's bar
+// would (docs/recipes/foldables.md).
+component ArrangementHeader
+  props
+    title: string
+    prefix: string
+    menus: string
+    native: bool
+    pushed: bool
+    openNext: action
+    back: action
+  view
+    header display="flex" align-items="center" gap=8 padding="8px 16px"
+      if pushed
+        button press=back testId=`${prefix}-back`
+          text "Back"
+      text title role="heading" aria-level=2 flex=1 testId=`${prefix}-title`
+      if native
+        button popovertarget=`${menus}-layout` aria-label="Layout" testId=`${prefix}-layout-button`
+          image "symbol:icon.split"
+        button popovertarget=`${menus}-options` aria-label="Options" testId=`${prefix}-options-button`
+          image "symbol:more"
+      button press=openNext aria-label="Next" testId=`${prefix}-next`
+        image "symbol:icon.next"
 
 // One single-choice row of a menu: the current choice is checked
 component Choice
@@ -123,9 +150,24 @@ component ArrangementPane
     ground: string
     stripe: string
     band: string
+    anchored: bool
+    leading: bool
+    across: bool
+    down: bool
+  slot
+  // On a segment, placed from the container's origin as the Panes screen's panes are. Across a fold each pane
+  // is as wide as the narrower segment: the primary aligns to the container's start, the secondary to its end,
+  // so in a right-to-left screen the primary takes the right segment. Down a fold the primary fills the upper
+  // segment, and the secondary runs from the top of the lower one to the container's end.
+  derive width = anchored and across ? "min(env(viewport-segment-width 0 0), env(viewport-segment-width 1 0))" : (anchored ? "auto" : "100%")
+  derive height = anchored and down and leading ? "env(viewport-segment-height 0 0)" : (anchored ? "auto" : "100%")
+  derive top = not anchored ? "auto" : (down and not leading ? "env(viewport-segment-top 0 1)" : "0px")
+  derive side = anchored and down ? "0px" : "auto"
+  derive bottom = anchored and not (down and leading) ? "0px" : "auto"
   view
-    // Fill UIKit's allocation, which is the pane's containing block, to scroll within it
-    scroll id=id hatch="arrangement-pane" testId=name flex="1 1 0%" width="100%" height="100%" min-width=0 min-height=0 background-color=ground
+    // Off a fold, fill UIKit's allocation (the pane's containing block) or the CSS row, to scroll within it
+    scroll id=id hatch="arrangement-pane" testId=name flex="1 1 0%" width=width height=height min-width=0 min-height=0 position=(anchored ? "absolute" : "relative") top=top left=side right=side bottom=bottom align-self=(anchored and across ? (leading ? "flex-start" : "flex-end") : "auto") background-color=ground
+      children
       for i in range(150) key=i
         column gap=4 padding="16px 20px" background-color=((i + 1) % 2 == 0 ? stripe : band) testId=`${name}-row-${i + 1}`
           text `${label} ${rowNumber(i + 1)}` font="-exact-body"
