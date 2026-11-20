@@ -7,6 +7,8 @@ final class GroupedCollectionView: UICollectionView, GroupedScroller {
     /// The list is UIKit's sidebar (`GroupedListView.sidebar`), whose rows follow its bar as it comes back.
     var followsBar = false
     private var top: CGFloat?
+    /// The list's node, which holds it
+    private var node: NodeView? { superview as? NodeView }
     /// UIKit brings a sidebar's bar back in one step as a search floated over the keys closes, and changes the list's
     /// top inset with UIView animations off (`performWithoutAnimation`), the rows dropping by the bar's height in one
     /// frame; it moves them on a spring as a search in the bar itself closes (measured on iOS 27.1: damping ratio 0.8,
@@ -17,8 +19,10 @@ final class GroupedCollectionView: UICollectionView, GroupedScroller {
         let was = top
         super.adjustedContentInsetDidChange()
         top = adjustedContentInset.top
+        // Only rows the last frame showed move: as the app launches the inset grows from 0 to the bar's before the
+        // list was ever shown, and its rows appear where they are laid out
         guard followsBar, let was, let top, top > was + 1, UIView.inheritedAnimationDuration == 0, window != nil,
-              abs(contentOffset.y + top) < 0.5 else { return }
+              abs(contentOffset.y + top) < 0.5, let node, node.presenter?.showed(node) == true else { return }
         let spring = CASpringAnimation(keyPath: "bounds.origin.y")
         (spring.mass, spring.stiffness, spring.damping) = (1, 306, 28) // ω 17.5 per second, ζ 0.8
         spring.fromValue = top - was
@@ -35,7 +39,7 @@ final class GroupedCollectionView: UICollectionView, GroupedScroller {
     override var bounds: CGRect {
         get { super.bounds }
         set {
-            guard UIView.inheritedAnimationDuration > 0, let node = superview as? NodeView, let presenter = node.presenter else { return super.bounds = newValue }
+            guard UIView.inheritedAnimationDuration > 0, let node, let presenter = node.presenter else { return super.bounds = newValue }
             presenter.moveOrPlace(node) { super.bounds = newValue }
         }
     }
