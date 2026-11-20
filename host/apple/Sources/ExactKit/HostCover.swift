@@ -22,13 +22,32 @@ package enum HostCover: Equatable {
     case gutter(right: CGFloat, bottom: CGFloat)
 }
 
-/// A content owner's values (LLP 1123 D9), in its content root's points:
-/// the safe area left there (top, right, bottom, left), D10's twenty region
-/// insets (`nil`: each is the safe area), the segments a fold makes of the
-/// content root, and its size, which container units read (D12).
-struct OwnerValues: Equatable {
-    var safe: [CGFloat]
-    var regions: [CGFloat]?
-    var fold: ViewportFold
-    var size: CGSize
+/// What the iOS host reports of a content owner beside its covers (LLP 1123
+/// D2's owner update): its margins as UIKit gives them, in its block's points
+/// (D8), nil where it reports none, and the segments a fold makes of its
+/// content root, in the content root's coordinates (D16). Its band is its
+/// root's cover, which the kernel reads as the band until a host gives one.
+package struct OwnerReport: Equatable {
+    /// UIKit's margins for an owner (the kernel's `OwnerMargins`), each four
+    /// top, right, bottom and left.
+    package struct Margins: Equatable {
+        /// The controller root view's margins guide as insets from the block's edges.
+        package var root: [CGFloat]
+        /// A plain view's default margins (a new `UIView`'s `layoutMargins`).
+        package var plain: [CGFloat]
+        /// The controller's `systemMinimumLayoutMargins`.
+        package var minimum: [CGFloat]
+        /// The width the root view's `readableContentGuide` keeps text to.
+        package var readableWidth: CGFloat
+
+        package init(root: [CGFloat], plain: [CGFloat], minimum: [CGFloat], readableWidth: CGFloat) {
+            (self.root, self.plain, self.minimum, self.readableWidth) = (root, plain, minimum, readableWidth)
+        }
+    }
+    package var margins: Margins?
+    package var fold: ViewportFold
+
+    package init(margins: Margins?, fold: ViewportFold) {
+        (self.margins, self.fold) = (margins, fold)
+    }
 }

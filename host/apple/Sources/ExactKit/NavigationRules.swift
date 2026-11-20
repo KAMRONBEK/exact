@@ -67,7 +67,7 @@ package enum NavigationRules {
     /// is above the detail's top in the app's stack (`shownKeys`), so a pop
     /// of the detail's top takes it too, and the route the pop takes away is
     /// the detail's top, the one beneath the inspector's (`poppedKeys`).
-    static func poppedTop(selected: String, inspecting: String?, shownKeys: [String]) -> String {
+    package static func poppedTop(selected: String, inspecting: String?, shownKeys: [String]) -> String {
         guard inspecting == selected, let at = shownKeys.firstIndex(of: selected), at > 0 else { return selected }
         return shownKeys[at - 1]
     }
@@ -75,7 +75,7 @@ package enum NavigationRules {
     /// The keys of the routes a pop UIKit committed takes from the app's stack (`popped`, `backTarget`): with the
     /// selected route's too when the inspector's column shows it and the pop took the detail's top beneath it
     /// (`poppedTop`).
-    static func poppedKeys(_ popped: Set<String>, selected: String, inspecting: String?, shownKeys: [String]) -> Set<String> {
+    package static func poppedKeys(_ popped: Set<String>, selected: String, inspecting: String?, shownKeys: [String]) -> Set<String> {
         let top = poppedTop(selected: selected, inspecting: inspecting, shownKeys: shownKeys)
         return top != selected && popped.contains(top) ? popped.union([selected]) : popped
     }
@@ -84,7 +84,7 @@ package enum NavigationRules {
     /// inspector's route with the route it is above (`poppedTop`): the route
     /// beneath that one. nil when the selected route is not the inspector's,
     /// or nothing is beneath.
-    static func beneathPoppedTop(selected: String, inspecting: String?, shownKeys: [String]) -> String? {
+    package static func beneathPoppedTop(selected: String, inspecting: String?, shownKeys: [String]) -> String? {
         let top = poppedTop(selected: selected, inspecting: inspecting, shownKeys: shownKeys)
         guard top != selected, let at = shownKeys.firstIndex(of: top), at > 0 else { return nil }
         return shownKeys[at - 1]

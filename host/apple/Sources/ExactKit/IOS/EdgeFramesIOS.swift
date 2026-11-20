@@ -39,7 +39,7 @@ extension Presenter {
     /// The boxes of `c`'s route that depend on its top edge, each between its two frames
     /// as far as UIKit has moved the edge from its resting place (`restingTop`) toward the
     /// block's top.
-    func placeEdge(_ c: any RouteSurface) {
+    package func placeEdge(_ c: any RouteSurface) {
         // PROTO (rule 4): place boxes between frames only in the resting mode; live modes lay them out at the edge
         guard ExactSession.protoMode == .resting, c.restingTop > 0, c.viewIfLoaded?.window != nil else { return }
         guard let frames = edgeFrames[c.node.id], !frames.isEmpty else {

@@ -4,7 +4,7 @@
 
 use crate::host::{view, NoData};
 use exact_apple::{Claims, Host};
-use exact_kernel::{BlockAxis, HostBlock, MonospaceMeasurer, OwnerValues};
+use exact_kernel::{BlockAxis, HostBlock, MonospaceMeasurer};
 use exact_runner::Event;
 
 const PAGE: &str = r##"component App
@@ -31,14 +31,6 @@ fn boot_owned(src: &str) -> (Host<NoData>, String) {
     let plan = contract::compile(src).unwrap();
     let measurer = Box::new(MonospaceMeasurer::default());
     let (mut host, _) = Host::boot(&plan.encode(), NoData, measurer, 800.0, 600.0).unwrap();
-    let values = OwnerValues {
-        safe: [0.0; 4],
-        regions: None,
-        cols: 1,
-        rows: 1,
-        segments: vec![],
-        size: (400.0, 300.0),
-    };
     // Container units read the owner's content root, in the block its host fixes (LLP 1123 D16)
     let block = HostBlock {
         tactic: Default::default(),
@@ -47,7 +39,6 @@ fn boot_owned(src: &str) -> (Host<NoData>, String) {
     };
     let owner = view(&host, "owner");
     let batch = host.set_claims(&Claims {
-        owners: &[(owner, Some(values))],
         blocks: &[(owner, Some(block))],
         ..Claims::default()
     });

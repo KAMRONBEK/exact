@@ -17,7 +17,6 @@ pub(crate) mod control_text;
 pub(crate) mod defaults;
 mod inline_image;
 mod lists;
-mod owners;
 mod styles;
 pub mod text_style;
 
@@ -136,10 +135,6 @@ pub struct NodeArena {
     /// absolutely positioned boxes placed past a covered box's bottom-edge
     /// chain (`cover::settle_chain`).
     pub(crate) covers: crate::kernel::Covers,
-    /// The content owners a host published values for (LLP 1123 D9), by their root's slot,
-    /// each with the environment its subtree's rows resolve against: the document's, carrying
-    /// its values. A few owners at most, as the covers.
-    owners: Vec<(u32, Env)>,
     /// The margins the platform's own list gives a grouped list's cards and
     /// cells, by the list's slot: a few lists at most, as the covers.
     grouped_cells: Vec<(u32, crate::grouped::GroupedCells)>,
@@ -230,7 +225,6 @@ impl Clone for NodeArena {
             nonzero_insets: self.nonzero_insets.clone(),
             intrinsic: self.intrinsic.clone(),
             covers: self.covers.clone(),
-            owners: self.owners.clone(),
             grouped_cells: self.grouped_cells.clone(),
             list_margins: self.list_margins.clone(),
             alert_state: self.alert_state.clone(),
@@ -284,7 +278,6 @@ impl NodeArena {
     /// Set the environment. The engine styles that read it are the
     /// kernel's to re-derive (`Kernel::set_env`).
     pub fn set_env(&mut self, env: Env) {
-        self.rebase_owners(&env);
         self.env = env;
         self.readers.invalidate();
         self.observations.invalidate();
@@ -339,7 +332,6 @@ impl NodeArena {
         self.nonzero_insets.clear();
         self.intrinsic.clear();
         self.covers = Default::default();
-        self.owners.clear();
         self.grouped_cells.clear();
         self.list_margins.clear();
         self.alert_state.clear();
@@ -1005,7 +997,6 @@ impl NodeArena {
         self.set_inset(slot, None);
         self.intrinsic.remove(&slot);
         self.covers.remove(slot);
-        self.owners.retain(|(s, _)| *s != slot);
         self.grouped_cells.retain(|(s, _)| *s != slot);
         self.list_margins.retain(|(s, _)| *s != slot);
         self.alert_state.remove(slot);

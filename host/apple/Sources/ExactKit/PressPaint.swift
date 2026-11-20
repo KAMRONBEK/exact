@@ -74,7 +74,7 @@ struct PressPaint {
 
 /// A view a press recoloured, held weakly: it may be destroyed or taken
 /// for another node while held.
-struct WeakNodeView { weak var view: NodeView? }
+package struct WeakNodeView { package weak var view: NodeView? }
 
 extension NodeView {
     /// Whether the text colour it shows is its own: written (a moving one

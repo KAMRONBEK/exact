@@ -31,7 +31,7 @@ extension Presenter {
     /// out of one, or shown again (`isHidden`). Core Animation's next commit
     /// shows it if it is in a window then, not hidden; one out of a window
     /// waits for the commit after it moves into one (`didMoveToWindow`).
-    func unshown(_ view: NodeView) {
+    package func unshown(_ view: NodeView) {
         if view.shown == .showed || view.layer.presentation() != nil { view.shown = .unshown }
         guard view.window != nil else { return }
         if awaitingFrame.isEmpty {
@@ -91,7 +91,7 @@ extension Presenter {
 
     /// Whether the last frame showed `view` where it is: it and every node
     /// above it, none hidden now.
-    func showed(_ view: NodeView) -> Bool {
+    package func showed(_ view: NodeView) -> Bool {
         var at: UIView? = view
         while let v = at {
             if let node = v as? NodeView, node.isHidden || !shown(node) { return false }

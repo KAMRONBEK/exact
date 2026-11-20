@@ -1049,11 +1049,13 @@ uint32_t exact_intrinsics(ExactRuntime rt, size_t len);
  * list's rows' cell margin (LLP 1138: float left, right, then two unused),
  * 11 clears it. Kind 14 shows a split's `navigationSplit="placeholder"` box
  * and kind 15 hides it again (LLP 1116.006 D2; the floats unused). Kind 21
- * is a content owner's values (LLP 1123 D9), 188 bytes: float safe-area top,
- * right, bottom, left, the content root's width and height, uint32 columns
- * and rows, four float rects x y w h (the segments, row-major), uint32 1 when
- * twenty float region insets follow (else 0, the regions the safe area's);
- * kind 22 takes them back. Kind 23 says how a block is shown against its
+ * is what a host reports of a content owner beside its covers (LLP 1123 D2's
+ * owner update), in its block's points, 136 bytes: uint32 1 when its margins
+ * follow (D8) and 0 when it reports none, then float the root view's margins
+ * guide as insets top, right, bottom, left, a plain view's margins, the
+ * system minimum and the readable width; then its segments (D16), uint32
+ * columns and rows and four float rects x y w h, row-major, a grid of one
+ * segment being none; kind 22 takes the report back. Kind 23 says how a block is shown against its
  * stack's top (LLP 1127): float 1 beside it, live (a split's list column, the
  * detail beside an inspector), 2 under a pane over it, not live (a split's
  * detail under the list that overlays it), 0 in its stack; then three unused.

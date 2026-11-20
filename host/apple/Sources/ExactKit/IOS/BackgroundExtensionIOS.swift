@@ -37,7 +37,7 @@ extension NodeView {
         ExtensionBlurs.warm()
         // A flight shows the whole image on its own layer (LLP 1013.000 D4).
         guard !cssVisibilityHidden, flightLook == nil, window != nil, let image = raster?.image else { return removeBackgroundExtension() }
-        if let route = ViewPresentation.controller(for: self) as? RouteController, route.safeAreaNeedsLayout { return }
+        if let route = ViewPresentation.controller(for: self) as? any RouteSurface, route.safeAreaNeedsLayout { return }
         let kept = (held as? ExtensionView).flatMap { $0.laidOut == boxLayout ? $0.sides : nil } ?? []
         guard let (frame, sides) = extensionFrame(keeping: kept) else {
             // Inside UIKit's animation, the safe areas are already its end's
@@ -113,7 +113,7 @@ extension NodeView {
     /// new layout landed (folding the iPhone Duo). Only the box's own layout
     /// takes a side away. Nil where it reaches none.
     private func extensionFrame(keeping kept: UIRectEdge) -> (CGRect, UIRectEdge)? {
-        guard let route = sequence(first: self as UIView, next: \.superview).first(where: { $0.next is RouteController }) else { return nil }
+        guard let route = sequence(first: self as UIView, next: \.superview).first(where: { $0.next is any RouteSurface }) else { return nil }
         let edges = route.convert(route.bounds, to: self)
         let safe = route.convert(route.bounds.inset(by: route.safeAreaInsets), to: self)
         var frame = bounds, sides: UIRectEdge = []

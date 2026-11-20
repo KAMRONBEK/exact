@@ -46,7 +46,7 @@ package final class Presenter {
     /// Views whose drawn origin a batch moved (`PixelGridIOS.swift`).
     var gridMoved: [NodeView] = []
     /// The views Core Animation's next commit may show (`unshown`).
-    var awaitingFrame: [WeakNodeView] = []
+    package var awaitingFrame: [WeakNodeView] = []
     /// Coalesce native appearance and geometry changes outside a batch into the
     /// next main-thread turn. Synchronize grouped lists, row separators, segments
     /// and controls without waiting for another kernel batch (LLP 1079).
@@ -211,7 +211,7 @@ package final class Presenter {
     var regions: [CGFloat]?
     /// The posture and the viewport segments last told (LLP 1078 D5), for
     /// `layout.env`. A change moves each route's own (LLP 1123 D9).
-    var fold = ViewportFold.flat { didSet { if fold != oldValue { navigation.coversChanged() } } }
+    package var fold = ViewportFold.flat { didSet { if fold != oldValue { navigation.coversChanged() } } }
     /// Whether the device has a fold — UIKit 27.1 reported a division region
     /// or a hinge — in which case `prefer posture`/`segments` is refused:
     /// the device decides (LLP 1078 D7).
@@ -229,7 +229,7 @@ package final class Presenter {
     let pinnedRoom = PinnedRoom()
     /// A native prompt outside the session's mounts, associated by its creator.
     package weak var keyboardPrompt: UITextField?
-    var keyboardEditor: UIView? {
+    package var keyboardEditor: UIView? {
         guard let responder = FirstResponder.current as? UIView, responder is UIKeyInput,
               mounts(responder) || responder === keyboardPrompt else { return nil }
         return responder
@@ -429,7 +429,7 @@ package final class Presenter {
     /// A capability an action called (LLP 1005 §3), after its commit.
     var onCommand: ((String, [Any], UInt32?) -> Void)?
     /// A `key` handler called `preventDefault()` (`keyDown(at:_:)`, KeyEvents.swift).
-    var defaultPrevented = false
+    package var defaultPrevented = false
     /// The touches whose `pointerdown` an action prevented, a finger each:
     /// the view each went down on takes no focus from it (LLP 1005 §3;
     /// `keepsFocus(from:)`).
@@ -798,17 +798,18 @@ package final class Presenter {
         }
     }
     package func intrinsic(_ id: UInt32, _ size: CGSize?) { onIntrinsic?([(id, size)]) }
-    /// What native containers cover of boxes (LLP 1075.003 §3.5), and
-    /// content owners' values (LLP 1123 D9), told under one layout.
-    package var onCovers: (([(UInt32, HostCover?)], [(UInt32, OwnerValues?)]) -> Void)?
+    /// What native containers cover of boxes (LLP 1075.003 §3.5), and what
+    /// the host reports of content owners (LLP 1123 D8, D16), told under one
+    /// layout.
+    package var onCovers: (([(UInt32, HostCover?)], [(UInt32, OwnerReport?)]) -> Void)?
     /// The border box a person dragged a box's `resize` grip to; nil keeps an axis (ResizeGrip.swift).
     var onResizeBox: ((UInt32, CGFloat?, CGFloat?) -> Void)?
     // PROTO (rule 4, `EdgeFramesIOS.swift`): routes whose top edge moves, as told; each one's boxes' two frames
-    var onMovingTops: (([(UInt32, Bool)]) -> Void)?
-    var movingTops = Set<UInt32>(), deliveredMovingTops = Set<UInt32>()
-    let geometry = GeometryOnlyState() // PROTO (UIKit-first measurement, `GeometryOnlyIOS.swift`)
+    package var onMovingTops: (([(UInt32, Bool)]) -> Void)?
+    package var movingTops = Set<UInt32>(), deliveredMovingTops = Set<UInt32>()
+    package let geometry = GeometryOnlyState() // PROTO (UIKit-first measurement, `GeometryOnlyIOS.swift`)
     /// PROTO (rule 4): routes whose top edge UIKit moved though nothing configured said it would (`noteUnforeseenMove`)
-    var movedTops = Set<UInt32>()
+    package var movedTops = Set<UInt32>()
     var edgeFrames: [UInt32: [UInt32: [(t: Double, frame: CGRect)]]] = [:]
     /// In `reset`: host state its views would move with no runtime to tell stays as it was (FocusEvents' focus,
     /// OwnersIOS' blocks, ExactView `fit`'s geometry; ResetGate).

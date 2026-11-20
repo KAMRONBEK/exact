@@ -8,12 +8,12 @@
 import CoreGraphics
 import Foundation
 
-struct ViewportFold: Equatable {
-    var posture = "continuous"
-    var cols = 1
-    var rows = 1
-    var rects: [CGRect] = []
-    static let flat = ViewportFold()
+package struct ViewportFold: Equatable {
+    package var posture = "continuous"
+    package var cols = 1
+    package var rows = 1
+    package var rects: [CGRect] = []
+    package static let flat = ViewportFold()
 
     /// The fold under a keyboard that ends the viewport at `viewport` (LLP
     /// 1078, "As built (the keyboard)"): the posture, the count and each
@@ -39,7 +39,7 @@ struct ViewportFold: Equatable {
     /// The fold whose segments are `rects`, the parts of a grid's segments
     /// a box inside it holds (LLP 1123 D9), when they make a whole grid;
     /// flat otherwise.
-    static func grid(_ rects: [CGRect]) -> ViewportFold {
+    package static func grid(_ rects: [CGRect]) -> ViewportFold {
         let cols = Set(rects.map(\.minX)).count, rows = Set(rects.map(\.minY)).count
         guard rects.count > 1, cols * rows == rects.count else { return .flat }
         return ViewportFold(posture: "folded", cols: cols, rows: rows, rects: rects.sorted { ($0.minY, $0.minX) < ($1.minY, $1.minX) })

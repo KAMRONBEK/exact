@@ -598,7 +598,7 @@ extension NodeView {
     /// `scrollViewDidScrollToTop` for the status bar's) or as a drag begins,
     /// and a second after it began at the latest, should UIKit report no end;
     /// another scroll to the top meanwhile has its own second.
-    func scrollsToTop() {
+    package func scrollsToTop() {
         let began = CACurrentMediaTime()
         toTopBegan = began
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in if self?.toTopBegan == began { self?.endScrollToTop() } }

@@ -3,7 +3,7 @@
 //! draws the platform's list carries into the header (`header_view`).
 
 use super::grouped_list::{boot_source, id};
-use exact_kernel::{GroupedMargins, Offer, TextLook};
+use exact_kernel::{GroupedCells, Offer, TextLook};
 
 const FAVORITES: &str = r##"component App
   state groups = ["Ryu", "Ken"]
@@ -97,10 +97,10 @@ fn a_custom_header_starts_at_the_platform_lists_margins() {
     assert_eq!(before.0, 16.0, "the sheet's stand-in");
     let list = id(&r, "list");
     let k = r.kernel_mut();
-    k.set_grouped_margins(
+    k.set_grouped_cells(
         list,
-        Some(GroupedMargins {
-            card: [0.0, 0.0],
+        Some(GroupedCells {
+            width: 402.0,
             cell: [20.0, 24.0],
         }),
     )
@@ -113,7 +113,9 @@ fn a_custom_header_starts_at_the_platform_lists_margins() {
 
 /// UIKit's header view in an inset-grouped list spans the card, so a hand-built
 /// header's own inset (16 points) is from the card's edge, not the list's: on
-/// every host, before a host says its margins and after.
+/// every host, before a host says its cells and after. Told UIKit's cells, the
+/// header stands where the card does, at the list's start at the cell's width,
+/// since UIKit's cell, not the kernel's box, places what it carries.
 #[test]
 fn a_custom_headers_written_inline_padding_is_from_the_cards_edge() {
     let source = |style: &str, padding: &str| {
@@ -122,12 +124,12 @@ fn a_custom_headers_written_inline_padding_is_from_the_cards_edge() {
         )
     };
     // The header's content edges, from the section's (the list's) left.
-    let ends = |style: &str, padding: &str, margins: Option<GroupedMargins>| {
+    let ends = |style: &str, padding: &str, cells: Option<GroupedCells>| {
         let mut r = boot_source(&source(style, padding));
-        if margins.is_some() {
+        if cells.is_some() {
             let list = id(&r, "list");
             let k = r.kernel_mut();
-            k.set_grouped_margins(list, margins).unwrap();
+            k.set_grouped_cells(list, cells).unwrap();
             let root = k.node_by_key(k.find_by_test_id("root")[0]).unwrap().id;
             k.compute_layout(root, Offer::definite(402.0, 874.0))
                 .unwrap();
@@ -137,43 +139,34 @@ fn a_custom_headers_written_inline_padding_is_from_the_cards_edge() {
         let (f, p) = (header.frame, k.resolved_padding(header.key).unwrap());
         (f.x + p.0, f.x + f.width - p.2)
     };
-    let uikit = Some(GroupedMargins {
-        card: [16.0, 16.0],
+    let uikit = Some(GroupedCells {
+        width: 370.0,
         cell: [20.0, 20.0],
     });
     let both = " padding-left=16 padding-right=16";
     assert_eq!(
         ends("inset-grouped", "", uikit),
-        (36.0, 366.0),
-        "the card's and the cell's"
+        (20.0, 350.0),
+        "the cell's, in the card"
     );
     assert_eq!(
         ends("inset-grouped", both, None),
         (32.0, 370.0),
         "the sheet's card, no host's"
     );
-    assert_eq!(ends("inset-grouped", both, uikit), (32.0, 370.0));
+    assert_eq!(ends("inset-grouped", both, uikit), (16.0, 354.0));
     assert_eq!(
         ends("inset-grouped", " padding=\"12px 16px\"", uikit),
-        (32.0, 370.0),
+        (16.0, 354.0),
         "the shorthand"
     );
     assert_eq!(
         ends("inset-grouped", " padding-left=16", uikit),
-        (32.0, 366.0),
+        (16.0, 350.0),
         "an unsaid side keeps the platform's"
     );
-    let uneven = Some(GroupedMargins {
-        card: [10.0, 30.0],
-        cell: [20.0, 20.0],
-    });
-    assert_eq!(
-        ends("inset-grouped", both, uneven),
-        (26.0, 356.0),
-        "each side its own card"
-    );
-    let plain = Some(GroupedMargins {
-        card: [0.0, 0.0],
+    let plain = Some(GroupedCells {
+        width: 402.0,
         cell: [20.0, 20.0],
     });
     assert_eq!(

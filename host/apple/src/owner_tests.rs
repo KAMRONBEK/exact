@@ -3,7 +3,7 @@
 //! it inherits changed.
 
 use super::Host;
-use exact_kernel::{BlockAxis, HostBlock, MonospaceMeasurer, Op, OwnerValues};
+use exact_kernel::{BlockAxis, HostBlock, MonospaceMeasurer, Op};
 use exact_runner::{DataError, DataSource, Timed, Value};
 
 struct NoData;
@@ -48,12 +48,6 @@ fn a_subtree_moved_to_another_owner_is_sent_its_lengths_by_it() {
     };
     let (tall, short) = (id(&host, "tall"), id(&host, "short"));
     let (card, inner) = (id(&host, "card"), id(&host, "inner"));
-    let owner = |height| OwnerValues {
-        cols: 1,
-        rows: 1,
-        size: (400.0, height),
-        ..OwnerValues::default()
-    };
     // Container units read each owner's content root, in the block its host fixes (LLP 1123 D16)
     let block = |height| HostBlock {
         tactic: Default::default(),
@@ -61,7 +55,6 @@ fn a_subtree_moved_to_another_owner_is_sent_its_lengths_by_it() {
         height: BlockAxis::Is(height),
     };
     let first = host.set_claims(&crate::Claims {
-        owners: &[(tall, Some(owner(300.0))), (short, Some(owner(100.0)))],
         blocks: &[(tall, Some(block(300.0))), (short, Some(block(100.0)))],
         ..crate::Claims::default()
     });

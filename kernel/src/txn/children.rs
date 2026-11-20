@@ -17,9 +17,10 @@ pub(super) fn sync_children(
         return;
     };
     // Children joining here from elsewhere, or built detached: their styles
-    // were converted under another owner's values, or none (LLP 1123 D9).
+    // were converted under another owner's content root, which container
+    // units read, or none (LLP 1123 D16).
     let joining: Vec<u32> = match layout.tree_ref() {
-        Some(tree) if arena.has_owners() => arena
+        Some(tree) if arena.blocks.any_given() => arena
             .children(parent)
             .iter()
             .copied()
@@ -43,7 +44,7 @@ pub(super) fn sync_children(
 
 /// Converts again the styles under `roots` that read the environment, which
 /// a subtree reads from the content owner it is now in, or from the document
-/// in the top layer (LLP 1123 D9). An image among them is measured again with
+/// in the top layer (LLP 1123 D16). An image among them is measured again with
 /// its paragraph, and each is touched: a host sends its style again though
 /// nothing it inherits changed.
 pub(crate) fn restyle_environment_readers(

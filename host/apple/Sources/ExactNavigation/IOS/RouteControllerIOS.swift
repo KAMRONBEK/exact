@@ -49,7 +49,7 @@ final class RouteController: UIViewController, UIScrollViewDelegate {
     /// UIKit has announced a safe area its layout has yet to apply. It can announce a transition's end before opening
     /// that transition's animation and laying the view out inside it, as a view constrained to the safe area moves
     /// then: read now, the content would jump to its end, so a report keeps what it last told until the layout.
-    private(set) var safeAreaNeedsLayout = false
+    package private(set) var safeAreaNeedsLayout = false
     var restingTop: CGFloat = 0, placedEdge: Double? // PROTO (rule 4, `EdgeFramesIOS.swift`)
 
     /// Whether the route turns off `edge`'s native clearance: by
@@ -502,6 +502,17 @@ final class RouteController: UIViewController, UIScrollViewDelegate {
         }
         follow(scrollView)
         topEdgeWatch = scrollView.observe(\.contentOffset) { sv, _ in follow(sv) }
+    }
+}
+
+extension RouteController {
+    /// Whether a presentation covers this route, which then keeps its own safe area under the keys (LLP 1127.000 D9):
+    /// its controller, or one that holds it, presents another, an active search controller aside (UIKit presents one
+    /// over its field's context, covering nothing).
+    var presentedOver: Bool {
+        sequence(first: self as UIViewController, next: \.parent).contains { c in
+            c.presentedViewController.map { !($0 is UISearchController) && !$0.isBeingDismissed } == true
+        }
     }
 }
 

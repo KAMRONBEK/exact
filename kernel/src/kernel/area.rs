@@ -180,7 +180,7 @@ pub(super) fn band_at(kernel: &Kernel, slot: u32) -> Space {
         Holder::Owner(s) => Space {
             owner: Some(s),
             root: Some(s),
-            band: arena.observations.band(s),
+            band: super::cover::owner_band(arena, s),
             size: kernel.used_size(s),
             origin: (0.0, 0.0),
         },

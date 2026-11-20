@@ -2,6 +2,7 @@
 import UIKit
 import XCTest
 @testable import ExactKit
+@testable import ExactNavigation
 
 /// LLP 1127 §1 on UIKit: collapsed, the split nests the detail's stack in
 /// the list's, so a back swipe has both stacks' pop recognizers under the

@@ -152,11 +152,11 @@ extension Runtime {
     /// layout: `edges` add to a box's padding; `whole` lays it out as
     /// `display: none`; nil clears.
     package func covers(_ covers: [(UInt32, HostCover?)]) -> Batch { self.covers(covers, owners: []) }
-    /// And content owners' values (LLP 1123 D9), nil taking one back, and the
-    /// routes whose top edge moves (PROTO, rule 4).
-    func covers(_ covers: [(UInt32, HostCover?)], owners: [(UInt32, OwnerValues?)], movingTops: [(UInt32, Bool)] = []) -> Batch {
+    /// And what the host reports of content owners (LLP 1123 D8, D16), nil
+    /// taking one back, and the routes whose top edge moves (PROTO, rule 4).
+    package func covers(_ covers: [(UInt32, HostCover?)], owners: [(UInt32, OwnerReport?)], movingTops: [(UInt32, Bool)] = []) -> Batch {
         return on(layout: true) {
-            var bytes = Data(capacity: covers.count * 24 + owners.count * 188)
+            var bytes = Data(capacity: covers.count * 24 + owners.count * 136)
             func append(_ words: [UInt32]) {
                 for word in words { withUnsafeBytes(of: word.littleEndian) { bytes.append(contentsOf: $0) } }
             }
@@ -173,15 +173,14 @@ extension Runtime {
             }
             // PROTO (rule 4): kind 24, a route whose top edge moves (1) or no longer does (0)
             for (view, on) in movingTops { append([view, 24] + floats([on ? 1 : 0, 0, 0, 0])) }
-            // Kind 21, a content owner's values; 22 takes them back (exact.h).
-            for (view, values) in owners {
-                guard let v = values else { append([view, 22, 0, 0, 0, 0]); continue }
-                let rects = v.fold.cols * v.fold.rows > 1 ? v.fold.rects : []
+            // Kind 21, what the host reports of a content owner; 22 takes it back (exact.h).
+            for (view, report) in owners {
+                guard let r = report else { append([view, 22, 0, 0, 0, 0]); continue }
+                let margins = r.margins.map { $0.root + $0.plain + $0.minimum + [$0.readableWidth] }
+                let rects = r.fold.cols * r.fold.rows > 1 ? r.fold.rects : []
                 let segments = rects.prefix(4).flatMap { [$0.minX, $0.minY, $0.width, $0.height] }
-                let regions = v.regions.flatMap { $0.count == 20 ? $0 : nil }
-                append([view, 21] + floats(v.safe) + floats([v.size.width, v.size.height]) + [UInt32(v.fold.cols), UInt32(v.fold.rows)]
-                       + floats(segments + Array(repeating: 0, count: 16 - segments.count))
-                       + [regions == nil ? 0 : 1] + floats(regions ?? Array(repeating: 0, count: 20)))
+                append([view, 21, margins == nil ? 0 : 1] + floats(margins ?? Array(repeating: 0, count: 13))
+                       + [UInt32(r.fold.cols), UInt32(r.fold.rows)] + floats(segments + Array(repeating: 0, count: 16 - segments.count)))
             }
             return read(exact_host_covers(rt, write(bytes)))
         }

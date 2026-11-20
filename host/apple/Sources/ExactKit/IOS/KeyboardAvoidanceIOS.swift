@@ -32,7 +32,7 @@ package final class KeyboardInset {
         scroll.verticalScrollIndicatorInsets = indicators
     }
     /// Forgets the contribution: its scroll view is gone or another's.
-    func reset() { amount = 0 }
+    package func reset() { amount = 0 }
 }
 
 extension Presenter {
@@ -382,7 +382,7 @@ extension Presenter {
     /// `route` (LLP 1127.000 D9; iOS 26: out of every navigation bar, across the window), which covers what lies under it
     /// as the keys do. The bar is the field's first container taller than it. UIKit places it above the route's safe
     /// area, so it is a scroll inset, not safe area: counted there, the bar would rise with every inset it gave.
-    func fieldBarInset(over route: UIViewController) -> CGFloat {
+    package func fieldBarInset(over route: UIViewController) -> CGFloat {
         guard let top = keyboardTop, let field = keyboardEditor as? UISearchTextField, field.window != nil, field.window === route.view.window,
               !sequence(first: field as UIView, next: \.superview).contains(where: { $0 is UINavigationBar }),
               let bar = sequence(first: field as UIView, next: \.superview).first(where: { $0.bounds.height > field.bounds.height + 1 }) else { return 0 }
@@ -392,14 +392,4 @@ extension Presenter {
 }
 #endif
 
-extension RouteController {
-    /// Whether a presentation covers this route, which then keeps its own safe area under the keys (LLP 1127.000 D9):
-    /// its controller, or one that holds it, presents another, an active search controller aside (UIKit presents one
-    /// over its field's context, covering nothing).
-    var presentedOver: Bool {
-        sequence(first: self as UIViewController, next: \.parent).contains { c in
-            c.presentedViewController.map { !($0 is UISearchController) && !$0.isBeingDismissed } == true
-        }
-    }
-}
 #endif

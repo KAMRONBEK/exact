@@ -7,12 +7,13 @@
 //! stack's route, LLP 1123 D2), which only the runner's geometry reads.
 //! And the cells UIKit's own list gives a grouped list (their width and margins),
 //! which split placeholders a pane shows (LLP 1116.006 D2), the size a
-//! person dragged a box's `resize` grip to (`Runner::resize_box`), and a
-//! content owner's values (LLP 1123 D9).
+//! person dragged a box's `resize` grip to (`Runner::resize_box`), and what
+//! a host reports of a content owner beside them: its margins and segments
+//! (LLP 1123 D8, D16).
 
 use super::Host;
 use exact_kernel::{
-    BlockMeasure, BlockShown, GroupedCells, HostBlock, HostCover, OwnerValues, ViewId,
+    BlockMeasure, BlockShown, GroupedCells, HostBlock, HostCover, OwnerMargins, ViewId,
 };
 use exact_runner::DataSource;
 
@@ -25,6 +26,19 @@ pub enum Restyle {
     /// The border box's width and height a person dragged its `resize`
     /// grip to; `None` keeps an axis (`Runner::resize_box`).
     Size([Option<f32>; 2]),
+}
+
+/// What a host reports of a content owner beside its covers (LLP 1123 D2's
+/// owner update), in its block's points: its margins as UIKit gives them
+/// (D8), `None` where it reports none, and its segments (D16), `None` where
+/// it lies on one segment. Its band is its root's cover until a host gives
+/// one (`Kernel::set_owner_band`).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct OwnerReport {
+    /// The owner's margins (`Kernel::set_owner_margins`).
+    pub margins: Option<OwnerMargins>,
+    /// The owner's segments (`Kernel::set_owner_segments`).
+    pub segments: Option<exact_kernel::style::env::SegmentGrid>,
 }
 
 /// What a host claims of boxes in one report, each `None` taking one back.
@@ -46,8 +60,8 @@ pub struct Claims<'a> {
     /// A content owner's local insets, or the session root's (`None`), top
     /// right bottom left; `None` insets take them back (LLP 1123 D9).
     pub locals: &'a [(Option<ViewId>, Option<[f32; 4]>)],
-    /// A content owner's safe area, regions, segments and size.
-    pub owners: &'a [(ViewId, Option<OwnerValues>)],
+    /// What a host reports of a content owner: its margins and segments.
+    pub owners: &'a [(ViewId, Option<OwnerReport>)],
     /// How a block is shown against its stack's top (a split's columns).
     pub shown: &'a [(ViewId, BlockShown)],
 }
@@ -113,8 +127,9 @@ impl<D: DataSource> Host<D> {
     }
     /// Every claim under one layout, and the canvases' work after it: a
     /// canvas in a box given back is laid out and drawn in this batch.
-    /// Content owners' local insets (`None` for the session root's) and
-    /// values (LLP 1123 D9) change only the lengths that read them.
+    /// Content owners' local insets (`None` for the session root's),
+    /// margins and segments (LLP 1123 D8, D9, D16) change only the lengths
+    /// that read them.
     pub fn set_claims(&mut self, claims: &Claims<'_>) -> String {
         let Claims {
             covers,
@@ -140,22 +155,23 @@ impl<D: DataSource> Host<D> {
                 Err(e) => drop(error.get_or_insert(format!("local insets: {e:?}"))),
             }
         }
-        // An owner's values lay out again only where a row reads them, and
-        // those rows' native styles are sent again as the owner resolves them,
-        // once its covers and block are set too (below).
+        // An owner's margins and segments lay out again only where a length
+        // reads them, and those rows' native styles are sent again as the
+        // owner resolves them, once its covers and block are set too (below).
         let mut reread = Vec::new();
-        for (view, values) in owners {
-            match self
-                .runner
-                .kernel_mut()
-                .set_owner_values(*view, values.clone())
-            {
+        for (view, report) in owners {
+            let report = report.clone().unwrap_or_default();
+            let kernel = self.runner.kernel_mut();
+            let set = kernel
+                .set_owner_margins(*view, report.margins)
+                .and_then(|m| Ok(kernel.set_owner_segments(*view, report.segments)? | m));
+            match set {
                 Ok(true) => {
                     read = true;
                     reread.push(*view);
                 }
                 Ok(false) => {}
-                Err(e) => drop(error.get_or_insert(format!("owner values: {e:?}"))),
+                Err(e) => drop(error.get_or_insert(format!("owner report: {e:?}"))),
             }
         }
         // PROTO (rule 4): a route's far frames owed (`set_moving_top`) need a layout pass

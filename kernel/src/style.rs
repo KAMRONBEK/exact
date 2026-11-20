@@ -42,7 +42,6 @@ pub use calc::Comparison;
 use handles::calc_handle;
 pub(crate) use handles::{calc_handle_in, resolve_calc, tree_handle, LayoutEnv};
 pub mod env;
-pub mod owner;
 pub mod targets;
 pub use env::link as link_segments;
 pub use env::{uses_env, Edge, Env, EnvRefusal, Rect, Region, SegmentVar, TitleBarVar};
@@ -53,7 +52,6 @@ pub use exact_motion::color::css::link_wide as link_wide_colors;
 
 mod link;
 pub use link::link_all;
-pub use owner::{OwnerValues, OwnerVar};
 mod lengths;
 use lengths::absolute_length;
 pub(crate) use lengths::{parse_css_number, parse_pixel_length};
@@ -110,9 +108,6 @@ pub enum Dimension {
     /// <x> <y>)`, plus points. Undefined on a viewport with one segment, or
     /// past its grid: the row's initial value then (CSS-ENV-1 §2.3).
     Segment(SegmentVar, u8, u8, f32),
-    /// A content owner's value plus points (LLP 1123 D9): `var(--exact-…)`,
-    /// resolved against the environment of the owner the node lies in.
-    Owner(OwnerVar, f32),
     /// A percentage of a viewport dimension, resolved at layout.
     Viewport(ViewportUnit, f32),
     /// A math function the other forms do not hold exactly: its simplified
@@ -135,8 +130,7 @@ impl Dimension {
             | Dimension::Viewport(_, v)
             | Dimension::Env(_, v)
             | Dimension::Region(_, _, v)
-            | Dimension::Segment(_, _, _, v)
-            | Dimension::Owner(_, v) => v.is_finite(),
+            | Dimension::Segment(_, _, _, v) => v.is_finite(),
             Dimension::Calc(p, v) => p.is_finite() && v.is_finite(),
         }
     }
@@ -180,9 +174,6 @@ impl Dimension {
                 f64::from(unit.basis(env)) * f64::from(n) / 100.0,
             )),
             Dimension::Segment(var, x, y, plus) => env::resolve(var, x, y, plus, env),
-            Dimension::Owner(var, plus) => var.value(env).map_or(Dimension::Auto, |base| {
-                Dimension::Points(calc::narrow(base + f64::from(plus)))
-            }),
             Dimension::Compare(c) if c.undefined(env) => Dimension::Auto,
             Dimension::Compare(c) => match c.substituted(env) {
                 // A tree needs a basis only where it reads a percentage, and
@@ -222,7 +213,6 @@ impl Dimension {
     fn undefined_segment(&self, env: &Env) -> bool {
         match self {
             Dimension::Segment(_, x, y, _) => env.segment(*x, *y).is_none(),
-            Dimension::Owner(var, _) => var.value(env).is_none(),
             Dimension::Compare(c) => c.undefined(env),
             _ => false,
         }
@@ -560,7 +550,6 @@ impl StyleValue<'_> {
                 Ok(Some(d)) => Ok(Some(d)),
                 Ok(None) => env::parse(t).map_err(|refusal| StyleValueError::BadEnv { style, refusal }),
             }?
-            .or_else(|| owner::parse(t).map(|var| Dimension::Owner(var, 0.0)))
             .or_else(|| viewport::parse(t))
                 .or_else(|| {
                     parse_pixel_length(t.trim_matches(['\t', '\n', '\u{c}', '\r', ' ']))

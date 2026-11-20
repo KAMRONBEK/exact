@@ -2,6 +2,7 @@
 import UIKit
 import XCTest
 @testable import ExactKit
+@testable import ExactNavigation
 
 /// A reaching scroller's content inset and the reach it compensates change together, in the pass that moves the
 /// reach (`SafeReach.apply`), never when UIKit only gives the safe area the reach will follow.

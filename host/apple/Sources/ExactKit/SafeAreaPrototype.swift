@@ -20,7 +20,7 @@ extension ExactSession {
 
     /// PROTO (UIKit-first measurement): a cover update's runtime and apply CPU time, wall time,
     /// and wait for in-flight work, measured after the session becomes idle
-    func applyMeasuredCovers(_ covers: [(UInt32, HostCover?)], owners: [(UInt32, OwnerValues?)]) {
+    func applyMeasuredCovers(_ covers: [(UInt32, HostCover?)], owners: [(UInt32, OwnerReport?)]) {
         let asked = CACurrentMediaTime(), deferred = fillInFlight
         whenIdle(bound: true) { [unowned self] in
             let start = CACurrentMediaTime(), startCPU = Self.prototypeCPU()
@@ -46,10 +46,10 @@ extension ExactSession {
 /// PROTO (UIKit-first measurement): the main thread's CPU time in microseconds in four apply
 /// phases since the last live cover report read and reset them: operations, regrid and flush,
 /// reach and placement, and navigation synchronization
-enum ApplyPhases {
-    static var ops = 0.0, regrid = 0.0, reach = 0.0, navigation = 0.0
-    static func cpu() -> Double { ExactSession.prototypeCPU() }
-    static func take() -> String {
+package enum ApplyPhases {
+    package static var ops = 0.0, regrid = 0.0, reach = 0.0, navigation = 0.0
+    package static func cpu() -> Double { ExactSession.prototypeCPU() }
+    package static func take() -> String {
         defer { ops = 0; regrid = 0; reach = 0; navigation = 0 }
         return String(format: "ops %.0f regrid %.0f reach %.0f navigation %.0f", ops, regrid, reach, navigation)
     }

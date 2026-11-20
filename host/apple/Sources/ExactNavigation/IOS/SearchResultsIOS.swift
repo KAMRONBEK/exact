@@ -1,4 +1,5 @@
 #if os(iOS) || os(tvOS)
+import ExactKit
 import UIKit
 
 /// A header search's results as a level of the stack: the route that holds the element its field names by
@@ -158,7 +159,7 @@ extension NavigationHost {
     }
 }
 
-extension Presenter {
+extension NavigationHost {
     /// Whether the bar search of the route `view` is in is open, or UIKit is moving its bar into search.
     package func barSearchOpen(around view: UIView) -> Bool {
         guard let search = ViewPresentation.controllers(for: view).lazy.compactMap({ ($0 as? RouteController)?.search }).first else { return false }

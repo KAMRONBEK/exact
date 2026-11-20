@@ -4,6 +4,7 @@ import UIKit
 import XCTest
 @testable import ExactImages
 @testable import ExactKit
+@testable import ExactNavigation
 
 /// LLP 1123 D11: an image's background extension is the image's own bottom
 /// subview, which draws its picture and the mirror: it grows on the sides

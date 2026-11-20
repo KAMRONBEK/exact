@@ -647,7 +647,7 @@ extension NodeView {
         #endif
     }
     /// Whether this box's background is the page's ground, plain or grouped.
-    var paintsPageGround: Bool {
+    package var paintsPageGround: Bool {
         guard case .object(let o)? = style["background_color"], let role = o["sys"]?.string else { return false }
         return role == "systemBackgroundColor" || role == "systemGroupedBackgroundColor"
     }

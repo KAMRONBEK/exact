@@ -322,7 +322,7 @@ final class NavigationTabsIOSTests: XCTestCase {
         guard hostedWindowScene() != nil else { throw missing("scene", "the authored tabs need their window safe area and control dispatch") }
         var calls = 0, depth = 0, maximumDepth = 0
         var history: [String] = []
-        var deliver: (([(UInt32, HostCover?)], [(UInt32, OwnerValues?)]) -> Void)?
+        var deliver: (([(UInt32, HostCover?)], [(UInt32, OwnerReport?)]) -> Void)?
         let session = try fixture("overflowing-authored-tabs", wholeScreen: true, plan: "EXACT_OVERFLOWING_TABS_PLAN", prepare: { session in
             deliver = session.presenter.onCovers
             session.presenter.onCovers = { changes, owners in

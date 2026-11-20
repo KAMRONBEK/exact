@@ -3,6 +3,7 @@
 // again: the router's stack and the one shown then part for good (a fold's closing search dropped the pages an unfold
 // asked for). The refused stack is written again once the transition ends; a newer write replaces it.
 #if os(iOS) || os(tvOS)
+import ExactKit
 import UIKit
 
 final class ExactNavigationController: UINavigationController {

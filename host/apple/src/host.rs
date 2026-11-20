@@ -50,7 +50,7 @@ pub use content_region_host::LinkedRegions;
 mod control_text_tests;
 #[path = "covers.rs"]
 mod covers;
-pub use covers::Claims;
+pub use covers::{Claims, OwnerReport};
 #[path = "first_frame.rs"]
 mod first_frame;
 #[cfg(test)]

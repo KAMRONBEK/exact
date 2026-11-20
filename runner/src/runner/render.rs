@@ -218,7 +218,7 @@ pub(super) fn scroll_margin(kernel: &exact_kernel::Kernel, view: ViewId) -> [f64
 #[cfg(test)]
 mod tests {
     use crate::{DataError, DataSource, Runner};
-    use exact_kernel::{BlockAxis, HostBlock, Kernel, OwnerValues};
+    use exact_kernel::{BlockAxis, HostBlock, Kernel};
     use exact_plan::Value;
 
     struct NoData;
@@ -248,16 +248,6 @@ mod tests {
             k.node_by_key(k.find_by_test_id(id)[0]).unwrap().id
         };
         let (owner, list, row) = (view(&r, "owner"), view(&r, "list"), view(&r, "row"));
-        let values = OwnerValues {
-            safe: [20.0, 0.0, 0.0, 0.0],
-            cols: 1,
-            rows: 1,
-            size: (400.0, 300.0),
-            ..OwnerValues::default()
-        };
-        r.kernel_mut()
-            .set_owner_values(owner, Some(values))
-            .unwrap();
         // `var(--exact-safe-area-inset-top)` is main's local inset, which a host reports for the owner, and `cqh` its
         // content root, in the block its host fixes (LLP 1123 D16)
         r.kernel_mut()

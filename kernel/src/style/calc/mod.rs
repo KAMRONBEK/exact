@@ -110,8 +110,6 @@ pub enum EnvTerm {
     /// owner, so it resolves per node ([`Env::local_inset`]). A
     /// substitution, as `env()` is; always a tree.
     Local(Edge),
-    /// `var(--exact-…)`: a content owner's value (LLP 1123 D9).
-    Owner(crate::style::OwnerVar),
 }
 
 impl EnvTerm {
@@ -124,7 +122,6 @@ impl EnvTerm {
             EnvTerm::Region(region, edge) => Some(f64::from(env.region_inset(region, edge))),
             EnvTerm::TitleBar(var) => env.titlebar(var).map(f64::from),
             EnvTerm::Local(edge) => Some(f64::from(env.local_inset(edge))),
-            EnvTerm::Owner(var) => var.value(env),
         }
     }
 }
@@ -464,11 +461,10 @@ impl Node {
         self.children().for_each(|c| c.names(out));
     }
 
-    /// Whether it is a leaf a content owner gives: `var(--exact-…)` or a
-    /// container unit (LLP 1123 D9, D12).
+    /// Whether it is a leaf a content owner gives: a container unit (LLP
+    /// 1123 D16).
     fn owned(&self) -> bool {
         match self {
-            Node::Env(EnvTerm::Owner(_)) => true,
             Node::Value(_, Unit::Viewport(unit)) => unit.is_container(),
             _ => false,
         }
@@ -631,7 +627,6 @@ fn env_dimension(term: EnvTerm, plus: f32) -> Option<Dimension> {
         EnvTerm::Inset(edge) => Dimension::Env(edge, plus),
         EnvTerm::Segment(var, x, y) => Dimension::Segment(var, x, y, plus),
         EnvTerm::Region(region, edge) => Dimension::Region(region, edge, plus),
-        EnvTerm::Owner(var) => Dimension::Owner(var, plus),
         EnvTerm::TitleBar(_) | EnvTerm::Local(_) => return None,
     })
 }
@@ -661,7 +656,6 @@ pub(crate) fn tree_of(d: &Dimension) -> Option<Node> {
         Dimension::Env(edge, x) => plus(EnvTerm::Inset(*edge), *x),
         Dimension::Region(region, edge, x) => plus(EnvTerm::Region(*region, *edge), *x),
         Dimension::Segment(var, a, b, x) => plus(EnvTerm::Segment(*var, *a, *b), *x),
-        Dimension::Owner(var, x) => plus(EnvTerm::Owner(*var), *x),
         Dimension::Viewport(unit, n) => Node::Value(f64::from(*n), Unit::Viewport(*unit)),
         Dimension::Compare(c) => return c.tree(|t| t.clone()),
     })
@@ -988,14 +982,13 @@ impl Comparison {
         self.tree(|_| ()).is_some()
     }
 
-    /// It with the values a content owner gives bound to `env`'s (LLP 1123
-    /// D9, D12). The engine resolves a tree with a percentage later, under
-    /// the document's environment ([`crate::style::LayoutEnv`]), which is not
-    /// a node's inside an owner. A top-layer box in an owner has no owner
-    /// values but keeps the owner's container (`NodeArena::env_for`). Itself
-    /// with neither, or when it reads none.
+    /// It with the container units its content owner gives bound to `env`'s
+    /// (LLP 1123 D16). The engine resolves a tree with a percentage later,
+    /// under the document's environment ([`crate::style::LayoutEnv`]), which
+    /// is not a node's inside an owner. Itself where `env` has no container,
+    /// or when it reads none.
     pub(crate) fn bound(self, env: &Env) -> Comparison {
-        if env.owner.is_none() && env.container.is_none() {
+        if env.container.is_none() {
             return self;
         }
         let bound = self.tree(|t| t.any(&Node::owned).then(|| t.bind(env)));

@@ -8,12 +8,12 @@ import UIKit
 
 /// PROTO (UIKit-first measurement): the deferred views, quiet-frame clock, last root attributes,
 /// active run and top-reaching view IDs retained between geometry-only batches
-final class GeometryOnlyState {
+package final class GeometryOnlyState {
     var deferredViews = Set<UInt32>()
     var quiet: GeometryQuiet?
     var dataset = ""
     var lastRun: String?
-    var run: EdgeRun?
+    package var run: EdgeRun?
     var topReachers: [UInt32: [UInt32]] = [:]
 }
 
@@ -115,7 +115,7 @@ extension Presenter {
 /// the edge 106 points low for half a second first. In the resting mode that held inset counts
 /// in the resting top, so the sweep moves the edge up from its resting place as a collapsing
 /// title does. Completion or cancellation restores the route's own inset; start and end delimit its log.
-final class EdgeRun: NSObject {
+package final class EdgeRun: NSObject {
     private weak var route: UIViewController?
     private let originalTop: CGFloat
     private let done: () -> Void
@@ -138,7 +138,7 @@ final class EdgeRun: NSObject {
 
     /// PROTO (UIKit-first measurement): this route's held inset while the run is active in the
     /// resting mode, or 0 for another route, an ended run or a live mode
-    func restingInset(for route: UIViewController) -> CGFloat {
+    package func restingInset(for route: UIViewController) -> CGFloat {
         link != nil && self.route === route && ExactSession.protoMode == .resting ? originalTop + Self.travel : 0
     }
 

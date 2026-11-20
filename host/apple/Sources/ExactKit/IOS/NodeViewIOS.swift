@@ -34,7 +34,7 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
     /// CSS removes it with its subtree, or its texts paint at its 0×0 frame's
     /// origin (recipes F19). Reading says whether it is hidden, for either reason.
     private var hostHidden = false
-    var groupedOwner = false
+    package var groupedOwner = false
     package var pressed = false { didSet { if pressed != oldValue { pressChanged() } } }
     /// A surface control's focus from its touch (SurfaceInput), which the
     /// author did not ask for: it does not keep a later autofocus off
@@ -585,7 +585,7 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
     }
 
     /// The view is gone: no load in flight may report for it.
-    func forget() {
+    package func forget() {
         layoutHits = nil
         holdGone() // out of the map: a hold on it is let go (HeldState.swift)
         cancelPressContact()

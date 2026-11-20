@@ -7,10 +7,12 @@ at the safe area's edge, not at the platform's margins. A plain list, a header's
 sheet's list: write nothing.
 
 ```text
-column navigationKey="inbox" position="absolute" inset=0 display="flex" flex-direction="column"
-  // Content at the platform's margins (16 on an iPhone, 20 beside a sidebar); the list
-  // still spans the screen and UIKit draws its indicator at the display's edge
-  scroll flex=1 padding-left="var(--exact-layout-margins-inset-left)" padding-right="var(--exact-layout-margins-inset-right)"
+column navigationKey="inbox" position="absolute" inset=0 display="flex" flex-direction="column" -exact-preserves-superview-layout-margins="true"
+  // Content at the platform's margins (16 on an iPhone, 20 beside a sidebar): the route's
+  // root and the scroller preserve their superview's, as a view in a controller's view
+  // must in UIKit; the list still spans the screen and UIKit draws its indicator at the
+  // display's edge
+  scroll flex=1 -exact-preserves-superview-layout-margins="true" padding-left="var(--exact-layout-margins-inset-left)" padding-right="var(--exact-layout-margins-inset-right)"
     // A carousel: nothing to write. It spans the screen and scrolls under the sidebar
     list display="flex" overflow-x="scroll" overflow-y="hidden" gap=12
       …
@@ -21,7 +23,10 @@ column navigationKey="inbox" position="absolute" inset=0 display="flex" flex-dir
 ```
 
 - **Content at the platform's margins**: pad the scroller by the values, as above, never the
-  route's root: padding there keeps the list and its carousels off the edges. A carousel in
+  route's root: padding there keeps the list and its carousels off the edges. A box reads its
+  own margins, UIKit's 8 points plus its safe area, unless it and each box above it to the
+  route's root write `-exact-preserves-superview-layout-margins="true"`, which reads the
+  controller view's. A carousel in
   the scroller spans the screen; rows whose colour should span it pad themselves.
   `--exact-readable-content-inset-left` and `-right` give a readable width.
 - **Two panes side by side**: pad the left one's left and the right one's right by the

@@ -585,12 +585,6 @@ fn a_report_re_presents_an_owners_lengths_by_the_owner() {
     let (mut host, _) = boot(&format!(
         "component A\n  view\n    column\n      column testId=\"owner\" width=\"100%\" height=\"100%\"\n        box testId=\"wash\" width=20 height=20 border-radius=\"10cqh\" background-image=\"linear-gradient({BRAND}, #ffffff)\"\n"
     ));
-    let values = exact_kernel::OwnerValues {
-        cols: 1,
-        rows: 1,
-        size: (390.0, 300.0),
-        ..Default::default()
-    };
     // Container units read the owner's content root, in the block its host fixes (LLP 1123 D16)
     let block = exact_kernel::HostBlock {
         tactic: Default::default(),
@@ -599,7 +593,6 @@ fn a_report_re_presents_an_owners_lengths_by_the_owner() {
     };
     let owner = view(&host, "owner");
     host.set_claims(&crate::Claims {
-        owners: &[(owner, Some(values))],
         blocks: &[(owner, Some(block))],
         ..Default::default()
     });

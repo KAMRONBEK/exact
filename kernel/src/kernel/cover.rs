@@ -128,9 +128,14 @@ impl Kernel {
         }
         self.arena.set_cover(slot, cover);
         // PROTO: a block root's clearance moves its frames' origin whether or
-        // not its layout changes (`clearance`): publish it again.
+        // not its layout changes (`clearance`): publish it again. Its cover is
+        // its owner's band until a host gives one (`owner_band`), so what its
+        // boxes observe and take is measured again.
         if self.arena.blocks.holds(slot) {
             self.arena.layout_dirty.insert(slot);
+            if self.arena.observations.band(slot).is_none() {
+                self.arena.observations.invalidate_band(Some(slot));
+            }
         }
         if let Some(r) = &mut self.region {
             r.intrinsic(slot);
@@ -709,25 +714,20 @@ pub(crate) fn added_padding(arena: &NodeArena, slot: u32) -> [f32; 4] {
     }
 }
 
-/// PROTO (safe-area design §2.2): the clearance of a block root, top,
-/// right, bottom and left: the owner's safe area as its host reports it
-/// (`Edges`) less the edges the route turns off (`-exact-safe-area`), which
-/// the root is laid out inside until a host gives its band (`block::cleared`). Its frames are published that far in from
-/// the block's origin; its used size is still the block's.
-pub(crate) fn cover_clearance(arena: &NodeArena, slot: u32) -> Option<[f32; 4]> {
-    match arena.cover(slot) {
-        Some(HostCover::Edges(e)) if arena.blocks.holds(slot) => {
-            let off = arena.style(slot).rare.safe_area;
-            Some(std::array::from_fn(|i| {
-                if off & (1 << i) != 0 {
-                    0.0
-                } else {
-                    e[i]
-                }
-            }))
-        }
-        _ => None,
-    }
+/// PROTO (safe-area design §2.2): the band of the content owner rooted at
+/// `slot`, top right bottom left in its block's space: the band its host
+/// gives (`Kernel::set_owner_band`), else its root's cover (`Edges`), the safe
+/// area the iOS host reports for a route. Every reader of the band takes it
+/// from here: the owner's clearance (`block::cleared`), the area its boxes
+/// observe and take (`area::band_at`, LLP 1123 D4, D12) and their margins (D8).
+pub(crate) fn owner_band(arena: &NodeArena, slot: u32) -> Option<[f32; 4]> {
+    arena
+        .observations
+        .band(slot)
+        .or_else(|| match arena.cover(slot) {
+            Some(HostCover::Edges(e)) if arena.blocks.holds(slot) => Some(e),
+            _ => None,
+        })
 }
 
 /// The edges, as bits top 1, right 2, bottom 4 and left 8, whose padding in

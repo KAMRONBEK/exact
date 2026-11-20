@@ -50,6 +50,8 @@ package protocol RouteSurface: UIViewController {
     var placedEdge: Double? { get set }
     /// The text field of the search the route's bar shows, while it shows one.
     var headerSearchEditor: UIView? { get }
+    /// Whether UIKit has yet to lay the route out in a safe area it changed.
+    var safeAreaNeedsLayout: Bool { get }
     /// Whether UIKit's search field in the route's bar is editing.
     var searchBarEditing: Bool { get }
     /// The stack that holds the route (a navigation controller, a plain tab or the boot owner); nil once popped.
@@ -338,6 +340,8 @@ package protocol NavigationHosting: AnyObject {
     func safeAreaCorrection(_ scroll: UIScrollView) -> UIEdgeInsets
     /// Whether a header search's field edits over `route`, its results among the stack's levels.
     func searchEdits(over route: any RouteSurface) -> Bool
+    /// Whether the bar search of the route `view` is in is open, or UIKit is moving its bar into search.
+    func barSearchOpen(around view: UIView) -> Bool
     /// Ends the editing of the search in use, through its search, which holds the end back while UIKit moves the bar
     /// into search (`HeaderSearch.resign`); whether there was one.
     func resignSearch() -> Bool
@@ -627,6 +631,7 @@ package final class NoNavigation: NavigationHosting {
     package func adjustedInsetChanged(_ node: NodeView) {}
     package func safeAreaCorrection(_ scroll: UIScrollView) -> UIEdgeInsets { .zero }
     package func searchEdits(over route: any RouteSurface) -> Bool { false }
+    package func barSearchOpen(around view: UIView) -> Bool { false }
     package func resignSearch() -> Bool { false }
     /// No split shows without navigation.
     package func showsAsSidebar(_ list: UIView) -> Bool { false }
@@ -725,5 +730,29 @@ package final class NoModals: ModalHosting {
     package var drawnScales: [(route: NodeView, kind: String, scale: CGFloat)] { [] }
     package func agentDismiss() -> String? { nil }
     #endif
+}
+#if os(iOS)
+extension Presenter {
+    /// Whether a grouped list shows as UIKit's sidebar: in a split's list column beside its detail.
+    package func showsAsSidebar(_ list: UIView) -> Bool { navigation.showsAsSidebar(list) }
+    /// The row of a sidebar whose detail shows, which stays selected.
+    package func sidebarSelection(_ list: UIView) -> UInt32? { navigation.sidebarSelection(list) }
+    /// Whether a view is in a split's column whose ground is UIKit's: the sidebar or the inspector.
+    package func onColumnGround(_ view: UIView) -> Bool { navigation.onColumnGround(view) }
+    /// Whether `id`'s view is the inspector's route's, or in it, live while its column slides out.
+    package func slidesOut(_ id: UInt32) -> Bool { navigation.slidesOut(id) }
+    /// Whether the bar search of the route `view` is in is open, or UIKit is moving its bar into search.
+    package func barSearchOpen(around view: UIView) -> Bool { navigation.barSearchOpen(around: view) }
+}
+
+#endif
+
+extension NodeView {
+    /// UIKit's inset changed as a bar or the safe area did: a route that turns
+    /// an edge off corrects it now, before the next batch's cover report.
+    package func scrollViewDidChangeAdjustedContentInset(_ scrollView: UIScrollView) {
+        guard scrollView === self.scrollView else { return }
+        presenter?.navigation.adjustedInsetChanged(self)
+    }
 }
 #endif

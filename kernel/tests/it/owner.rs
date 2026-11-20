@@ -1,11 +1,12 @@
-//! A content owner's values (LLP 1123 D9) and container units (D12): a
-//! route under a bar reads its own segments, in its content root's
+//! A content owner's segments (LLP 1123 D16) and container units: a route
+//! under a bar reads the segments its host reports, in its content root's
 //! coordinates, so its panes land on the window's segments whatever the bar
 //! takes; `env()` stays the window's.
 
+use exact_kernel::style::env::SegmentGrid;
 use exact_kernel::{
-    BlockAxis, Env, HostBlock, HostCover, Kernel, NodeType, Offer, Op, OwnerValues, PropId, Rect,
-    StyleId, StyleProps, StyleValue,
+    BlockAxis, Env, HostBlock, HostCover, Kernel, NodeType, Offer, Op, PropId, Rect, StyleId,
+    StyleProps, StyleValue,
 };
 
 fn style(rows: &[(StyleId, StyleValue)]) -> StyleProps {
@@ -140,31 +141,29 @@ fn frame(kernel: &mut Kernel, id: u32) -> (f32, f32, f32, f32) {
     (f.x, f.y, f.width, f.height)
 }
 
-/// What the iOS host publishes for the route: its content root starts below
+/// What the iOS host reports for the route: its content root starts below
 /// the bar, so the division is at 321.5 there.
-fn route_values() -> OwnerValues {
-    OwnerValues {
-        safe: [0.0; 4],
-        regions: None,
+fn route_segments() -> Option<SegmentGrid> {
+    Some(SegmentGrid {
         cols: 1,
         rows: 2,
-        segments: vec![
+        rects: vec![
             Rect::new(0.0, 0.0, 669.0, 321.5),
             Rect::new(0.0, 361.5, 669.0, 455.5),
         ],
-        size: (669.0, 817.0),
-    }
+    })
 }
 
 #[test]
 fn a_route_under_a_bar_places_its_panes_on_the_windows_segments() {
     let mut kernel = laptop();
-    // With nothing published the route reads the document's values, which
-    // are the window's: the upper pane runs 134 to 589.5, across the band.
-    assert_eq!(frame(&mut kernel, 3).3, 455.5);
+    // With nothing reported a box in the route reads no segment (LLP 1123
+    // D16), not the window's: the upper pane, which names no fallback, takes
+    // its initial height.
+    assert_eq!(frame(&mut kernel, 3).3, 0.0);
     assert_eq!(frame(&mut kernel, 3).1, 134.0);
     assert!(
-        kernel.set_owner_values(2, Some(route_values())).unwrap(),
+        kernel.set_owner_segments(2, route_segments()).unwrap(),
         "the panes read them"
     );
     assert_eq!(
@@ -181,16 +180,16 @@ fn a_route_under_a_bar_places_its_panes_on_the_windows_segments() {
     // is main's local inset, which no host reports here, so it is the window's
     // 82 inside the route as outside it.
     assert_eq!(frame(&mut kernel, 5), (0.0, 134.0, 92.0, 408.5));
-    // Taken back, the route reads the document's again.
-    assert!(kernel.set_owner_values(2, None).unwrap());
-    assert_eq!(frame(&mut kernel, 3).3, 455.5);
+    // Taken back, the route reads none again.
+    assert!(kernel.set_owner_segments(2, None).unwrap());
+    assert_eq!(frame(&mut kernel, 3).3, 0.0);
     assert_eq!(frame(&mut kernel, 5).2, 92.0);
 }
 
 #[test]
 fn a_calculation_with_a_percentage_reads_the_owners_values() {
     let mut kernel = laptop();
-    kernel.set_owner_values(2, Some(route_values())).unwrap();
+    kernel.set_owner_segments(2, route_segments()).unwrap();
     let below = vec![
         Op::CreateView {
             id: 7,
@@ -222,7 +221,7 @@ fn a_calculation_with_a_percentage_reads_the_owners_values() {
 #[test]
 fn a_subtree_built_detached_reads_the_owner_it_joins() {
     let mut kernel = laptop();
-    kernel.set_owner_values(2, Some(route_values())).unwrap();
+    kernel.set_owner_segments(2, route_segments()).unwrap();
     frame(&mut kernel, 3);
     // As a runner rebuilds a branch: the new pane is made and styled before
     // it is attached, then joins the route.
@@ -262,7 +261,7 @@ fn a_subtree_built_detached_reads_the_owner_it_joins() {
 #[test]
 fn a_popover_in_an_owner_reads_the_documents_values_and_the_owners_container() {
     let mut kernel = laptop();
-    kernel.set_owner_values(2, Some(route_values())).unwrap();
+    kernel.set_owner_segments(2, route_segments()).unwrap();
     let lifted = vec![
         Op::CreateView {
             id: 10,
@@ -323,7 +322,7 @@ fn a_popover_in_an_owner_reads_the_documents_values_and_the_owners_container() {
 #[test]
 fn a_box_in_a_dialog_in_an_owner_reads_the_documents_values_and_the_owners_container() {
     let mut kernel = laptop();
-    kernel.set_owner_values(2, Some(route_values())).unwrap();
+    kernel.set_owner_segments(2, route_segments()).unwrap();
     // As lowering writes a `dialog`: absolute, its tag a prop. The box that
     // reads the values is a level below the dialog's root.
     let dialog = vec![
@@ -379,7 +378,7 @@ fn a_box_in_a_dialog_in_an_owner_reads_the_documents_values_and_the_owners_conta
 #[test]
 fn a_sticky_inset_in_an_owners_scroller_reads_what_the_scroller_leaves() {
     let mut kernel = laptop();
-    kernel.set_owner_values(2, Some(route_values())).unwrap();
+    kernel.set_owner_segments(2, route_segments()).unwrap();
     let scroller = vec![
         Op::CreateView {
             id: 12,
@@ -439,14 +438,8 @@ fn a_sticky_inset_in_an_owners_scroller_reads_what_the_scroller_leaves() {
 fn an_owner_on_one_segment_has_none_and_its_fallbacks_take_over() {
     let mut kernel = laptop();
     // The route lies wholly above the band: one segment, so none of the
-    // segment properties, while the document still has two (LLP 1123 D9).
-    let one = OwnerValues {
-        cols: 1,
-        rows: 1,
-        segments: Vec::new(),
-        ..route_values()
-    };
-    kernel.set_owner_values(2, Some(one)).unwrap();
+    // segment properties, while the document still has two (LLP 1123 D16).
+    kernel.set_owner_segments(2, None).unwrap();
     let halves = vec![
         Op::CreateView {
             id: 12,
@@ -479,7 +472,7 @@ fn an_owner_on_one_segment_has_none_and_its_fallbacks_take_over() {
 #[test]
 fn a_node_outside_every_owner_reads_the_documents_values() {
     let mut kernel = laptop();
-    kernel.set_owner_values(2, Some(route_values())).unwrap();
+    kernel.set_owner_segments(2, route_segments()).unwrap();
     let outside = vec![
         Op::CreateView {
             id: 6,
@@ -505,17 +498,17 @@ fn a_node_outside_every_owner_reads_the_documents_values() {
 }
 
 #[test]
-fn invalid_values_are_refused() {
+fn invalid_segments_are_refused() {
     let mut kernel = laptop();
-    let mut bad = route_values();
-    bad.segments.pop();
+    let mut bad = route_segments().unwrap();
+    bad.rects.pop();
     assert!(
-        kernel.set_owner_values(2, Some(bad)).is_err(),
+        kernel.set_owner_segments(2, Some(bad)).is_err(),
         "two rows need two rects"
     );
-    let mut bad = route_values();
-    bad.size = (f32::NAN, 0.0);
-    assert!(kernel.set_owner_values(2, Some(bad)).is_err());
+    let mut bad = route_segments().unwrap();
+    bad.rects[0].height = f32::NAN;
+    assert!(kernel.set_owner_segments(2, Some(bad)).is_err());
 }
 
 /// A paragraph `id` of "ab " and an image `id + 2` in its text, `10cqh`
@@ -551,16 +544,6 @@ fn paragraph_with_image(id: u32) -> [Op; 6] {
             children: vec![id + 1, id + 2],
         },
     ]
-}
-
-/// An owner `height` tall, the basis of its `cqh`.
-fn tall(height: f32) -> OwnerValues {
-    OwnerValues {
-        cols: 1,
-        rows: 1,
-        size: (400.0, height),
-        ..OwnerValues::default()
-    }
 }
 
 /// Laid out in 400 × 600: the box paragraph `id` reserves for its image,
@@ -604,7 +587,6 @@ fn an_inline_image_follows_its_owners_size() {
     kernel.apply(0, 1, &ops).unwrap();
     // The image stands on the baseline, 3.84 above the line's bottom. Its
     // owner's host fixes the block its container units read (D16).
-    kernel.set_owner_values(9, Some(tall(200.0))).unwrap();
     kernel
         .set_host_block(9, Some(fixed_block(400.0, 200.0)))
         .unwrap();
@@ -612,7 +594,6 @@ fn an_inline_image_follows_its_owners_size() {
         measured(&mut kernel, 2),
         ((20.0, 20.0), (20.0, 20.0), 23.84)
     );
-    kernel.set_owner_values(9, Some(tall(400.0))).unwrap();
     kernel
         .set_host_block(9, Some(fixed_block(400.0, 400.0)))
         .unwrap();
@@ -653,8 +634,6 @@ fn an_inline_image_moved_to_another_owner_is_measured_by_it() {
         Op::AttachRoot { id: 1 },
     ]);
     kernel.apply(0, 1, &ops).unwrap();
-    kernel.set_owner_values(2, Some(tall(300.0))).unwrap();
-    kernel.set_owner_values(3, Some(tall(100.0))).unwrap();
     kernel
         .set_host_block(2, Some(fixed_block(200.0, 300.0)))
         .unwrap();
@@ -678,7 +657,7 @@ fn an_inline_image_moved_to_another_owner_is_measured_by_it() {
 #[test]
 fn a_box_made_a_popover_at_run_time_takes_the_documents_values_and_gives_them_back() {
     let mut kernel = laptop();
-    kernel.set_owner_values(2, Some(route_values())).unwrap();
+    kernel.set_owner_segments(2, route_segments()).unwrap();
     let boxed = vec![
         Op::CreateView {
             id: 10,

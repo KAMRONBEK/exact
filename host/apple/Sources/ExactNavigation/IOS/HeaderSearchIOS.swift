@@ -1,6 +1,7 @@
 // @ref LLP 1075.003 §9.6 — a header's search field as UIKit's search controller, and its close (LLP 1127.000): the
 // route's projection that holds it is NavigationBarIOS.swift's.
 #if os(iOS) || os(tvOS)
+import ExactKit
 import UIKit
 
 /// A header's search field as UIKit's search controller (LLP 1075.003

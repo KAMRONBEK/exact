@@ -28,7 +28,7 @@ extension Presenter {
 
     /// `id`'s view and its authored descendants out of every lookup, painted
     /// where they are and inert, until whoever retired them forgets them.
-    func retire(_ id: UInt32) -> Leaving? {
+    package func retire(_ id: UInt32) -> Leaving? {
         guard let view = views[id] else { return nil }
         flightHost.landInside(view)
         var children: [ObjectIdentifier: [NodeView]] = [:]

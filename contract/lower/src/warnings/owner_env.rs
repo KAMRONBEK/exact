@@ -1,8 +1,8 @@
-//! `lower-env-in-owner` (LLP 1123 D9): a route reads the window's
+//! `lower-env-in-owner` (LLP 1123 D8, D16): a route reads the window's
 //! `env(-exact-<region>-inset-*)` or `env(viewport-segment-*)`. A route is a
-//! content owner whose layout regions and segments are its own, read as
-//! `var(--exact-…)`: a pane placed on the window's segment misses the fold by
-//! the bar's height. `env(safe-area-inset-*)` reads what its context leaves
+//! content owner whose margins, layout regions and segments are its own,
+//! read as `var(--exact-…)`: a pane placed on the window's segment misses the
+//! fold by the bar's height. `env(safe-area-inset-*)` reads what its context leaves
 //! (`exact_kernel`'s inset rule), so it is the route's already. A dialog or a
 //! popover is the document's (D9), so `env()` is right inside one. A computed
 //! value is given the benefit.
@@ -61,7 +61,7 @@ fn warn(row: &Attr, seen: &mut BTreeSet<(u32, u32, u32)>, out: &mut Vec<LowerErr
     let name = &row.name;
     out.push(LowerError {
         id: "lower-env-in-owner",
-        message: format!("`{name}=\"{value}\"` reads the window's `env()` inside a route, which has layout regions and fold segments of its own, measured from where its content starts (LLP 1123 D9): a pane on the window's segment misses the fold by the bar's height. Write the route's: `{name}=\"{owned}\"`. In a dialog or a popover, which are the window's, `env()` is right"),
+        message: format!("`{name}=\"{value}\"` reads the window's `env()` inside a route, which has margins, layout regions and fold segments of its own, measured in its own box (LLP 1123 D8, D16): a pane on the window's segment misses the fold by the bar's height. Write the route's: `{name}=\"{owned}\"`. In a dialog or a popover, which are the window's, `env()` is right"),
         span: row.span,
     });
 }
@@ -92,7 +92,7 @@ fn owner_spelling(value: &str) -> Option<String> {
                 .filter(|n| n.contains("-inset-"))
                 .map(|n| format!("--exact-{n}"))
         };
-        match owned.filter(|n| exact_kernel::OwnerVar::from_name(n).is_some()) {
+        match owned.filter(|n| exact_kernel::style::calc::host_name(n)) {
             Some(n) => {
                 out.push_str(&match fallback {
                     Some(f) => format!("var({n}, {f})"),

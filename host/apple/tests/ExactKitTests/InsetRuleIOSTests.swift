@@ -2,6 +2,7 @@
 import UIKit
 import XCTest
 @testable import ExactKit
+@testable import ExactNavigation
 
 /// The inset rule (`kernel/src/kernel/context.rs`) on a device, over
 /// `scripts/fixtures/inset-rule-cover.contract` (a `cover` root's full-screen

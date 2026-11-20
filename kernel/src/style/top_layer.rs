@@ -70,9 +70,9 @@ pub(crate) fn apply(arena: &NodeArena, slot: u32, s: &mut taffy::style::Style) {
 /// parent's flow, so its engine style is derived again, it joins or leaves
 /// its covered box's bottom-edge chain (`cover::chain_changed`), and the
 /// sticky machinery takes it or lets it go (a platform start's sticky). In
-/// the top layer its subtree reads the document's values, not its content
-/// owner's (LLP 1123 D9), so what under it reads the environment is styled
-/// again and touched.
+/// the top layer its subtree reads the document's container, not its
+/// content owner's (LLP 1123 D16), so what under it reads the environment is
+/// styled again and touched.
 pub(crate) fn prop_changed(
     arena: &mut NodeArena,
     layout: &mut dyn crate::layout::LayoutMirror,
@@ -87,7 +87,7 @@ pub(crate) fn prop_changed(
     if let Some(node) = arena.taffy(slot) {
         layout.restyle(arena, slot, node);
     }
-    if arena.has_owners() {
+    if arena.blocks.any_given() {
         let below = arena.children(slot).to_vec();
         crate::txn::restyle_environment_readers(arena, layout, below, touched);
     }

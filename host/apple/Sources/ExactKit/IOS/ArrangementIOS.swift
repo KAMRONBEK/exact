@@ -461,7 +461,7 @@ package final class ArrangementHost {
             + toldHidden.subtracting(now).filter { presenter.views[$0] != nil }.map { ($0, nil as HostCover?) }
         toldHidden = now
         for (id, _) in changes { presenter.views[id]?.fitScroll() }
-        presenter.onCovers?(changes)
+        presenter.onCovers?(changes, [])
     }
 
     /// Native-hidden panes take no room in the authored edge chain.

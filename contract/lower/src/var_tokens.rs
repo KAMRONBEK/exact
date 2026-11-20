@@ -1064,13 +1064,12 @@ mod tests {
     }
 
     #[test]
-    fn a_content_owners_value_is_left_as_written() {
+    fn a_hosts_observation_is_left_as_written() {
         let t = tokens(&["gutter"]);
         let mut quote = None;
         for s in [
             "var(--exact-safe-area-inset-top)",
             "calc(16px + var(--exact-layout-margins-inset-left))",
-            "var(--exact-viewport-segment-width-0-0, 50%)",
         ] {
             assert_eq!(
                 text(s, &t, false, &mut quote, false, false),

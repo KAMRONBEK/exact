@@ -145,16 +145,17 @@ fn cleared_taking(arena: &NodeArena, held: &Held, taking: bool) -> [f32; 4] {
     if !is_owner(arena, held) {
         return [0.0; 4];
     }
-    // PROTO (safe-area design §2.2): until a host gives the owner's band, the
-    // band is the clearance it reports as the root's cover (`Edges`)
-    let band = (arena.observations.band(held.slot))
-        .or_else(|| super::cover::cover_clearance(arena, held.slot))
-        .unwrap_or([0.0; 4]);
+    let band = super::cover::owner_band(arena, held.slot).unwrap_or([0.0; 4]);
     let taken = match taking {
         true => super::ignore::edges(arena, held.slot, SafeAreaIgnore::Container),
         false => [false; 4],
     };
-    let band = std::array::from_fn(|e| if taken[e] { 0.0 } else { band[e] });
+    // PROTO: nor does it clear the edges the route turns off (`-exact-safe-area`)
+    let off = arena.style(held.slot).rare.safe_area;
+    let band = std::array::from_fn(|e| match taken[e] || off & (1 << e) != 0 {
+        true => 0.0,
+        false => band[e],
+    });
     let cover = super::keyboard::cover(arena, held.slot);
     match reservation::reserved(arena, held.slot) {
         Some(r) => r.inside_covered(band, cover),

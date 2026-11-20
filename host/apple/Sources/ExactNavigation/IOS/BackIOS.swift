@@ -138,4 +138,14 @@ extension NavigationHost {
     }
 }
 
+#if os(tvOS)
+extension NavigationHost {
+    /// Whether the Siri Remote's Menu goes back: a route to pop and a Back control.
+    var menuGoesBack: Bool { (navigation?.viewControllers.count ?? 0) > 1 && canInvokeBack }
+    func menuBack() {
+        guard menuGoesBack, !changing else { return }
+        goBack()
+    }
+}
+#endif
 #endif

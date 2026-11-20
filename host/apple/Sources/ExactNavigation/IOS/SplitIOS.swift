@@ -9,6 +9,7 @@
 // a sheet that says `navigationInspector` is the split's inspector column
 // (D14).
 #if os(iOS) || os(tvOS)
+import ExactKit
 import UIKit
 
 /// UIKit's split, which says when a layout changed whether the list shows
@@ -386,17 +387,6 @@ final class SplitIOS: NSObject, UISplitViewControllerDelegate {
         }
         DispatchQueue.main.async { self.changed() }
     }
-}
-
-extension Presenter {
-    /// Whether a grouped list shows as UIKit's sidebar: in a split's list column beside its detail.
-    package func showsAsSidebar(_ list: UIView) -> Bool { navigation.showsAsSidebar(list) }
-    /// The row of a sidebar whose detail shows, which stays selected.
-    package func sidebarSelection(_ list: UIView) -> UInt32? { navigation.sidebarSelection(list) }
-    /// Whether a view is in a split's column whose ground is UIKit's: the sidebar or the inspector.
-    package func onColumnGround(_ view: UIView) -> Bool { navigation.onColumnGround(view) }
-    /// Whether `id`'s view is the inspector's route's, or in it, live while its column slides out.
-    package func slidesOut(_ id: UInt32) -> Bool { navigation.slidesOut(id) }
 }
 
 extension NavigationHost {

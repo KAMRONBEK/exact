@@ -1394,14 +1394,14 @@ fn a_native_regions_nodes_cross_with_their_owners_container_units() {
         exact_runner::time::Launch::NONE,
     )
     .unwrap();
-    let values = exact_kernel::OwnerValues {
-        cols: 1,
-        rows: 1,
-        size: (600.0, 300.0),
-        ..Default::default()
+    // A block the host gives the owner, which a registered content region fixes no container by
+    let block = exact_kernel::HostBlock {
+        tactic: Default::default(),
+        width: exact_kernel::BlockAxis::Is(600.0),
+        height: exact_kernel::BlockAxis::Is(300.0),
     };
     history.push_str(&host.set_claims(&exact_apple::Claims {
-        owners: &[(projection_id(&host, "owner"), Some(values))],
+        blocks: &[(projection_id(&host, "owner"), Some(block))],
         ..Default::default()
     }));
     projection_complete(&mut host, &mut history);

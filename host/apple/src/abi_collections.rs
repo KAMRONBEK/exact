@@ -67,14 +67,15 @@ impl<D: DataSource> Bridge<D> {
     /// four floats are unused. Kind 16 is the border box a person dragged
     /// the box's `resize` grip to (`Runner::resize_box`): f32 width and
     /// height, a NaN keeping that axis, and two unused.
-    /// Kind 21 is a content owner's values (LLP 1123 D9), in its content
-    /// root's points ([`OWNER_RECORD`] bytes): f32 the safe area's top,
-    /// right, bottom and left, the content root's width and height, u32
-    /// columns and rows, four f32 rectangles x, y, width, height (the
-    /// segments, row-major, the unused ones zero), u32 1 when twenty f32
-    /// region insets follow (D10's five regions, each top, right, bottom,
-    /// left) and 0 when the regions are the safe area's. Kind 22 takes an
-    /// owner's values back. Kind 23 says how a block is shown against its
+    /// Kind 21 is what a host reports of a content owner beside its covers
+    /// (LLP 1123 D2's owner update), in its block's points ([`OWNER_RECORD`]
+    /// bytes): u32 1 when its margins follow (D8, `OwnerMargins`) and 0 when
+    /// it reports none, then f32 the root view's margins guide as insets
+    /// top, right, bottom and left, a plain view's margins, the system
+    /// minimum and the readable width; then its segments (D16), u32 columns
+    /// and rows and four f32 rectangles x, y, width, height, row-major, the
+    /// unused ones zero, a grid of one segment being none. Kind 22 takes an
+    /// owner's report back. Kind 23 says how a block is shown against its
     /// stack's top (LLP 1127), its first float 1 beside it, 2 under a pane
     /// over it, 0 in its stack.
     pub fn covers(&mut self, len: usize) -> u32 {
@@ -117,7 +118,7 @@ impl<D: DataSource> Bridge<D> {
                     18 | 20 => locals.push(((kind == 18).then_some(view), None)),
                     10 => lists.push((view, Some([edge(8), edge(12)]))),
                     11 => lists.push((view, None)),
-                    21 => owned.push((view, Some(owner_values(&edge, &word)))),
+                    21 => owned.push((view, Some(owner_report(&edge, &word)))),
                     22 => owned.push((view, None)),
                     // PROTO (rule 4): the route's top edge moves (1) or no longer does (0)
                     24 => moving.push((view, edge(8) != 0.0)),
@@ -365,35 +366,36 @@ fn block_axis(length: f32, policy: f32) -> exact_kernel::BlockAxis {
 }
 
 /// The bytes of a kind 21 record, the view and the kind included.
-const OWNER_RECORD: usize = 188;
+const OWNER_RECORD: usize = 136;
 
-/// A kind 21 record's values, read by `edge` (an f32 at a byte offset) and
+/// A kind 21 record's report, read by `edge` (an f32 at a byte offset) and
 /// `word` (its four bytes). The kernel refuses a grid the rectangles do not
 /// fill, which a count past the record's four rectangles never is.
-fn owner_values(
+fn owner_report(
     edge: &dyn Fn(usize) -> f32,
     word: &dyn Fn(usize) -> [u8; 4],
-) -> exact_kernel::OwnerValues {
+) -> crate::host::OwnerReport {
+    let four = |at: usize| std::array::from_fn(|e| edge(at + e * 4));
+    let margins = (u32::from_le_bytes(word(8)) == 1).then(|| exact_kernel::OwnerMargins {
+        root: four(12),
+        plain: four(28),
+        minimum: four(44),
+        readable_width: edge(60),
+    });
     let count = |i: usize| u8::try_from(u32::from_le_bytes(word(i))).unwrap_or(u8::MAX);
-    let (cols, rows) = (count(32), count(36));
+    let (cols, rows) = (count(64), count(68));
     let n = usize::from(cols) * usize::from(rows);
-    let segments = (0..n)
-        .filter(|_| (2..=4).contains(&n))
-        .map(|i| {
-            let at = 40 + i * 16;
-            exact_kernel::Rect::new(edge(at), edge(at + 4), edge(at + 8), edge(at + 12))
-        })
-        .collect();
-    let regions = (u32::from_le_bytes(word(104)) == 1)
-        .then(|| std::array::from_fn(|r| std::array::from_fn(|e| edge(108 + (r * 4 + e) * 4))));
-    exact_kernel::OwnerValues {
-        safe: [edge(8), edge(12), edge(16), edge(20)],
-        regions,
+    let segments = (n > 1).then(|| exact_kernel::style::env::SegmentGrid {
         cols,
         rows,
-        segments,
-        size: (edge(24), edge(28)),
-    }
+        rects: (0..n.min(4))
+            .map(|i| {
+                let at = 72 + i * 16;
+                exact_kernel::Rect::new(edge(at), edge(at + 4), edge(at + 8), edge(at + 12))
+            })
+            .collect(),
+    });
+    crate::host::OwnerReport { margins, segments }
 }
 
 /// Four two-bit physical side indices, least significant first.

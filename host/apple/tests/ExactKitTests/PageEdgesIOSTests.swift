@@ -608,15 +608,23 @@ final class PageEdgesIOSTests: XCTestCase {
         route.frame = CGRect(x: 0, y: 82, width: 951, height: 553)
         bar.frame.size.width = 951
         XCTAssertEqual(ControlBars(p).bars(of: list, in: route, top: true).map { $0.map(\.id) }, [bar.id])
-        // One side: the scroller reaches the left edge it opts out of and stops at the right cover it keeps
-        list.frame = CGRect(x: 0, y: 133, width: 951 - 84, height: 502)
+        // One side: the root is laid out to the left edge it opts out of and stops at the right cover it keeps
+        // (the safe-area prototype lays a route's root out in what it clears), and its scroller spans it
         route.style["safe_area"] = .number(8)
+        route.frame = CGRect(x: 0, y: 82, width: 951 - 84, height: 553)
+        bar.frame.size.width = 951 - 84
+        list.frame = CGRect(x: 0, y: 51, width: 951 - 84, height: 502)
         XCTAssertEqual(ControlBars(p).bars(of: list, in: route, top: true).map { $0.map(\.id) }, [bar.id])
+        // The left kept, the root starts past the left cover: a scroller laid out to the left edge is wider than its room
         route.style["safe_area"] = .number(2)
+        route.frame = CGRect(x: 320, y: 82, width: 951 - 320, height: 553)
+        bar.frame.size.width = 951 - 320
         XCTAssertNil(ControlBars(p).bars(of: list, in: route, top: true), "the left cover it keeps is not its room")
         // The foot: open at the bottom cover it keeps, short of the route's edge it opts out of
+        list.frame = CGRect(x: 0, y: 51, width: 951 - 320, height: 502)
         XCTAssertEqual(ControlBars(p).bars(of: list, in: route, top: false).map { $0.map(\.id) }, [])
         route.style["safe_area"] = .number(Double(2 | 4))
+        route.frame.size.height = 553 + 34
         XCTAssertNil(ControlBars(p).bars(of: list, in: route, top: false))
     }
 

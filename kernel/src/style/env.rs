@@ -464,10 +464,6 @@ pub struct Env {
     /// The owner segments one node reads (LLP 1123 D16), set, as `local` is,
     /// only in an environment made for a node.
     pub segments_held: Option<HeldSegments>,
-    /// The values of the content owner a node lies in (LLP 1123 D9), for the
-    /// environment a node's rows resolve against; `None` for the document's
-    /// own, outside every owner. `env()` never reads them.
-    pub owner: Option<std::sync::Arc<super::owner::OwnerValues>>,
     /// What `env(safe-area-inset-<edge>)` reads at one node, top right bottom
     /// left: the remainder of its context, the document's insets outside
     /// every owner, an owner's own inside one, and 0 in a scroller's padding
@@ -574,7 +570,6 @@ impl Env {
             targets: None,
             segments_held: None,
             rtl: false,
-            owner: None,
             context: None,
         }
     }
@@ -1102,7 +1097,6 @@ pub fn uses_env(style: &crate::StyleProps) -> bool {
             Dimension::Env(..)
                 | Dimension::Region(..)
                 | Dimension::Segment(..)
-                | Dimension::Owner(..)
                 | Dimension::Viewport(..)
                 | Dimension::Compare(..)
         )

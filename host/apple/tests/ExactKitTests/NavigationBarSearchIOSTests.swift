@@ -2,6 +2,7 @@
 import UIKit
 import XCTest
 @testable import ExactKit
+@testable import ExactNavigation
 
 /// A header's search field as UIKit moves its bar into search (`HeaderSearch`).
 extension NavigationBarIOSTests {

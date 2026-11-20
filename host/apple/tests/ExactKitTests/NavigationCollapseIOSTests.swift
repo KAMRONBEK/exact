@@ -1070,17 +1070,10 @@ final class NavigationCollapseIOSTests: XCTestCase {
             let size = CGSize(width: box.width - safe.left - safe.right, height: box.height - safe.top - safe.bottom)
             XCTAssertEqual(list.convert(list.bounds, to: route.view).maxY, route.view.bounds.maxY, accuracy: 0.5,
                            "\(title): the scroller reaches under the bars at the bottom")
-            until("\(title): the values describe the content root between the bars") {
-                guard let values = session.presenter.navigationHost.ownerValues[route.node.id] else { return false }
-                return values.safe.allSatisfy { abs($0) < 0.5 }
-                    && abs(values.size.width - size.width) < 0.5 && abs(values.size.height - size.height) < 0.5
+            until("\(title): the route reports its margins") {
+                session.presenter.navigationHost.ownerReports[route.node.id]?.margins != nil
             }
-            if let values = session.presenter.navigationHost.ownerValues[route.node.id] {
-                XCTAssertTrue(values.safe.allSatisfy { abs($0) < 0.5 }, "\(title): the safe area's insets, \(values.safe)")
-                XCTAssertEqual(values.size.width, size.width, accuracy: 0.5, "\(title): the content root's width")
-                XCTAssertEqual(values.size.height, size.height, accuracy: 0.5, "\(title): the content root's height")
-            }
-            until("\(title): the kernel lays out by them") {
+            until("\(title): the kernel lays out in the content root between the bars") {
                 abs(content.frame.minY) < 0.5 && abs(padded.bounds.height - size.height / 10) < 0.5
             }
             XCTAssertEqual(content.frame.minY, 0, accuracy: 0.5, "\(title): `var(--exact-safe-area-inset-top)` pads nothing")

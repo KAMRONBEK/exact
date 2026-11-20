@@ -2,6 +2,7 @@
 // the route's primary scrollers by their overlap with the safe area
 // (`.automatic`), and Exact adds the negation to the scroller's own insets.
 #if os(iOS) || os(tvOS)
+import ExactKit
 import UIKit
 
 /// A route's opted-out edges (`-exact-safe-area`, and the top under a
@@ -193,12 +194,4 @@ final class RouteSafeArea {
     }
 }
 
-extension NodeView {
-    /// UIKit's inset changed as a bar or the safe area did: a route that turns
-    /// an edge off corrects it now, before the next batch's cover report.
-    package func scrollViewDidChangeAdjustedContentInset(_ scrollView: UIScrollView) {
-        guard scrollView === self.scrollView else { return }
-        presenter?.navigation.adjustedInsetChanged(self)
-    }
-}
 #endif

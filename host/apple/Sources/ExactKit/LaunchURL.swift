@@ -200,7 +200,7 @@ extension ExactSession {
     /// The runner's own `go` to `location` under a root with no `navigate`
     /// handler, as a link there takes it (a split that expands keeps the page
     /// its detail showed, `SplitIOS`).
-    func hostGo(_ location: String) {
+    package func hostGo(_ location: String) {
         guard state != .destroyed, booted else { return }
         apply(runtime.hostGo(location, now: now()))
     }
