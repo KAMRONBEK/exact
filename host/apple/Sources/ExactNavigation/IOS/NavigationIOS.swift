@@ -576,7 +576,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
                 if inspecting == nil, split.inspecting != nil, mounted.count <= common { placeInspector(nil) }
                 let animated = owners.count == 1 && mounted.count == boundaries.count && !ExactEnv.agentFreezes && !unanimated && split.controller.view.window != nil
                 syncSplit(split, stack, animated: animated)
-                if !split.columnsAboutToMove { split.controller.view.layoutIfNeeded() }
+                if !split.laysOutItself { split.controller.view.layoutIfNeeded() }
                 continue
             }
             let wantedStack = Array(wanted[parts[index]])
@@ -675,7 +675,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         if p.tabs != nil { replayTabs() }
         // Before the covers, run the edge passes owed (a route hatch's selection may owe some), unless a transition holds them
         runOwedScrollEdges()
-        if !presenter.awaitingFrame.isEmpty, split?.columnsAboutToMove != true { window?.layoutIfNeeded() } // Lay out new views before reporting their geometry
+        if !presenter.awaitingFrame.isEmpty, split?.laysOutItself != true { window?.layoutIfNeeded() } // Lay out new views before reporting their geometry
         reportCovers()
         refitForBars()
         settled = true
@@ -1123,6 +1123,9 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
 
     func navigationController(_ navigationController: UINavigationController, didShow viewController: UIViewController, animated: Bool) {
         followPops()
+        // A stack UIKit moves between the split's columns as it collapses or expands shows its routes as a step of
+        // that move: the move's report syncs the settled columns (`SplitIOS.splitViewControllerDidCollapse`)
+        if let split, split.moving, split.list === navigationController || split.detail === navigationController { return }
         if navigationController === more {
             followSelection(showing: viewController)
             if declineMoreRow(viewController) { return }

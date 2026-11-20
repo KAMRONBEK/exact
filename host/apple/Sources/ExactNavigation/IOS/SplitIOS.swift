@@ -111,6 +111,12 @@ final class SplitIOS: NSObject, UISplitViewControllerDelegate {
     private var collapsing = false
     /// Whether UIKit is collapsing or expanding the columns, from its question until its report.
     var moving: Bool { expansion || collapsing }
+    /// Whether UIKit lays the columns out itself, so nothing here may: it has said they will move and has yet to open
+    /// its animation (`columnsAboutToMove`), or it is collapsing or expanding them, moving the navigation items
+    /// between bars, where a bar laid out meanwhile fails UIKit's assertion ("Layout requested for visible navigation
+    /// bar … when the top item belongs to a different navigation bar"; iOS 27.1, collapsing for the app switcher's
+    /// snapshot as the app left the screen). The report that ends the move syncs again (`changed`).
+    var laysOutItself: Bool { columnsAboutToMove || moving }
     /// Whether the split is expanded and no longer moving between its forms: UIKit reads it expanded before it has
     /// said so (`splitViewControllerDidExpand`), and a sync can come between.
     var settledExpanded: Bool { !controller.isCollapsed && !expansion && !collapsing }

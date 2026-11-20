@@ -111,7 +111,9 @@ final class NavigationDelegateProxy: ForwardingDelegate, UINavigationControllerD
         // Restoring a hidden bar changes the route's safe area. Lay out its
         // container before reporting that cover to the kernel.
         nav.view.setNeedsLayout()
-        if nav.viewIfLoaded?.window != nil {
+        // Not while UIKit collapses or expands the split this stack is a column of (`SplitIOS.laysOutItself`)
+        let split = host?.split, held = split.map { $0.laysOutItself && ($0.list === nav || $0.detail === nav) } == true
+        if nav.viewIfLoaded?.window != nil, !held {
             // That layout can start the bar's own update UIKit deferred to
             // the transition's end (iPadOS applies a push's items only then):
             // started inside the end, it takes the bar's touches and never
