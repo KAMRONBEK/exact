@@ -1367,7 +1367,8 @@ impl<D: DataSource + Default> CanvasHost<D> {
     }
 
     fn owed_at(&self, now: f64) -> bool {
-        self.moved > 0 && self.moves < 1000 && now - self.moved_at >= 12.0
+        // A frame and a half at 60 Hz with no move: the scroll paused.
+        self.moved > 0 && self.moves < 1000 && now - self.moved_at >= 25.0
     }
 
     fn shift(&mut self, at: f64) -> Option<Vec<u32>> {

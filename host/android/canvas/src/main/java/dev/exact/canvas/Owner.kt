@@ -656,8 +656,9 @@ internal class Owner(private val hwbuf: Boolean, private val fast: Boolean, prio
             idle()
         }
         var due = Native.nextDue()
-        // A moved paint is owed a paint once scrolling pauses: each step pushes this back.
-        if (Native.owed() && (due < 0 || due > 16)) due = 16.0
+        // A moved paint is owed a paint once scrolling pauses: each step pushes this back. It waits two frames at
+        // 60 Hz, so a step each 16.7 ms comes first.
+        if (Native.owed() && (due < 0 || due > 34)) due = 34.0
         handler.removeCallbacks(timer)
         if (due >= 0) handler.postDelayed(timer, due.toLong().coerceAtLeast(0))
     }

@@ -1065,8 +1065,9 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
         }
         if (Native.animating() && !turnPosted) { turnPosted = true; android.view.Choreographer.getInstance().postFrameCallback(turn) }
         var due = Native.nextDue()
-        // A moved paint is owed a paint once scrolling pauses: each step pushes this back.
-        if (Native.owed() && (due < 0 || due > 16)) due = 16.0
+        // A moved paint is owed a paint once scrolling pauses: each step pushes this back. It waits two frames at
+        // 60 Hz, so a step each 16.7 ms comes first.
+        if (Native.owed() && (due < 0 || due > 34)) due = 34.0
         removeCallbacks(timer)
         if (due >= 0) postDelayed(timer, due.toLong().coerceAtLeast(0))
     }

@@ -47,7 +47,8 @@ class OwnerBackgroundTest {
             @JvmStatic @Implementation fun timerHeld() = 0
             @JvmStatic @Implementation fun animating(vsyncOnly: Boolean) = frameDemand
             @JvmStatic @Implementation fun displayFrame() {}
-            @JvmStatic @Implementation fun owed() = false
+            var owes = false
+            @JvmStatic @Implementation fun owed() = owes
             @JvmStatic @Implementation fun nextDue() = (due - SystemClock.uptimeMillis()).toDouble()
         }
     }
@@ -68,6 +69,33 @@ class OwnerBackgroundTest {
             }
         } finally {
             Host.frameDemand = false
+            owner.running(false)
+            owner.ask { }
+            handler.removeCallbacksAndMessages(null)
+            thread.quitSafely(); thread.join(5000)
+            assertFalse(thread.isAlive)
+        }
+    }
+
+    /** A moved paint is painted once scrolling pauses, and each step pushes that back: the wait outlasts the 16.7 ms
+     * between a 60 Hz display's steps, so a scroll does not paint between them. */
+    @Test fun anOwedPaintWaitsOutA60HzStep() {
+        val owner = Owner(false, false, 0) { "0" }
+        fun field(name: String) = Owner::class.java.getDeclaredField(name).apply { isAccessible = true }
+        val thread = field("thread").get(owner) as HandlerThread
+        val handler = field("handler").get(owner) as Handler
+        val schedule = Owner::class.java.getDeclaredMethod("schedule").apply { isAccessible = true }
+        try {
+            val wait = owner.ask {
+                Host.due = SystemClock.uptimeMillis() + 30000
+                Host.owes = true
+                handler.removeCallbacksAndMessages(null)
+                schedule.invoke(owner)
+                shadowOf(thread.looper).nextScheduledTaskTime.toMillis() - SystemClock.uptimeMillis()
+            }
+            assertTrue("the owed paint waited $wait ms", wait > 17)
+        } finally {
+            Host.owes = false
             owner.running(false)
             owner.ask { }
             handler.removeCallbacksAndMessages(null)
