@@ -327,8 +327,13 @@ final class ContextMenuIOSTests: XCTestCase {
         host.contextMenuInteraction(cardMenu, willEndFor: authored, animator: nil)
 
         // A run's link: its words leave the paragraph while their picture is
-        // lifted, and tapping that picture follows the link.
+        // lifted, and tapping that picture follows the link. A path in the app
+        // gets that menu only on the app's declared origin.
         let paragraph = try node(session, "link-text")
+        guard ExactEnv.appMetadata["ExactOrigin"] != nil else {
+            XCTAssertNil(interaction(paragraph), "a path in the app has no menu without a declared origin")
+            return
+        }
         let run = try XCTUnwrap(paragraph.inlineText.first { $0.props["testId"] == "run-link" })
         let box = try XCTUnwrap(paragraph.inlineRects(run).first)
         let runs = try XCTUnwrap(interaction(paragraph))
@@ -337,8 +342,7 @@ final class ContextMenuIOSTests: XCTestCase {
         XCTAssertTrue(runOwner.isLink)
         XCTAssertEqual(runOwner.name, "/detail")
         XCTAssertEqual(runOwner.inlineID, run.id)
-        XCTAssertEqual(titles(try XCTUnwrap(host.menu(runOwner))), ExactEnv.appMetadata["ExactOrigin"] == nil ? ["Open Link"] : ["Open Link", "Copy Link", "Share…"],
-                       "a path in the app is copied and shared only on the app's declared origin")
+        XCTAssertEqual(titles(try XCTUnwrap(host.menu(runOwner))), ["Open Link", "Copy Link", "Share…"])
         let ink = try XCTUnwrap(paragraph.textRasterLayer)
         XCTAssertNil(ink.mask)
         _ = try XCTUnwrap(host.contextMenuInteraction(runs, configuration: at, highlightPreviewForItemWithIdentifier: at.identifier))
@@ -366,12 +370,19 @@ final class ContextMenuIOSTests: XCTestCase {
         XCTAssertNil(ContextMenuHost.linkURL("/detail", origin: nil, visit: visit), "a link in the app has no URL without a declared origin")
         XCTAssertEqual(ContextMenuHost.linkURL("https://other.example/", origin: nil, visit: visit)?.absoluteString, "https://other.example/")
         for href in ["mailto:a@example.com", "tel:+15555550100", "javascript:alert(1)", "JavaScript:void(0)", "myapp://open", ""] {
-            XCTAssertFalse(NodeView.hasLinkMenu(href), href)
+            XCTAssertFalse(NodeView.isWebLink(href), href)
+            XCTAssertFalse(NodeView.hasLinkMenu(href, origin: origin), href)
             XCTAssertNil(url(href), href)
         }
         for href in ["https://example.com", "HTTP://example.com", "/detail", "about", "#moves", "//cdn.example.org/x"] {
-            XCTAssertTrue(NodeView.hasLinkMenu(href), href)
+            XCTAssertTrue(NodeView.isWebLink(href), href)
+            XCTAssertTrue(NodeView.hasLinkMenu(href, origin: origin), href)
         }
+        // Without a declared origin a path in the app names no URL: no menu, as a tap already opens it
+        for href in ["/detail", "about", "#moves", "//cdn.example.org/x"] {
+            XCTAssertFalse(NodeView.hasLinkMenu(href, origin: nil), href)
+        }
+        XCTAssertTrue(NodeView.hasLinkMenu("https://example.com", origin: nil))
     }
 }
 #endif

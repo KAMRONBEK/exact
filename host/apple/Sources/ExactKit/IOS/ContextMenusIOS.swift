@@ -160,7 +160,7 @@ final class ContextMenuHost: NSObject, UIContextMenuInteractionDelegate, UIEditM
             for v in presenter.textViews.values where v.hasInlineContextPopover || (v.hasInlineLink && !authoredMenu(at: v)) { wanted[v.id] = v }
             for v in presenter.carrying("contextPopover") where v.props["contextPopover"]?.isEmpty == false { wanted[v.id] = v }
             for id in presenter.chrome.ids("href") where wanted[id] == nil {
-                if let v = presenter.views[id], v.props["href"].map(NodeView.hasLinkMenu) == true, !authoredMenu(at: v) { wanted[id] = v }
+                if let v = presenter.views[id], v.props["href"].map { NodeView.hasLinkMenu($0) } == true, !authoredMenu(at: v) { wanted[id] = v }
             }
         }
         for (key, interaction) in projected {
@@ -590,9 +590,9 @@ final class ContextMenuHost: NSObject, UIContextMenuInteractionDelegate, UIEditM
     /// Share): as written when it has a scheme, else resolved as a browser
     /// resolves it, against the visit shown on the app's declared origin
     /// (`app.origin`, baked as `ExactOrigin`). Nil without a declared origin,
-    /// and for a scheme `NodeView.hasLinkMenu` refuses.
+    /// and for a scheme `NodeView.isWebLink` refuses.
     static func linkURL(_ href: String, origin: String?, visit: String) -> URL? {
-        guard NodeView.hasLinkMenu(href) else { return nil }
+        guard NodeView.isWebLink(href) else { return nil }
         if let url = URL(string: href), url.scheme != nil { return url }
         guard let origin, let base = URL(string: origin + visit) else { return nil }
         return URL(string: href, relativeTo: base)?.absoluteURL

@@ -77,7 +77,7 @@ extension NodeView {
     /// `point`, else the node's own, where nothing authored answers it.
     func peekedLink(at point: CGPoint) -> (href: String, run: InlineText?)? {
         guard !hasOwnContextMenu, inlineContextTarget(at: point) == nil else { return nil }
-        if let run = inlineRun(at: point, where: { $0.props["href"].map(Self.hasLinkMenu) == true }), let href = run.props["href"] { return (href, run) }
+        if let run = inlineRun(at: point, where: { $0.props["href"].map { Self.hasLinkMenu($0) } == true }), let href = run.props["href"] { return (href, run) }
         return props["href"].flatMap { Self.hasLinkMenu($0) ? ($0, nil) : nil }
     }
     /// A row's menu wins a long press over selectable text; an authored
@@ -105,13 +105,23 @@ extension NodeView {
 
     #endif
 
-    /// Whether a link to `href` gets the host's own menu: a web link, `http` or
-    /// `https`, or one with no scheme, which resolves in the app. A `mailto:`,
-    /// `tel:` or `javascript:` link, or an app's own scheme, gets none.
-    static func hasLinkMenu(_ href: String) -> Bool {
+    /// Whether `href` is a web link: `http` or `https`, or one with no scheme,
+    /// which resolves in the app. A `mailto:`, `tel:` or `javascript:` link, or
+    /// an app's own scheme, is none.
+    static func isWebLink(_ href: String) -> Bool {
         guard !href.isEmpty else { return false }
         guard let scheme = URL(string: href)?.scheme?.lowercased() else { return true }
         return scheme == "http" || scheme == "https"
+    }
+
+    /// Whether a link to `href` gets the host's own menu: a web link a reader can
+    /// take out of the app (`ContextMenuHost.linkURL`), one with `http` or
+    /// `https`, or one with no scheme in an app that declares its web `origin`.
+    /// A path in an app with none names no URL to copy or share, and its menu
+    /// would only open it, as a tap does, so it gets none, as an in-app link in
+    /// UIKit or SwiftUI gets none.
+    static func hasLinkMenu(_ href: String, origin: String? = ExactEnv.appMetadata["ExactOrigin"] as? String) -> Bool {
+        isWebLink(href) && (URL(string: href)?.scheme != nil || origin != nil)
     }
 
     func deliverContext(at point: CGPoint, inline inlineID: UInt32? = nil) {
