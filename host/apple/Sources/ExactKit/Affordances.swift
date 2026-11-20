@@ -49,7 +49,9 @@ extension NodeView {
         guard let view = symbolView else { return }
         if faceSymbol.map(FaceSymbol.isOriginal) == true { view.image = image; return }
         let follows = inkTintShare == 1 || style["symbol_rendering"]?.string == "palette" && style["symbol_palette"]?.namesTint == true
-        var ink = follows ? nil : inkTintShare.map(SystemColor.tint) ?? drawnSymbolInk
+        // A palette's or a multicolour symbol's colours are its ink, which a tint drawn over the image would replace
+        let ownInk = ["palette", "multicolor"].contains(style["symbol_rendering"]?.string ?? "")
+        var ink = follows || ownInk ? nil : inkTintShare.map(SystemColor.tint) ?? drawnSymbolInk
         let path = props["symbolPath"] != nil
         if path, ink != nil {
             if let share = inkTintShare { ink = tintColor.withAlphaComponent(share) }
