@@ -43,6 +43,18 @@ final class GroupedCollectionView: UICollectionView, GroupedScroller {
             presenter.moveOrPlace(node) { super.bounds = newValue }
         }
     }
+    /// UIKit lays the cells out as it lays the list out, also inside an animation UIKit has open around that (a
+    /// column sliding in with its route). A list no frame has shown places its cells at once, as its offset
+    /// (`bounds`) and any view no frame has shown are placed (`Presenter.moveOrPlace`): animated, its self-sizing cells
+    /// would grow from their estimated size down the list. A list that showed moves its cells with the animation.
+    override func layoutSubviews() {
+        if UIView.inheritedAnimationDuration > 0, let node, let presenter = node.presenter, !presenter.showed(node) {
+            UIView.performWithoutAnimation { super.layoutSubviews() }
+        } else {
+            super.layoutSubviews()
+        }
+        paintCardShadows()
+    }
     /// The safe area at the sides the collection reaches over (`sideReach`):
     /// the window's, which the host keeps from the views it lays out (LLP
     /// 1123), or a fold's half band. UIKit insets the cards from it, as in a
@@ -87,11 +99,6 @@ final class GroupedCollectionView: UICollectionView, GroupedScroller {
     /// Each section's outer-shadow reach as the layout last decorated it.
     private var decorated: [Int: CGFloat] = [:]
     private var insets: [(clip: CALayer, caster: InsetShadowCaster)] = []
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        paintCardShadows()
-    }
 
     /// How far a section's card's outer shadows reach; nil when it casts none.
     private func outerReach(_ section: Int) -> CGFloat? {
