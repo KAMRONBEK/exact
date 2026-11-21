@@ -999,3 +999,63 @@ fn quiet_travel_acknowledges_a_correction_before_the_next_prepend() {
         "an old snapshot acknowledges nothing"
     );
 }
+
+#[test]
+fn a_data_update_while_the_list_moves_keeps_the_rows_its_report_led_into() {
+    let mut h = Harness::new(1_000, false, false);
+    let rows = |h: &Harness| {
+        h.snapshot()
+            .rows
+            .iter()
+            .map(|r| r.index)
+            .collect::<Vec<_>>()
+    };
+    h.send(h.feedback(3200.0));
+    let up = CollectionFill {
+        velocity: -1_600.0,
+        limit: Some(1),
+        ..Default::default()
+    };
+    h.send_filled(h.feedback(2880.0), up);
+    let mut reports = 0;
+    while !rows(&h).iter().any(|&i| i < 76) {
+        let mut f = h.feedback(2880.0);
+        f.scroll_sequence -= 1;
+        h.send_filled(f, up);
+        reports += 1;
+        assert!(reports < 40, "{:?}", rows(&h));
+    }
+    let led: Vec<usize> = rows(&h).into_iter().filter(|&i| i < 79).collect();
+    let before = h.snapshot().rows;
+    h.slots[1] = Value::Number(1.0); // what the rows show changes: a data update
+    h.update().unwrap();
+    let after = rows(&h);
+    assert!(
+        led.iter().all(|i| after.contains(i)),
+        "led {led:?}, after the update {after:?}"
+    );
+    for row in h.snapshot().rows.into_iter().filter(|r| r.index < 79) {
+        let original = before
+            .iter()
+            .find(|r| r.index == row.index)
+            .expect("refresh built another lead row");
+        assert_eq!((row.view, row.epoch), (original.view, original.epoch));
+    }
+    // A report at rest that retires nothing (build only) ends the motion; the
+    // next update's window is the plain one again, and only it retires the lead.
+    let rest = CollectionFill {
+        create_only: true,
+        ..Default::default()
+    };
+    let mut f = h.feedback(2880.0);
+    f.scroll_sequence -= 1;
+    h.send_filled(f, rest);
+    assert!(
+        led.iter().all(|i| rows(&h).contains(i)),
+        "a build-only report retired {:?}",
+        rows(&h)
+    );
+    h.slots[1] = Value::Number(2.0);
+    h.update().unwrap();
+    assert!(!rows(&h).iter().any(|&i| i < 79), "{:?}", rows(&h));
+}
