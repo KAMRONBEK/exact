@@ -463,9 +463,12 @@ snapshot. The backend’s clock stays its own.
    the platform's bordered one; a document's own text (a note's title and body, as Notes
    draws them) says `border="none"`, and a chat's composer is `chat-thread`'s.
 2. **A `header` holds a heading (`h1 "Title"`), one text after it (the subtitle) and
-   buttons** (or a search field, a `tablist`); anything else isn't in the iOS bar. A
-   control fixed under the bar goes with an inline title (`h2`); one that may scroll
-   away, in the list's first section.
+   buttons** (or a search field, a `tablist`). Anything else in it (a spinner and its
+   words, a picture) is an item of its own on its side of the heading, drawn as
+   written, with no glass unless something in it presses; inside a box around the
+   heading, only the title shows. Android, Linux and tvOS leave such an item out, and the
+   Mac keeps a header holding one in the page. A control fixed under the bar goes with an
+   inline title (`h2`); one that may scroll away, in the list's first section.
 3. **`width="100%"` with padding overflows**, as in CSS: drop the width; a `flex=1` field
    takes `min-width=0`.
 

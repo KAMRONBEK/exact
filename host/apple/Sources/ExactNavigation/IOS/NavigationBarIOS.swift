@@ -479,14 +479,6 @@ extension NavigationHost {
             guard let nav = c.navigationController, nav.topViewController === c, barShows(nav) else { return false }
             return c.viewIfLoaded?.window != nil
         }
-        // A readout the bar shows (§9.15) is tapped as a person taps it:
-        // nothing happens. Its header may be lifted whole or only in part.
-        if let readout = shown.lazy.compactMap({ c in c.readouts.first { id, _ in
-            id == node.id || self.presenter.views[id].map { node.isDescendant(of: $0) } == true }?.value }).first {
-            let point = readout.customView.map { $0.convert(CGPoint(x: $0.bounds.midX, y: $0.bounds.midY), to: nil) }
-            guard before(point) else { return ["error": "bar readout #\(id) is unavailable"] }
-            return ["tapped": id, "delivery": "host-activation", "native": "bar-readout"]
-        }
         guard shown.contains(where: { c in
             c.barPresses.contains { $0.id == node.id } || c.lifted.map { node === $0 || node.isDescendant(of: $0) } == true
         }) else { return nil }
@@ -678,7 +670,9 @@ extension NavigationHost {
             scope(c, shape: shows ? shape : nil)
             #endif
             collapse(c, shape: shape, shows: shows, scroller: scroller)
-            showReadouts(shows ? shape : nil, in: c)
+            #if os(iOS)
+            barHosted.show(shows ? shape?.hosted.map(\.id) ?? [] : [], in: c)
+            #endif
             reachBottom(c, presented: presented)
             c.paintBackdrop()
             searchField(shows ? shape?.search : nil, in: c, covered: index < routes.count - 1)
@@ -777,8 +771,8 @@ extension NavigationHost {
     private func coverLifted(_ routes: [RouteController]) {
         var lifted = false
         for c in routes {
-            for node in (c.lifted.map({ [$0] }) ?? c.barNodes) + [c.scoped].compactMap({ $0 }) where covers[node.id] != .whole {
-                covers[node.id] = .whole
+            for node in (c.lifted.map({ [$0] }) ?? c.barNodes) + [c.scoped].compactMap({ $0 }) where covers[node.id] != Self.cover(of: node, in: c) {
+                covers[node.id] = Self.cover(of: node, in: c)
                 lifted = true
             }
         }
@@ -788,6 +782,11 @@ extension NavigationHost {
         if presenter.applying { liftReport = coversReported }
         presenter.afterBatch { [weak self] in self?.deliverCovers() }
     }
+
+    /// What the bar's projection covers `node` with: a lifted header the bar
+    /// replaces, laying out only the blocks of its hosted items inside it
+    /// (LLP 1141.004 D2), and a node the bar places, whole.
+    static func cover(of node: NodeView, in c: RouteController) -> HostCover { node === c.lifted ? .bar : .whole }
 
     /// Write the defaults an authored header gives a navigation item, and
     /// lift the header out of the route's layout while the bar shows it. A
@@ -1314,8 +1313,8 @@ extension NavigationHost {
     /// Each of `shape`'s items enabled as it says, on the item made for it; false when one has none.
     private func enable(_ shape: HeaderShape, in c: RouteController) -> Bool {
         let items = shape.leading + shape.trailing
-        guard items.allSatisfy({ $0.readout != nil || c.barItemsMade[$0.id] != nil }) else { return false }
-        for i in items where i.readout == nil {
+        guard items.allSatisfy({ $0.hosted || c.barItemsMade[$0.id] != nil }) else { return false }
+        for i in items where !i.hosted {
             guard let item = c.barItemsMade[i.id]?.bar else { continue }
             item.isEnabled = !i.disabled
             if i.disabled || i.accessibilityDisabled { item.accessibilityTraits.insert(.notEnabled) }
@@ -1336,7 +1335,9 @@ extension NavigationHost {
 
     private func barItemMade(_ i: HeaderShape.Item, _ c: RouteController) -> UIBarButtonItem {
         presenter.views[i.id]?.rejectNativeActiveProperties(on: "UIBarButtonItem", supporting: i.supportsActiveColor ? ["press_color"] : [])
-        if i.readout != nil { c.barItemsMade[i.id] = nil; return readoutItem(i, c) }
+        #if os(iOS)
+        if i.hosted { c.barItemsMade[i.id] = nil; return barHosted.item(i, in: c) }
+        #endif
         // A menu reads its rows through the button's view: a new view, a new menu.
         // Before iOS 26 a chip's picture follows the bar's tint, which the item
         // does not hold; from iOS 26 it is drawn in the label colour.

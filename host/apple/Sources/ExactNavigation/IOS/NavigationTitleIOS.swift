@@ -50,7 +50,10 @@ struct HeaderTitle: Equatable {
     let tap: UInt32?
     let accessibilityDisabled: Bool
 
-    init?(header: NodeView, heading: NodeView, tap: NodeView?, apart: [NodeView]) {
+    /// `apart`: the nodes the title never reads (the items, the readouts, the
+    /// search field, the tablist); `atomic`: the hosted elements (LLP
+    /// 1141.004 D1), which it takes whole as the subtitle or not at all.
+    init?(header: NodeView, heading: NodeView, tap: NodeView?, apart: [NodeView], atomic: [NodeView] = []) {
         // The heading's ancestors below the header, innermost first.
         var chain: [NodeView] = [], at = heading.superview
         while let view = at, view !== header {
@@ -61,12 +64,17 @@ struct HeaderTitle: Equatable {
         // what wraps it holds a bar item): the header is the group, whose
         // walk passes over the items, the search field and the tablist as
         // controls (LLP 1116 D2, amending LLP 1075.003 §9.10).
-        let wrapper = tap ?? chain.last(where: { a in !apart.contains { $0.isDescendant(of: a) } })
+        // Inside, in the authored tree: a readout the bar lifted is still in its box.
+        func inside(_ node: NodeView, _ box: NodeView) -> Bool {
+            node.presenter?.logicalAncestry(of: node).contains { $0 === box } ?? node.isDescendant(of: box)
+        }
+        let wrapper = tap ?? chain.last(where: { a in !apart.contains { inside($0, a) } })
         let group = wrapper ?? header
         var avatar: BadgeFace?, subtitle = "", glyphs: [Glyph] = [], passed = false, spoken: String?, rtl = false
         var placed: [NodeView] = []
+        // A hosted element the bar lifted is read at its place: the title may take it.
         func shown(_ node: NodeView) -> [NodeView] {
-            node.container.subviews.compactMap { $0 as? NodeView }.filter { $0.style["display"]?.string != "none" }
+            node.authoredChildNodes.filter { $0.style["display"]?.string != "none" }
         }
         /// A passive box: no button, no press, no fill (a pill or badge
         /// keeps its own look, so it is no line of glyphs).
@@ -130,10 +138,16 @@ struct HeaderTitle: Equatable {
                 if headingImages.contains(where: { $0 === child }) { placed.append(child); continue }
                 // A bar item, a readout among them, is not the title's to read.
                 if control(child) || apart.contains(where: { $0 === child }) { continue }
+                // A hosted element is the subtitle whole, else its own item: the title reads nothing inside it.
+                if atomic.contains(where: { $0 === child }) {
+                    if passed, subtitle.isEmpty, child.isParagraph, !child.accessibleText.isEmpty { subtitle = child.accessibleText; placed.append(child) }
+                    else if passed, subtitle.isEmpty, let pieces = line(child) { take(child, pieces) }
+                    continue
+                }
                 // A box holding one is no avatar; a row of glyphs beside a
                 // readout is still the glyph line, without it; else what it
                 // holds is read alone.
-                if apart.contains(where: { $0.isDescendant(of: child) }) {
+                if apart.contains(where: { inside($0, child) }) {
                     if passed, subtitle.isEmpty, let pieces = line(child) { take(child, pieces); continue }
                     if !(passed && child.channels("background_color") != nil) { walk(child) }
                     continue
@@ -228,7 +242,7 @@ extension HeaderShape {
             if let box = view as? NodeView, box.props["popover"] != nil || box.props["semanticTag"] == "dialog" { return true }
             at = view.superview
         }
-        return placed.contains { node === $0 || node.isDescendant(of: $0) || $0.isDescendant(of: node) }
+        return (placed + hosted).contains { node === $0 || node.isDescendant(of: $0) || $0.isDescendant(of: node) }
     }
 }
 
