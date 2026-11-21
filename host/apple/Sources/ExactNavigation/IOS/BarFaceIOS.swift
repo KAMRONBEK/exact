@@ -108,6 +108,8 @@ struct ChipFace: Equatable {
             for kid in kids where kid.style["display"]?.string != "none" { visitLeaf(kid, in: presenter, alpha: alpha * CGFloat(kid.opacity), host: host) }
         }
         func visit(_ child: NodeView, fonted: Bool, inked: Bool, alpha: CGFloat) {
+            // A leaf `visibility` hides is not painted (LLP 1141.004 D1).
+            if HeaderShape.Item.unpainted(child) { return }
             let fonted = fonted || ["font_family", "font_size", "font_weight"].contains(where: child.wrote)
             let inked = inked || child.wrote("text_color")
             if child.isParagraph {

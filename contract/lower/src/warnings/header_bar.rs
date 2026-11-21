@@ -69,7 +69,10 @@ fn part(node: Visit<'_>) -> Part {
             && (computed(attrs, "command") || literal(attrs, "command").is_some_and(opens)));
     // A link follows its `href`, unless it has none or an empty one (`fact::HREF`).
     let follows = has(attrs, "href") && literal(attrs, "href") != Some("");
-    if has(attrs, "press") || (tag == "button" && item) || (tag == "link" && follows) {
+    if has(attrs, "press")
+        || (tag == "button" && item)
+        || (matches!(tag, "button" | "link") && follows)
+    {
         return Part::Pressable;
     }
     if role == Some("status") && tag != "header" {
@@ -380,6 +383,13 @@ impl<'a> Bar<'a> {
             Part::Box => hide("this box".into()),
             // Drawn in the title, before or after its text.
             Part::Other if glyphs && symbol(node) && !filled(node) => {}
+            // An idle button or link around the heading is walked for it.
+            Part::Other
+                if matches!(node.element(), Some(("button" | "link", _, _)))
+                    && holds_heading(node) =>
+            {
+                return true;
+            }
             Part::Other => match node.element() {
                 Some(("button", _, _)) => bar
                     .unplaced

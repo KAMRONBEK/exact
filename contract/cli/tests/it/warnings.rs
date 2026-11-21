@@ -82,6 +82,10 @@ fn what_the_bar_places_or_the_compiler_cannot_see_is_not_warned() {
         "  row\n    box background-color=\"-exact-system-blue\"\n      text \"AL\"\n    text \"Ada\" role=\"heading\" aria-level=1\n    row\n      image \"symbol:sf/bell.slash\"\n      text \"Muted\"",
         // A pressable group around the heading is the title, tapped.
         "  button press=go\n    text \"Ada\" role=\"heading\" aria-level=1\n    text \"online\"",
+        // A link that follows nothing around the heading is walked for it;
+        // a button with an `href` follows it, an item.
+        "  link href=\"\"\n    text \"List\" role=\"heading\" aria-level=1",
+        "  text \"List\" role=\"heading\" aria-level=1\n  button href=\"/history\" aria-label=\"History\"\n    text \"History\"",
         // Readouts (LLP 1075.003 §9.15): a status of a dot and a text after
         // the buttons, a status text before the heading.
         "  text \"Saved\" role=\"status\"\n  text \"Log\" role=\"heading\"\n  button press=go\n    text \"Add\"\n  row role=\"status\" gap=6\n    view width=7 height=7 border-radius=3.5 background-color=\"-exact-system-blue\"\n    text \"Clock\" font-family=\"Menlo\" font-size=12",

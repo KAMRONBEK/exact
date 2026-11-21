@@ -289,6 +289,25 @@ final class BarHostedIOSTests: XCTestCase {
         XCTAssertEqual(drawn.trailing.map(\.hosted), [true, false])
         XCTAssertEqual(drawn.trailing.last?.badge?.text, "AB")
         XCTAssertNil(drawn.trailing.last?.badge?.symbol, "the hidden symbol is not drawn")
+        // A badge of a dot and a text draws one of them: hosted. A badge whose
+        // one symbol `visibility` hides shows only its fill: drawn as written.
+        // A symbol and words on a pressed row are UIKit's image item, which
+        // speaks the words, as a hand-built bar's is.
+        let dot: [String: Any] = ["background_color": [52, 199, 89, 255], "width": 7, "height": 7]
+        let faces = route([["op": "create", "id": 4, "kind": "button", "handlers": ["press"], "props": ["accessibilityLabel": "Live"]],
+                           ["op": "create", "id": 5, "kind": "view", "style": fill], ["op": "create", "id": 6, "kind": "view", "style": dot], text(7, "AB"),
+                           ["op": "create", "id": 8, "kind": "button", "handlers": ["press"], "props": ["accessibilityLabel": "Me"]],
+                           ["op": "create", "id": 9, "kind": "view", "style": fill],
+                           ["op": "create", "id": 10, "kind": "image", "props": ["imageSource": "symbol:sf/person", "symbolName": "person"], "style": ["visibility": "hidden"]],
+                           ["op": "create", "id": 11, "kind": "view", "handlers": ["press"], "props": ["accessibilityLabel": "Retry"]],
+                           ["op": "create", "id": 12, "kind": "image", "props": ["imageSource": "symbol:sf/arrow.clockwise", "symbolName": "arrow.clockwise"]], text(13, "Retry")],
+                          kids: [4, 8, 11], more: [["op": "children", "id": 4, "ids": [5]], ["op": "children", "id": 5, "ids": [6, 7]],
+                                                   ["op": "children", "id": 8, "ids": [9]], ["op": "children", "id": 9, "ids": [10]],
+                                                   ["op": "children", "id": 11, "ids": [12, 13]]])
+        let painted = try bar(faces)
+        XCTAssertEqual(painted.trailing.map(\.hosted), [true, true, false])
+        XCTAssertEqual(painted.trailing.last?.symbol, "arrow.clockwise")
+        XCTAssertEqual(painted.trailing.last?.title, "Retry", "spoken by the item")
     }
 
     /// A title wrapper that opts out after the bar lifted its readout keeps
@@ -479,11 +498,17 @@ final class BarHostedIOSTests: XCTestCase {
         stale.performWithSender(nil, target: nil)
         spin(0.3)
         XCTAssertEqual(try node("retried").accessibleText, "1", "no press from an entry the bar no longer offers")
+        // An entry from a menu made while Home showed does nothing once
+        // another route's bar shows.
+        let later = try XCTUnwrap(alerts.menuRepresentation as? UIAction)
         let link = try node("history-link")
         XCTAssertNil(try item("history-link", on: home).customView, "UIKit's own item")
         let reply = p.navigationHost.activateChrome(link)
         XCTAssertNil(reply?["error"], "\(reply ?? [:])")
         until("the agent's tap followed the link") { nav.viewControllers.count == 2 && nav.transitionCoordinator == nil }
+        later.performWithSender(nil, target: nil)
+        spin(0.3)
+        XCTAssertEqual(try node("noted").accessibleText, "1", "no press from Home's bar under History's")
         let history = try XCTUnwrap(nav.topViewController)
         try XCTUnwrap(item("about-link", on: history).target as? BarPress).press()
         until("a tap on the item followed the link") { nav.viewControllers.count == 3 }

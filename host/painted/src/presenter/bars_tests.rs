@@ -380,6 +380,26 @@ fn a_link_item_follows_its_href() {
     assert_eq!(top(&mut p).title, "History");
 }
 
+/// A press on the link goes where the page sends it, a listener above it,
+/// before the link is followed.
+#[test]
+fn a_link_items_press_reaches_a_listener_above_it_before_it_follows() {
+    let source = LINKED
+        .replace(
+            "component App\n",
+            "component App\n  state noted = 0\n  action note\n    noted = noted + 1\n",
+        )
+        .replace(
+            "header display=\"flex\"",
+            "header display=\"flex\" press=note",
+        )
+        + "          text `${noted}` testId=\"noted\"\n";
+    let (mut p, _) = barred(&source);
+    touch(&mut p, TOP, Some("history"));
+    assert_eq!(top(&mut p).title, "History");
+    assert_eq!(text(&p, "noted"), "1", "the header heard the press");
+}
+
 /// An inert link is no enabled item and follows nothing.
 #[test]
 fn an_inert_link_item_is_dimmed_and_follows_nothing() {

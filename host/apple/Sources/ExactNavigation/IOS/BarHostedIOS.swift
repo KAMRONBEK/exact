@@ -135,8 +135,8 @@ final class BarHosted: LiftedNodes {
     /// What the overflow menu does for a hosted element: press it, or flip
     /// a switch in it.
     private struct Entry {
-        let node: NodeView, name: String, on: Bool?, disabled: Bool
-        var source: String { "\(node.id)/\(name)/\(on.map(String.init) ?? "")/\(disabled)" }
+        let node: NodeView, name: String, on: Bool?, disabled: Bool, invokes: String
+        var source: String { "\(node.id)/\(name)/\(on.map(String.init) ?? "")/\(disabled)/\(invokes)" }
     }
 
     /// The element as the overflow menu acts on it: itself where it is a
@@ -149,9 +149,10 @@ final class BarHosted: LiftedNodes {
     private func entries(_ node: NodeView) -> [Entry] {
         func entry(_ n: NodeView) -> Entry? {
             guard !n.cssVisibilityHidden else { return nil }
-            let disabled = n.disabled || n.inert
-            if let s = presenter.controls.controls[n.id] as? UISwitch { return Entry(node: n, name: n.accessibleName, on: s.isOn, disabled: disabled || !s.isEnabled) }
-            if n.handlers.contains("press") || n.defaultLink != nil || presenter.invocation(of: n) != nil { return Entry(node: n, name: n.accessibleName, on: nil, disabled: disabled) }
+            let disabled = n.disabled || n.inert, invocation = presenter.invocation(of: n)
+            let invokes = invocation.map { "\($0.target.id) \($0.action)" } ?? n.defaultLink ?? ""
+            if let s = presenter.controls.controls[n.id] as? UISwitch { return Entry(node: n, name: n.accessibleName, on: s.isOn, disabled: disabled || !s.isEnabled, invokes: invokes) }
+            if n.handlers.contains("press") || n.defaultLink != nil || invocation != nil { return Entry(node: n, name: n.accessibleName, on: nil, disabled: disabled, invokes: invokes) }
             return nil
         }
         if let own = entry(node) { return [own] }
@@ -176,15 +177,18 @@ final class BarHosted: LiftedNodes {
         guard let entry = hosted[id] else { return }
         let node = entry.view.node, name = node.accessibleName
         let entries = entries(node)
-        let source = ([name] + entries.map(\.source)).joined(separator: "\u{1F}")
+        let source = offered(node, entries)
         guard source != entry.menu else { return }
         hosted[id]?.menu = source
         let actions = entries.map { e in
-            UIAction(title: e.name.isEmpty ? name : e.name, attributes: e.disabled ? .disabled : [], state: e.on == true ? .on : .off) { [weak self, weak presenter, weak root = node, weak node = e.node] _ in
-                // Still the bar's item, shown, and still offering this entry.
+            UIAction(title: e.name.isEmpty ? name : e.name, attributes: e.disabled ? .disabled : [], state: e.on == true ? .on : .off) { [weak self, weak presenter, weak root = node, weak node = e.node, disabled = e.disabled] _ in
+                // Still the item of the bar that shows, its element shown, and
+                // offering what was offered: an entry chosen from a menu made
+                // before a change does nothing.
                 guard let self, let presenter, let root, let node, presenter.views[node.id] === node,
-                      self.hosted[root.id]?.view.node === root, root.style["display"]?.string != "none",
-                      self.entries(root).contains(where: { $0.node === node && !$0.disabled }) else { return }
+                      let held = self.hosted[root.id], held.view.node === root, root.style["display"]?.string != "none",
+                      let route = held.route, route.navigationController?.topViewController === route, route.viewIfLoaded?.window != nil,
+                      self.offered(root, self.entries(root)) == source, !disabled else { return }
                 if let s = presenter.controls.controls[node.id] as? UISwitch {
                     // As a tap flips it: the switch's own change.
                     guard s.isEnabled else { return }
@@ -198,6 +202,11 @@ final class BarHosted: LiftedNodes {
         if actions.count > 1 { entry.item.menuRepresentation = UIMenu(title: name, children: actions) }
         else if let one = actions.first { entry.item.menuRepresentation = one }
         else { entry.item.menuRepresentation = name.isEmpty ? nil : UIAction(title: name, attributes: .disabled) { _ in } }
+    }
+
+    /// What the overflow menu offers for `root`: its name and its entries.
+    private func offered(_ root: NodeView, _ entries: [Entry]) -> String {
+        ([root.accessibleName] + entries.map(\.source)).joined(separator: "\u{1F}")
     }
 
     /// The room the bar gives a hosted item: a third of its width, so a

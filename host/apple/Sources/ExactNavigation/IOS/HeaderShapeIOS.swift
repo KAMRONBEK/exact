@@ -85,7 +85,7 @@ struct HeaderShape: Equatable {
         init(_ button: NodeView, hosted: Bool = false) {
             var symbol: String?, text = "", ink: (NodeView, String)?
             func walk(_ node: NodeView) {
-                for child in Self.shown(node) {
+                for child in Self.shown(node) where !Self.unpainted(child) {
                     if child.kind == "image", let name = child.faceSymbol {
                         if symbol == nil { symbol = name; ink = (child, "text_color") }
                     } else if child.isParagraph, text.isEmpty { text = child.accessibleText; ink = ink ?? (child, "text_color") }
@@ -181,22 +181,38 @@ struct HeaderShape: Equatable {
         /// second text UIKit's title would drop), or that is itself a control,
         /// a text or a picture (a switch that hears `press`), is hosted (D1).
         static func drawsFace(_ button: NodeView) -> Bool {
-            if button.isNativeButton { return true }
+            // A native button's face is UIKit's but for a second line or a picture.
+            if button.isNativeButton { return button.face.map { !$0.hasSubtitleOrPicture } ?? true }
             guard button.kind == "view" || button.kind == "button" else { return false }
-            var texts = 0, symbols = 0, pictures = 0
+            var texts = 0, symbols = 0, pictures = 0, dots = 0
             func count(_ node: NodeView) -> Bool {
-                for child in shown(node) {
+                for child in shown(node) where !unpainted(child) {
                     if child.isParagraph { texts += 1 }
                     else if child.kind == "image", child.faceSymbol != nil { symbols += 1 }
                     else if child.kind == "image", child.imageSource != nil { pictures += 1 }
+                    else if child.kind == "view", shown(child).isEmpty { dots += child.channels("background_color") == nil ? 0 : 1 }
                     else if child.kind == "view" { if !count(child) { return false } }
                     else { return false }
+                }
+                // A painted childless box drawn as a layer (`FlatLeavesIOS`) is a dot too.
+                if let flats = node.presenter?.flats {
+                    dots += (flats.children(of: node.id) ?? []).filter { id in
+                        flats.leaves[id].map { $0.style["display"]?.string != "none" && $0.style["background_color"] != nil } ?? false
+                    }.count
                 }
                 return true
             }
             guard count(button) else { return false }
-            if BadgeFace(button) != nil { return texts + symbols + pictures == 1 }
-            return pictures == 0 && (ChipFace(button) != nil || texts <= 1 && symbols <= 1)
+            if BadgeFace(button) != nil { return texts + symbols + pictures == 1 && dots == 0 }
+            // UIKit's own item shows one image or one title, and speaks the
+            // words a symbol stands beside (`configure`), as a hand-built
+            // bar's image item does.
+            // A face with nothing UIKit's item shows (a filled box alone) is drawn as written.
+            return pictures == 0 && (ChipFace(button) != nil || dots == 0 && texts + symbols >= 1 && texts <= 1 && symbols <= 1)
+        }
+        /// A leaf the page does not paint: its computed `visibility` hides it.
+        static func unpainted(_ node: NodeView) -> Bool {
+            node.cssVisibilityHidden && (node.isParagraph || node.kind == "image")
         }
         /// Whether `node` shows words: a paragraph in it, shown, says something.
         static func shows(words node: NodeView) -> Bool {

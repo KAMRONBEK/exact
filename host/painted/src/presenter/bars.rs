@@ -264,6 +264,24 @@ impl<D: DataSource> Presenter<D> {
         }
     }
 
+    /// The nearest node at or above a bar item's node that hears `press`, as
+    /// `handler_target` finds it in the page. The bar shows the node, so the
+    /// page's hit regions and the header the bar lifts out do not decide.
+    fn bar_listener(&self, id: ViewId) -> Option<ViewId> {
+        let kernel = self.host.kernel();
+        let mut at = Some(id);
+        while let Some(n) = at {
+            if kernel.node(n)?.props.bool(PropId::Disabled) == Some(true) {
+                return None;
+            }
+            if (self.host.runner().handlers_of(n)).contains(&EventKind::Press) {
+                return Some(n);
+            }
+            at = self.display.parent(kernel, n);
+        }
+        None
+    }
+
     /// A header's button as the top bar shows it.
     fn bar_button(&self, id: ViewId, dark: bool) -> Option<Button> {
         let kernel = self.host.kernel();
@@ -638,14 +656,13 @@ impl<D: DataSource> Presenter<D> {
                 let href = (kernel.node(node))
                     .and_then(|n| n.props.link().map(str::to_owned))
                     .filter(|_| !self.host.authored_visibility(node).1);
-                let presses = (self.host.runner().handlers_of(node)).contains(&EventKind::Press);
-                match href {
-                    Some(href) if !presses => self.follow(node, &href, now_ms),
-                    Some(href) => {
-                        self.activate(node, now_ms);
+                match (href, self.bar_listener(node)) {
+                    (Some(href), None) => self.follow(node, &href, now_ms),
+                    (Some(href), Some(target)) => {
+                        self.press_then_follow(target, now_ms, true);
                         self.follow(node, &href, now_ms);
                     }
-                    None => self.activate(node, now_ms),
+                    (None, _) => self.activate(node, now_ms),
                 }
             }
             What::Tab(node) => {

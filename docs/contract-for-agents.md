@@ -4213,7 +4213,8 @@ main navigationKey=`${top(nav).id}` navigationBack="close" navigate=follow displ
   `buttonStyle="glass"` on a header button gives that item a capsule of its own
   (`sharesBackground = false`).
 - A header button is its bar item: a symbol is its image and a text its title, in
-  the bar's type, the platform's. A `font-size` or `font-weight` on a native button or
+  the bar's type, the platform's; with both, the symbol is the image and the text
+  its spoken name, as a hand-built bar's item has them. A `font-size` or `font-weight` on a native button or
   its text sets that title's font, as on a button in the page, and its glass fits the
   words (`buttonStyle="glass" font-size=12` is a small "● Clock" chip). A face that
   says more keeps what it says: a status dot (a childless filled box) beside its
