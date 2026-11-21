@@ -139,20 +139,24 @@ final class BarHosted: LiftedNodes {
         var source: String { "\(node.id)/\(name)/\(on.map(String.init) ?? "")/\(disabled)" }
     }
 
-    /// The element as the overflow menu acts on it: itself where it presses
-    /// (a `press`, or a link's `href`) or is a switch; else each button and
-    /// switch in it, in order. A field or a slider has no entry: a menu
-    /// cannot hold one.
+    /// The element as the overflow menu acts on it: itself where it is a
+    /// switch or presses (a `press`, a link's `href`, or a command it
+    /// invokes); else each switch and button in it, in order. What the page
+    /// does not show is passed over: a closed dialog or popover in it, which
+    /// the top layer shows when open, and an inert subtree. A field or a
+    /// slider has no entry: a menu cannot hold one.
     private func entries(_ node: NodeView) -> [Entry] {
         func entry(_ n: NodeView) -> Entry? {
-            if n.handlers.contains("press") || n.defaultLink != nil { return Entry(node: n, name: n.accessibleName, on: nil, disabled: n.disabled) }
-            if let s = presenter.controls.controls[n.id] as? UISwitch { return Entry(node: n, name: n.accessibleName, on: s.isOn, disabled: n.disabled || !s.isEnabled) }
+            let disabled = n.disabled || n.inert
+            if let s = presenter.controls.controls[n.id] as? UISwitch { return Entry(node: n, name: n.accessibleName, on: s.isOn, disabled: disabled || !s.isEnabled) }
+            if n.handlers.contains("press") || n.defaultLink != nil || presenter.invocation(of: n) != nil { return Entry(node: n, name: n.accessibleName, on: nil, disabled: disabled) }
             return nil
         }
         if let own = entry(node) { return [own] }
         var out: [Entry] = []
         func walk(_ n: NodeView) {
             for child in HeaderShape.Item.shown(n) {
+                if child.props["popover"] != nil || child.props["semanticTag"] == "dialog" || child.inert { continue }
                 if let e = entry(child) { out.append(e) } else { walk(child) }
             }
         }
@@ -164,7 +168,8 @@ final class BarHosted: LiftedNodes {
     /// there by its element's name and does what the element does (LLP
     /// 1141.004 D3): one entry for what it presses or flips, a submenu of
     /// them where it holds several, else a dimmed line. Made again as the
-    /// element changes.
+    /// element changes, and an entry chosen acts only while the element
+    /// still offers it.
     private func name(_ id: UInt32) {
         guard let entry = hosted[id] else { return }
         let node = entry.view.node, name = node.accessibleName
@@ -173,8 +178,9 @@ final class BarHosted: LiftedNodes {
         guard source != entry.menu else { return }
         hosted[id]?.menu = source
         let actions = entries.map { e in
-            UIAction(title: e.name.isEmpty ? name : e.name, attributes: e.disabled ? .disabled : [], state: e.on == true ? .on : .off) { [weak presenter, weak node = e.node] _ in
-                guard let presenter, let node, presenter.views[node.id] === node, !node.disabled else { return }
+            UIAction(title: e.name.isEmpty ? name : e.name, attributes: e.disabled ? .disabled : [], state: e.on == true ? .on : .off) { [weak self, weak presenter, weak root = node, weak node = e.node] _ in
+                guard let self, let presenter, let root, let node, presenter.views[node.id] === node,
+                      self.entries(root).contains(where: { $0.node === node && !$0.disabled }) else { return }
                 if let s = presenter.controls.controls[node.id] as? UISwitch {
                     // As a tap flips it: the switch's own change.
                     guard s.isEnabled else { return }

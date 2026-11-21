@@ -259,6 +259,44 @@ final class BarHostedIOSTests: XCTestCase {
         XCTAssertTrue(shape.hosted.isEmpty)
     }
 
+    /// What UIKit's item cannot draw whole is hosted: a switch that hears
+    /// `press`, a badge holding a symbol and a text, of which a badge draws
+    /// one. A link is an item only with an `href` to follow: `role="link"`
+    /// alone, or an `href` cleared to nothing, is a button that presses
+    /// nothing.
+    func testWhatTheBarCannotDrawWholeIsHostedAndALinkNeedsAnHref() throws {
+        let fill: [String: Any] = ["background_color": [40, 100, 200, 255], "border_radius": 16]
+        let p = route([["op": "create", "id": 4, "kind": "control", "handlers": ["press"], "props": ["type": "checkbox", "accessibilityRole": "switch", "accessibilityLabel": "Alerts"]],
+                       ["op": "create", "id": 5, "kind": "button", "handlers": ["press"], "props": ["accessibilityLabel": "Me"]],
+                       ["op": "create", "id": 6, "kind": "view", "style": fill],
+                       ["op": "create", "id": 7, "kind": "image", "props": ["imageSource": "symbol:sf/person", "symbolName": "person"]], text(8, "AB"),
+                       ["op": "create", "id": 9, "kind": "button", "props": ["accessibilityRole": "link", "accessibilityLabel": "Nowhere"]],
+                       ["op": "create", "id": 10, "kind": "button", "props": ["href": "", "accessibilityLabel": "Cleared"]]],
+                      kids: [4, 5, 9, 10], more: [["op": "children", "id": 5, "ids": [6]], ["op": "children", "id": 6, "ids": [7, 8]]])
+        let shape = try bar(p)
+        XCTAssertEqual(shape.trailing.map(\.id), [4, 5], "no link that follows nothing")
+        XCTAssertEqual(shape.trailing.map(\.hosted), [true, true])
+    }
+
+    /// A title wrapper that opts out after the bar lifted its readout keeps
+    /// the readout in the page with it: the opt-out is read in the authored
+    /// tree.
+    func testAWrapperThatOptsOutKeepsItsLiftedReadout() throws {
+        let p = route([["op": "create", "id": 8, "kind": "view", "handlers": ["press"]], status(6), text(7, "Live")],
+                      kids: [], more: [["op": "children", "id": 6, "ids": [7]], ["op": "children", "id": 8, "ids": [3, 6]]], header: [8])
+        let route = RouteController(try XCTUnwrap(p.views[1]))
+        let first = try bar(p)
+        XCTAssertEqual(first.hosted.map(\.id), [6], "the readout, hosted")
+        XCTAssertEqual(first.group?.tap, 8)
+        _ = p.navigationHost.barItems(first.trailing, route)
+        XCTAssertFalse(try XCTUnwrap(p.views[6]).isDescendant(of: try XCTUnwrap(p.views[8])), "lifted")
+        p.apply(wireBatch([["op": "style", "id": 8, "style": ["appearance": "none", "written": ["appearance"]]]]))
+        let second = try bar(p)
+        XCTAssertEqual(second.authored.map(\.id), [8])
+        XCTAssertTrue(second.hosted.isEmpty, "kept in the page with its wrapper")
+        XCTAssertTrue(second.trailing.isEmpty)
+    }
+
     /// The item holds the element's own view, lifted out of the header; the
     /// next projection finds the element at its place, and a bar that stops
     /// showing it puts it back there.
@@ -392,10 +430,24 @@ final class BarHostedIOSTests: XCTestCase {
         flip.performWithSender(nil, target: nil)
         until("the switch flipped: on \(control.isOn), says \((try? node("live"))?.accessibleText ?? "")") { (try? node("live"))?.accessibleText == "on" }
         until("its entry follows") { (row.menuRepresentation as? UIAction)?.state == .on }
-        let retry = try XCTUnwrap(offline.menuRepresentation as? UIAction, "the readout's Retry")
-        XCTAssertEqual(retry.title, "Retry")
+        // A readout's buttons, a submenu by its name: its command, and not
+        // the button in its closed dialog.
+        let readout = try XCTUnwrap(offline.menuRepresentation as? UIMenu, "the readout's buttons")
+        XCTAssertEqual(readout.title, "Offline, retried 0")
+        XCTAssertEqual(readout.children.compactMap { ($0 as? UIAction)?.title }, ["Retry", "Details"])
+        let retry = try XCTUnwrap(readout.children.first as? UIAction)
         retry.performWithSender(nil, target: nil)
         until("Retry pressed") { (try? node("retried"))?.accessibleText == "1" }
+        // A switch that hears `press` is hosted, not a blank button, and its
+        // entry shows and flips its state.
+        let alerts = try item("alerts-switch", on: home)
+        XCTAssertTrue(alerts.customView is HostedItemView)
+        let alert = try XCTUnwrap(alerts.menuRepresentation as? UIAction)
+        XCTAssertEqual(alert.title, "Alerts")
+        XCTAssertEqual(alert.state, .off)
+        alert.performWithSender(nil, target: nil)
+        until("the alerts switch flipped and pressed") { (try? node("alerts"))?.accessibleText == "on" && (try? node("noted"))?.accessibleText == "1" }
+        until("its entry follows") { (alerts.menuRepresentation as? UIAction)?.state == .on }
         let link = try node("history-link")
         XCTAssertNil(try item("history-link", on: home).customView, "UIKit's own item")
         let reply = p.navigationHost.activateChrome(link)

@@ -173,19 +173,27 @@ struct HeaderShape: Equatable {
             NodeView.committed(node.container.subviews).filter { $0.style["display"]?.string != "none" }
         }
         /// Whether the bar can draw `button`'s face whole as UIKit's item: a
-        /// native button's, or texts, symbols and boxes of them, which a
-        /// title, an image or a painted face draws, and in a badge a picture
-        /// too. A spinner or a control anywhere in it, or a picture outside a
-        /// badge, it cannot, and such a button is hosted (D1).
+        /// native button's; a box or a bare button of texts, symbols and boxes
+        /// of them, which a title, an image or a painted face draws; or a
+        /// badge of one text, one symbol or one picture, which is all a badge
+        /// draws. A spinner or a control anywhere in it, a picture outside a
+        /// badge, or an element that is itself a control, a text or a picture
+        /// (a switch that hears `press`), it cannot, and such an item is hosted
+        /// (D1).
         static func drawsFace(_ button: NodeView) -> Bool {
             if button.isNativeButton { return true }
-            let badge = BadgeFace(button) != nil
-            func whole(_ node: NodeView) -> Bool {
-                shown(node).allSatisfy {
-                    $0.isParagraph || ($0.kind == "image" && ($0.faceSymbol != nil || badge && $0.imageSource != nil)) || ($0.kind == "view" && whole($0))
+            guard button.kind == "view" || button.kind == "button" else { return false }
+            func leaves(_ node: NodeView, pictures: Bool) -> Int? {
+                var count = 0
+                for child in shown(node) {
+                    if child.isParagraph || (child.kind == "image" && (child.faceSymbol != nil || pictures && child.imageSource != nil)) { count += 1 }
+                    else if child.kind == "view", let inner = leaves(child, pictures: pictures) { count += inner }
+                    else { return nil }
                 }
+                return count
             }
-            return whole(button)
+            if BadgeFace(button) != nil { return leaves(button, pictures: true) == 1 }
+            return leaves(button, pictures: false) != nil
         }
         /// Whether `node` shows words: a paragraph in it, shown, says something.
         static func shows(words node: NodeView) -> Bool {
@@ -245,7 +253,8 @@ struct HeaderShape: Equatable {
         let roles = rule.items + rule.hosted + [rule.heading, rule.tap, rule.search, rule.segments].compactMap { $0 }
         let authored = projected ? roles.filter { $0.wrote("appearance") && $0.style["appearance"]?.string == "none" } : []
         self.authored = authored
-        let projects = { (node: NodeView) in !authored.contains { node === $0 || node.isDescendant(of: $0) } }
+        // In the authored tree: an element the bar lifted is still inside what keeps it.
+        let projects = { (node: NodeView) in !authored.contains { Self.inside(node, $0) } }
         authoredBack = back != nil && roles.contains { $0.props["id"] == back && !projects($0) }
         let heading = rule.heading.flatMap { projects($0) ? $0 : nil }, titleProjects = heading != nil
         self.heading = heading
@@ -293,7 +302,7 @@ struct HeaderShape: Equatable {
         let tablist = segments.flatMap { HeaderShape.titleTabs($0).isEmpty ? nil : $0 }
         // The title's pressable wrapper goes with the title it holds, unless
         // it holds an opted-out node, which stays where it is.
-        let wrapper = titleProjects ? tap.flatMap { tap in authored.contains { $0.isDescendant(of: tap) } ? nil : tap } : nil
+        let wrapper = titleProjects ? tap.flatMap { tap in authored.contains { Self.inside($0, tap) } ? nil : tap } : nil
         placed = ([rule.heading].compactMap { $0 } + rule.items.filter { item in !hosted.contains { $0 === item } } + [search, tablist, wrapper].compactMap { $0 }
                   + (HeaderShape.presented(group, segments: segments)?.placed ?? [])).filter(projects)
     }

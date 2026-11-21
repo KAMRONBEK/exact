@@ -629,7 +629,18 @@ impl<D: DataSource> Presenter<D> {
             What::Up => {
                 self.system_back(now_ms);
             }
-            What::Item(node) => self.activate(node, now_ms),
+            What::Item(node) => {
+                // A link follows its `href` after its press, as a tap on it
+                // in the page does (LLP 1038 §7, LLP 1141.004 D1).
+                let kernel = self.host.kernel();
+                let href = kernel
+                    .node(node)
+                    .and_then(|n| n.props.link().map(str::to_owned));
+                self.activate(node, now_ms);
+                if let Some(href) = href {
+                    self.follow(node, &href, now_ms);
+                }
+            }
             What::Tab(node) => {
                 // Read before the tab's press, scrolled after it. The scroll
                 // gives way to a `scrollIntoView` the press asked for in the

@@ -352,6 +352,34 @@ fn an_absolute_footer_over_the_routes_scroller_rests_on_the_navigation_bar() {
     );
 }
 
+const LINKED: &str = r#"routes nav
+  home "/"
+    history "/history"
+component App
+  action follow(url: string)
+    nav = go(nav, url)
+  view
+    main navigationKey=`${top(nav).id}` navigate=follow width="100%" height="100%"
+      for e in stack(nav) key=e.id
+        column navigationKey=`${e.id}` position="absolute" inset=0
+          header display="flex"
+            text (e.name == "home" ? "Inbox" : "History") role="heading" flex=1
+            if e.name == "home"
+              link href="/history" aria-label="History" testId="history"
+                image "symbol:history"
+"#;
+
+/// A link with nothing pressing it is a top app bar item that follows its
+/// `href` (LLP 1141.004 D1), as a tap on it in the page does.
+#[test]
+fn a_link_item_follows_its_href() {
+    let (mut p, _) = barred(LINKED);
+    assert_eq!(top(&mut p).title, "Inbox");
+    assert_eq!(top(&mut p).trailing.len(), 1, "the link, an item");
+    touch(&mut p, TOP, Some("history"));
+    assert_eq!(top(&mut p).title, "History");
+}
+
 #[test]
 fn a_pushed_route_has_the_up_arrow_which_goes_back() {
     let (mut p, _) = barred(APP);

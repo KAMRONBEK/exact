@@ -494,6 +494,15 @@ fn an_element_the_bar_has_no_object_for_is_a_hosted_item() {
                     &[(PropId::Href, "/history")],
                     vec![],
                 ),
+                // `role="link"` alone, or an `href` cleared to nothing,
+                // follows nothing: a button that presses nothing.
+                Node(
+                    84,
+                    NodeType::Pressable,
+                    &[(PropId::AccessibilityRole, "link")],
+                    vec![],
+                ),
+                Node(85, NodeType::Pressable, &[(PropId::Href, "")], vec![]),
             ],
         )],
     ));

@@ -238,7 +238,7 @@ extension HeaderShape {
     /// header, or one the web does not show either (`display: none`), is
     /// not the bar's to judge.
     func presents(_ node: NodeView) -> Bool {
-        if authored.contains(where: { node === $0 || node.isDescendant(of: $0) }) { return true }
+        if authored.contains(where: { Self.inside(node, $0) }) { return true }
         guard node === header || node.isDescendant(of: header) else { return true }
         var at: UIView? = node
         while let view = at, view !== header.superview {
