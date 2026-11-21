@@ -1,11 +1,11 @@
 import { beforeAll, test } from 'bun:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { contractMayHaveFailed, throwContractErrors } from './contract-diagnosis.mjs';
+import { BUILD_SCRIPT_FAILED, BUILD_SCRIPT_FAILED_LINE, contractMayHaveFailed, throwContractErrors } from './contract-diagnosis.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const failed = (stderr, stdout = '') => ({ status: 101, stderr, stdout });
@@ -24,9 +24,28 @@ test('only a failed build script asks the Contract compiler', () => {
   assert.equal(contractMayHaveFailed(['build'], { status: 0, stderr: '', stdout: '' }), false);
 });
 
-test('an inherited stderr is read from the JSON messages on stdout', () => {
-  assert.equal(contractMayHaveFailed(['rustc'], failed(null, `${warning}\n${rustcError}\n`)), false);
-  assert.equal(contractMayHaveFailed(['rustc'], failed(null, `${warning}\n{"reason":"build-finished","success":false}\n`)), true);
+// With stderr inherited, only the relay's line says a build script failed: Cargo's JSON carries no rustc error under
+// json-render-diagnostics, and its human format nothing.
+test('an inherited stderr is read from the line its relay adds', () => {
+  const finished = '{"reason":"build-finished","success":false}';
+  assert.equal(contractMayHaveFailed(['build'], failed(null, `${warning}\n${finished}\n${BUILD_SCRIPT_FAILED_LINE}\n`)), true);
+  assert.equal(contractMayHaveFailed(['build'], failed(null, `${warning}\n${rustcError}\n${finished}\n`)), false);
+  assert.equal(contractMayHaveFailed(['build'], failed(null, '')), false);
+});
+
+// The relay streams Cargo's stderr and adds the line when a build script failed, wherever the text falls in its chunks.
+test('the stderr relay adds the line for a failed build script, and only then', () => {
+  const dir = mkdtempSync(resolve(tmpdir(), 'exact-relay-'));
+  try {
+    const cargo = resolve(dir, 'cargo');
+    writeFileSync(cargo, '#!/bin/sh\nprintf \'{"reason":"build-finished","success":false}\\n\'\nif [ "$1" = script ]; then printf \'error: failed to run custom \' >&2; sleep 0.2; printf \'build command for `app`\\n\' >&2; fi\nexit 101\n');
+    chmodSync(cargo, 0o755);
+    const relay = (args) => spawnSync(process.execPath, ['--no-env-file', resolve(ROOT, 'scripts/cargo-check.mjs'), ...args],
+      { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}` } });
+    const script = relay(['script']), rustc = relay(['rustc']);
+    assert.deepEqual([script.status, script.stdout.split('\n').includes(BUILD_SCRIPT_FAILED_LINE), script.stderr.includes(BUILD_SCRIPT_FAILED)], [101, true, true]);
+    assert.deepEqual([rustc.status, rustc.stdout.split('\n').includes(BUILD_SCRIPT_FAILED_LINE)], [101, false]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 // The compiler is built before the case, on its own budget: a slow or failed
