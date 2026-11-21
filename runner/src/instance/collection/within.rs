@@ -106,6 +106,7 @@ impl Collection {
         let Some(edge) = self.travel_within(u, &feedback, by_view, fill)? else {
             return Ok(None);
         };
+        self.velocity = fill.velocity;
         self.scrolling = fill.scrolling;
         self.reveal_shown(u);
         Ok(Some(edge))

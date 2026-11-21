@@ -220,6 +220,8 @@ pub(crate) struct Collection {
     /// The last report said the reader's scroll is under way and a jump
     /// would not end it ([`CollectionFill::scrolling`]).
     scrolling: bool,
+    /// The last accepted scroll velocity, used to retain already mounted lead rows on refresh.
+    velocity: f64,
     /// The last report said the host animates a smooth correction
     /// ([`CollectionFill::animating`]).
     animating: bool,
@@ -667,6 +669,7 @@ impl Collection {
         let mut port = None;
         // A glimpse's middle of the viewport and what shows, for its rows.
         let mut glimpsed = None;
+        let mut build_window = None;
         let mut ranges = if let Some(g) = &self.geometry {
             let pins = self.pins();
             let focus = self.pin(pins[0]);
@@ -676,15 +679,25 @@ impl Collection {
                 .filter(|p| p.pin_owned)
                 .map(|p| p.source.clone())
                 .or_else(|| self.pin(pins[1]));
-            let window = self
-                .index
-                .window_led(
-                    g.offset,
-                    g.port_main,
-                    lead(g.port_main, fill),
-                    [focus.as_deref(), interaction.as_deref()],
-                )
-                .map_err(index_error)?;
+            let window_for = |fill| {
+                self.index
+                    .window_led(
+                        g.offset,
+                        g.port_main,
+                        lead(g.port_main, fill),
+                        [focus.as_deref(), interaction.as_deref()],
+                    )
+                    .map_err(index_error)
+            };
+            let mut window = window_for(fill)?;
+            if update && self.velocity != 0.0 {
+                // Refresh existing lead rows, but leave new prefetch work to scroll reports.
+                build_window = Some(window.segments);
+                window = window_for(CollectionFill {
+                    velocity: self.velocity,
+                    ..fill
+                })?;
+            }
             if glimpse {
                 glimpsed = Some((window.offset + g.port_main / 2.0, window.visible.clone()));
             } else {
@@ -772,6 +785,13 @@ impl Collection {
                 }
                 None => {
                     if building.is_some() && !is_owed(position) && !admitted.contains(&position) {
+                        continue;
+                    }
+                    if build_window
+                        .as_ref()
+                        .is_some_and(|ranges| !ranges.iter().any(|r| r.contains(&position)))
+                        && !is_owed(position)
+                    {
                         continue;
                     }
                     if reusing {
@@ -1043,6 +1063,7 @@ impl Collection {
             m.size += self.gap_after(by_view.get(&m.view).and_then(|&i| self.mounted.get(i)));
         }
         let waited = self.request_waits();
+        self.velocity = fill.velocity;
         self.animating = fill.animating;
         self.view_offset = fill.view_offset;
         // A report gives where the port is, unless the host animates.

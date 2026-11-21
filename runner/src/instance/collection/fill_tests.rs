@@ -1039,7 +1039,7 @@ fn a_data_update_while_the_list_moves_keeps_the_rows_its_report_led_into() {
             .iter()
             .find(|r| r.index == row.index)
             .expect("refresh built another lead row");
-        assert_eq!((row.view, row.epoch), (original.view, original.epoch));
+        assert_eq!((row.view, row.root), (original.view, original.root));
     }
     // A report at rest that retires nothing (build only) ends the motion; the
     // next update's window is the plain one again, and only it retires the lead.

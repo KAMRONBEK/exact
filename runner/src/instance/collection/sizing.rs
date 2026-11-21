@@ -343,6 +343,7 @@ impl Collection {
             restored_at: None,
             target: None,
             scrolling: false,
+            velocity: 0.0,
             animating: false,
             view_offset: None,
             port_unknown: false,
