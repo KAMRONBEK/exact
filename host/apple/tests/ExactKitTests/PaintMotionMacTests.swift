@@ -102,7 +102,7 @@ final class PaintMotionMacTests: XCTestCase {
         let before = session.appliedBatches
         session.applyUnlessEmpty(later)
         XCTAssertEqual(session.repliesInFlight, 0)
-        XCTAssertFalse(reportsAfterReply.isEmpty, "the real mounted subtree reported its appearance")
+        XCTAssertEqual(reportsAfterReply.count, 1, "the mounted subtree reports its queued appearances together")
         XCTAssertTrue(reportsAfterReply.allSatisfy { $0 }, "each report follows the earlier reply's presentation")
         XCTAssertEqual(session.appliedBatches, before + 1, "only the published reply applies")
         XCTAssertEqual(session.timerDue, later.timerDueMs)

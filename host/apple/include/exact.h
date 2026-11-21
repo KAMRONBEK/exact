@@ -32,7 +32,7 @@
 #include <stdint.h>
 
 /* The ABI's version: part of the compatibility id (LLP 1030 D3a). */
-#define EXACT_ABI_VERSION 20
+#define EXACT_ABI_VERSION 21
 
 #ifdef __cplusplus
 extern "C" {
@@ -1015,10 +1015,8 @@ uint32_t exact_segments(ExactRuntime rt, uint32_t posture, uint32_t cols, uint32
 /* The presenter's appearance (nonzero: dark), which a light-dark() colour
  * under paint motion resolves by; a change transitions it (LLP 1062). */
 uint32_t exact_scheme(ExactRuntime rt, uint32_t dark);
-/* One view's appearance (nonzero: dark), where the presenter finds it
- * differs from the session's: its node's light-dark() colours resolve by it
- * (LLP 1062). */
-uint32_t exact_view_scheme(ExactRuntime rt, uint32_t view, uint32_t dark);
+/** Queued appearances in the input buffer as little-endian (uint32 view, uint32 dark) pairs. */
+uint32_t exact_view_schemes(ExactRuntime rt, size_t len);
 /** LLP 1095 D1: every colour reference the presenter should resolve, as JSON
  *  `[[kind, id, "name"], …]` in the output buffer; returns its length. */
 uint32_t exact_color_references(ExactRuntime rt);

@@ -122,9 +122,17 @@ impl<D: DataSource> Host<D> {
     /// session's first does; a later change transitions, and so does a view
     /// that agrees with the session again.
     pub fn set_view_scheme(&mut self, view: ViewId, dark: bool) -> String {
+        self.set_view_schemes([(view, dark)])
+    }
+
+    /// Apply queued view appearances in order before rebuilding shared SVG scenes.
+    pub fn set_view_schemes(&mut self, views: impl IntoIterator<Item = (ViewId, bool)>) -> String {
         let mut batch = Batch::new();
-        let key = self.runner.kernel().node(view).map(|n| n.key);
-        if let Some(key) = key {
+        let mut changed = false;
+        for (view, dark) in views {
+            let Some(key) = self.runner.kernel().node(view).map(|n| n.key) else {
+                continue;
+            };
             if let Some(retired) = self.paint.motion.set_view_scheme(
                 self.runner.kernel(),
                 &mut self.engine,
@@ -133,9 +141,12 @@ impl<D: DataSource> Host<D> {
                 self.now_ms / 1000.0,
             ) {
                 self.retire_paint(retired, &mut batch);
-                self.svg.all_dirty();
-                self.present(&mut batch, false);
+                changed = true;
             }
+        }
+        if changed {
+            self.svg.all_dirty();
+            self.present(&mut batch, false);
         }
         self.finish(batch, None)
     }

@@ -1063,7 +1063,16 @@ package final class Runtime {
         on(layout: presentOnly) { read(frame.map { exact_tick_at(rt, now, $0) } ?? exact_tick(rt, now)).made(by: .tick) }
     }
     package func scheme(dark: Bool) -> Batch { on(layout: true) { read(exact_scheme(rt, dark ? 1 : 0)) } }
-    package func viewScheme(_ view: UInt32, dark: Bool) -> Batch { on(layout: true) { read(exact_view_scheme(rt, view, dark ? 1 : 0)) } }
+    package func viewSchemes(_ views: [(UInt32, Bool)]) -> Batch {
+        on(layout: true) {
+            var bytes = Data(capacity: views.count * 8)
+            for (view, dark) in views {
+                withUnsafeBytes(of: view.littleEndian) { bytes.append(contentsOf: $0) }
+                withUnsafeBytes(of: UInt32(dark ? 1 : 0).littleEndian) { bytes.append(contentsOf: $0) }
+            }
+            return read(exact_view_schemes(rt, write(bytes)))
+        }
+    }
 
     /// Host intrinsic sizes (nil clears one), under one layout.
     package func intrinsics(_ sizes: [(UInt32, CGSize?)]) -> Batch {

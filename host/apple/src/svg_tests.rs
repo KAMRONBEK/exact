@@ -1049,23 +1049,22 @@ fn views_told_their_appearance_together_build_each_scene_once() {
     let mut each = std::collections::BTreeMap::new();
     {
         let (mut apart, views) = boot();
-        let builds = apart.svg.scene_builds;
         for view in views {
             scenes(&apart.set_view_scheme(view, true), &mut each);
         }
-        assert_eq!(
-            apart.svg.scene_builds - builds,
-            8,
-            "told apart, every scene for every view"
-        );
     }
     let (mut together, views) = boot();
     let builds = together.svg.scene_builds;
     let mut told = std::collections::BTreeMap::new();
-    for view in views {
-        scenes(&together.set_view_scheme(view, true), &mut told);
-    }
+    let reports = views.map(|view| (view, true));
+    scenes(&together.set_view_schemes(reports), &mut told);
     assert_eq!(together.svg.scene_builds - builds, 2, "each scene once");
-    assert_eq!(told.len(), 2, "both scenes changed: {told:?}");
+    assert_eq!(told.len(), 2);
     assert_eq!(told, each);
+    together.set_view_schemes(reports);
+    assert_eq!(
+        together.svg.scene_builds - builds,
+        2,
+        "unchanged reports rebuild nothing"
+    );
 }

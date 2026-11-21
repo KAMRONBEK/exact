@@ -1116,8 +1116,9 @@ public final class ExactSession {
         reportMeasured()
         if colorsOwed, !holdingReports, !awaitingTree { colorsOwed = false; apply(runtime.reportColors(tint: SystemColor.appTint.flatMap { SystemColor.tintPair($0) })) }
         while !holdingReports, !pendingViewDark.isEmpty {
-            let (id, dark) = pendingViewDark.removeFirst()
-            let batch = runtime.viewScheme(id, dark: dark)
+            let reports = pendingViewDark
+            pendingViewDark.removeAll()
+            let batch = runtime.viewSchemes(reports)
             // Appearance already changed natively; retain its transaction accounting without rescheduling.
             if !ownerInFlight, changesNothing(batch), clockUnchanged(batch) {
                 sampler?.batch(batch.seq, ms: 0); logSkipped(batch)

@@ -60,6 +60,30 @@ pub(crate) fn parse_report(bytes: &[u8]) -> Option<Vec<(ColorValue, bool, Color)
 }
 
 impl<D: DataSource> Bridge<D> {
+    /// Read little-endian (view ID, dark flag) pairs from the input buffer.
+    pub fn view_schemes(&mut self, len: usize) -> u32 {
+        let Some(bytes) = self
+            .input
+            .get(..len)
+            .filter(|bytes| bytes.len().is_multiple_of(8))
+        else {
+            let out = self.refusal("view schemes: truncated record");
+            return self.emit(out);
+        };
+        let views = bytes.as_chunks::<8>().0.iter().map(|r| {
+            let [a, b, c, d, e, f, g, h] = *r;
+            (
+                u32::from_le_bytes([a, b, c, d]),
+                u32::from_le_bytes([e, f, g, h]) != 0,
+            )
+        });
+        let out = self
+            .host
+            .as_mut()
+            .map_or_else(super::not_booted, |h| h.set_view_schemes(views));
+        self.emit(out)
+    }
+
     /// Every reference the presenter may resolve, as JSON in the output
     /// buffer; returns its length.
     pub fn color_references(&mut self) -> u32 {

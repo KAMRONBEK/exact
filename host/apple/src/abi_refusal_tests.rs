@@ -824,3 +824,18 @@ fn module_validation_keeps_the_live_sequence_and_root_drop_report() {
     assert_eq!(runner.generation(), 2);
     assert!(runner.kernel().epoch() > epoch);
 }
+
+#[test]
+fn truncated_view_schemes_keeps_state() {
+    preserves_state(
+        |bridge, view| {
+            let record = [view.to_le_bytes(), 1u32.to_le_bytes()].concat();
+            let len = bridge.input_write(&record);
+            let batch = bridge.view_schemes(len);
+            assert!(output(bridge, batch)["error"].is_null());
+            let len = bridge.input_write(&record[..7]);
+            bridge.view_schemes(len)
+        },
+        "view schemes: truncated record",
+    );
+}

@@ -1139,11 +1139,10 @@ macro_rules! host {
             $crate::abi::with_runtime(&EXACT_RUNTIMES, rt, false, |b, _| b.scheme(dark != 0), |n| n)
         }
 
-        /// One view's appearance (nonzero: dark), where it differs from the
-        /// session's (LLP 1062 D4); returns the batch's length.
+        /// Queued view appearances from the input buffer, presented together.
         #[no_mangle]
-        pub extern "C" fn exact_view_scheme(rt: u32, view: u32, dark: u32) -> u32 {
-            $crate::abi::with_runtime(&EXACT_RUNTIMES, rt, false, |b, _| b.view_scheme(view, dark != 0), |n| n)
+        pub extern "C" fn exact_view_schemes(rt: u32, len: usize) -> u32 {
+            $crate::abi::with_runtime(&EXACT_RUNTIMES, rt, false, |b, _| b.view_schemes(len), |n| n)
         }
 
         /// Every colour reference the presenter should resolve (LLP 1095
