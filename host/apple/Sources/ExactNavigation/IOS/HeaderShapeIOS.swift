@@ -85,7 +85,7 @@ struct HeaderShape: Equatable {
         init(_ button: NodeView, hosted: Bool = false) {
             var symbol: String?, text = "", ink: (NodeView, String)?
             func walk(_ node: NodeView) {
-                for child in Self.shown(node) where !Self.unpainted(child) {
+                for child in Self.shown(node) {
                     if child.kind == "image", let name = child.faceSymbol {
                         if symbol == nil { symbol = name; ink = (child, "text_color") }
                     } else if child.isParagraph, text.isEmpty { text = child.accessibleText; ink = ink ?? (child, "text_color") }
@@ -172,51 +172,49 @@ struct HeaderShape: Equatable {
         static func shown(_ node: NodeView) -> [NodeView] {
             NodeView.committed(node.container.subviews).filter { $0.style["display"]?.string != "none" }
         }
-        /// Whether the bar can draw `button`'s face whole as UIKit's item, as
-        /// each face draws it, shown parts only: a native button's; a badge of
-        /// one text, one symbol or one picture, which is all a badge draws; a
-        /// painted face, which draws every text, symbol and dot; else UIKit's
-        /// own item, one title and one image. An item holding anything else (a
-        /// spinner or a control anywhere in it, a picture outside a badge, a
-        /// second text UIKit's title would drop), or that is itself a control,
-        /// a text or a picture (a switch that hears `press`), is hosted (D1).
+        /// Whether the bar can draw `button`'s face whole as UIKit's item. Only
+        /// the plain faces are UIKit's: a native button's, but for a second line
+        /// or a picture; a badge, one filled box holding one text, one symbol or
+        /// one picture and nothing else; a painted face (`ChipFace`, a dot or an
+        /// authored font), which draws its texts, symbols and dots; and UIKit's
+        /// own item, one image, one title, or a symbol beside words, which it
+        /// speaks as its name. Any other face is hosted with its press (D1): one
+        /// holding a spinner, a control, a picture outside a badge, a second
+        /// text, a part `visibility` hides, or a dot or layer UIKit's item would
+        /// drop; one that shows nothing UIKit's item would; and an element that
+        /// is itself a control, a text or a picture (a switch that hears `press`).
         static func drawsFace(_ button: NodeView) -> Bool {
-            // A native button's face is UIKit's but for a second line or a picture.
             if button.isNativeButton { return button.face.map { !$0.hasSubtitleOrPicture } ?? true }
-            guard button.kind == "view" || button.kind == "button" else { return false }
-            var texts = 0, symbols = 0, pictures = 0, dots = 0
+            guard button.kind == "view" || button.kind == "button", !button.cssVisibilityHidden else { return false }
+            var texts = 0, symbols = 0, pictures = 0, boxes = 0, dots = 0, layers = false
             func count(_ node: NodeView) -> Bool {
-                for child in shown(node) where !unpainted(child) {
+                if let flats = node.presenter?.flats, (flats.children(of: node.id) ?? []).contains(where: { id in
+                    flats.leaves[id].map { $0.style["display"]?.string != "none" } ?? false
+                }) { layers = true }
+                for child in shown(node) {
+                    guard !child.cssVisibilityHidden else { return false }
                     if child.isParagraph { texts += 1 }
                     else if child.kind == "image", child.faceSymbol != nil { symbols += 1 }
                     else if child.kind == "image", child.imageSource != nil { pictures += 1 }
-                    else if child.kind == "view", shown(child).isEmpty { dots += child.channels("background_color") == nil ? 0 : 1 }
-                    else if child.kind == "view" { if !count(child) { return false } }
+                    else if child.kind == "view" {
+                        boxes += 1
+                        if shown(child).isEmpty, child.channels("background_color") != nil { dots += 1 }
+                        if !count(child) { return false }
+                    }
                     else { return false }
-                }
-                // A painted childless box drawn as a layer (`FlatLeavesIOS`) is a dot too.
-                if let flats = node.presenter?.flats {
-                    dots += (flats.children(of: node.id) ?? []).filter { id in
-                        flats.leaves[id].map { $0.style["display"]?.string != "none" && $0.style["background_color"] != nil } ?? false
-                    }.count
                 }
                 return true
             }
             guard count(button) else { return false }
-            if BadgeFace(button) != nil { return texts + symbols + pictures == 1 && dots == 0 }
-            // UIKit's own item shows one image or one title, and speaks the
-            // words a symbol stands beside (`configure`), as a hand-built
-            // bar's image item does.
-            // A face with nothing UIKit's item shows (a filled box alone) is drawn as written.
-            return pictures == 0 && (ChipFace(button) != nil || dots == 0 && texts + symbols >= 1 && texts <= 1 && symbols <= 1)
-        }
-        /// A leaf the page does not paint: its computed `visibility` hides it.
-        static func unpainted(_ node: NodeView) -> Bool {
-            node.cssVisibilityHidden && (node.isParagraph || node.kind == "image")
+            if BadgeFace(button) != nil { return !layers && boxes == 1 && texts + symbols + pictures == 1 }
+            if ChipFace(button) != nil { return pictures == 0 }
+            return !layers && dots == 0 && pictures == 0 && texts <= 1 && symbols <= 1 && texts + symbols >= 1
         }
         /// Whether `node` shows words: a paragraph in it, shown, says something.
         static func shows(words node: NodeView) -> Bool {
-            node.isParagraph ? !node.accessibleText.isEmpty : shown(node).contains { shows(words: $0) }
+            // A native button's words are its face's, not views.
+            if node.isNativeButton { return !(node.face?.title ?? "").isEmpty }
+            return node.isParagraph ? !node.accessibleText.isEmpty : shown(node).contains { shows(words: $0) }
         }
         /// Everything a bar item is made from. A hosted element is not: its
         /// views follow it in place (`BarHosted.show`).

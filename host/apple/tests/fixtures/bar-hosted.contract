@@ -1,8 +1,8 @@
 // A header's items that UIKit has no object of its own for (LLP 1141.004,
 // BarHostedIOSTests): link items, which follow their `href`; a row of a
-// label and a switch, a readout that holds a Retry button, a command and a
-// closed dialog, and a switch that hears `press`, each hosted, whose entries
-// in UIKit's overflow menu do what the element does.
+// label and a switch, a readout that holds a Retry button, a command and the
+// dialog it opens, and a switch that hears `press`, each hosted, whose
+// entries in UIKit's overflow menu are what the element itself does.
 routes nav
   home "/"
     history "/history"
@@ -13,7 +13,6 @@ component BarHosted
   state retried = 0
   state alerts = false
   state noted = 0
-  state quiet = false
   action follow(url: string)
     nav = go(nav, url)
   action flip(on: bool)
@@ -26,8 +25,6 @@ component BarHosted
     noted = noted + 1
   action wipe
     retried = 0
-  action hush
-    quiet = true
   view
     main navigationKey=`${top(nav).id}` navigate=follow width="100%" height="100%"
       for e in stack(nav) key=e.id
@@ -40,14 +37,12 @@ component BarHosted
               row gap=6 align-items="center" testId="live-row"
                 text "Live" font-size=13
                 input type="checkbox" role="switch" checked=live change=flip aria-label="Live" testId="live-switch"
-              row role="status" aria-label=`Offline, retried ${retried}` display=(quiet ? "none" : "flex") gap=6 align-items="center" testId="offline"
+              row role="status" aria-label=`Offline, retried ${retried}` gap=6 align-items="center" testId="offline"
                 text "Offline" font-size=13
                 button press=retry aria-label="Retry" testId="retry"
                   text "Retry"
                 button commandfor="details" command="show-modal" aria-label="Details" testId="details-button"
                   text "Details"
-                button press=wipe aria-label="Hidden" visibility="hidden" testId="hidden-button"
-                  text "Hidden"
                 dialog id="details" aria-label="Details" testId="details"
                   button press=wipe aria-label="Delete" testId="delete"
                     text "Delete"
@@ -61,5 +56,3 @@ component BarHosted
           text `${retried}` testId="retried"
           text (alerts ? "on" : "off") testId="alerts"
           text `${noted}` testId="noted"
-          button press=hush testId="hush"
-            text "Hush"

@@ -300,12 +300,16 @@ final class BarHostedIOSTests: XCTestCase {
                            ["op": "create", "id": 9, "kind": "view", "style": fill],
                            ["op": "create", "id": 10, "kind": "image", "props": ["imageSource": "symbol:sf/person", "symbolName": "person"], "style": ["visibility": "hidden"]],
                            ["op": "create", "id": 11, "kind": "view", "handlers": ["press"], "props": ["accessibilityLabel": "Retry"]],
-                           ["op": "create", "id": 12, "kind": "image", "props": ["imageSource": "symbol:sf/arrow.clockwise", "symbolName": "arrow.clockwise"]], text(13, "Retry")],
-                          kids: [4, 8, 11], more: [["op": "children", "id": 4, "ids": [5]], ["op": "children", "id": 5, "ids": [6, 7]],
-                                                   ["op": "children", "id": 8, "ids": [9]], ["op": "children", "id": 9, "ids": [10]],
-                                                   ["op": "children", "id": 11, "ids": [12, 13]]])
+                           ["op": "create", "id": 12, "kind": "image", "props": ["imageSource": "symbol:sf/arrow.clockwise", "symbolName": "arrow.clockwise"]], text(13, "Retry"),
+                           ["op": "create", "id": 14, "kind": "button", "handlers": ["press"], "props": ["accessibilityLabel": "Nested"]],
+                           ["op": "create", "id": 15, "kind": "view", "style": fill], ["op": "create", "id": 16, "kind": "view"], text(17, "AB")],
+                          kids: [4, 8, 14, 11], more: [["op": "children", "id": 4, "ids": [5]], ["op": "children", "id": 5, "ids": [6, 7]],
+                                                       ["op": "children", "id": 8, "ids": [9]], ["op": "children", "id": 9, "ids": [10]],
+                                                       ["op": "children", "id": 14, "ids": [15]], ["op": "children", "id": 15, "ids": [16]], ["op": "children", "id": 16, "ids": [17]],
+                                                       ["op": "children", "id": 11, "ids": [12, 13]]])
         let painted = try bar(faces)
-        XCTAssertEqual(painted.trailing.map(\.hosted), [true, true, false])
+        // A badge whose part sits in a box of its own is no plain badge: drawn as written.
+        XCTAssertEqual(painted.trailing.map(\.hosted), [true, true, true, false])
         XCTAssertEqual(painted.trailing.last?.symbol, "arrow.clockwise")
         XCTAssertEqual(painted.trailing.last?.title, "Retry", "spoken by the item")
     }
@@ -442,9 +446,10 @@ final class BarHostedIOSTests: XCTestCase {
 
     /// What a link item and a hosted item do (LLP 1141.004 D1, D3): a link
     /// is UIKit's item and follows its `href` under the agent's tap and under
-    /// a tap on the item; in UIKit's overflow menu a hosted row's switch
-    /// flips, its entry showing the switch's state, and a readout's Retry
-    /// presses.
+    /// a tap on the item; in UIKit's overflow menu a hosted switch flips, its
+    /// entry showing the switch's state, a row or a readout is its name,
+    /// dimmed, and an entry acts only while the bar that shows still offers
+    /// it.
     func testALinkItemAndAHostedItemDoWhatTheElementDoes() throws {
         guard UIApplication.shared.connectedScenes.first is UIWindowScene else { throw missing("scene", "a switch sends its actions through the app, which a hosted test has") }
         let session = try session(), p = session.presenter
@@ -456,22 +461,16 @@ final class BarHostedIOSTests: XCTestCase {
         }
         let row = try item("live-row", on: home), offline = try item("offline", on: home)
         XCTAssertTrue(row.customView is HostedItemView && offline.customView is HostedItemView)
-        let flip = try XCTUnwrap(row.menuRepresentation as? UIAction, "the switch, an entry of its own")
-        XCTAssertEqual(flip.title, "Live")
-        XCTAssertEqual(flip.state, .off)
-        XCTAssertFalse(flip.attributes.contains(.disabled))
-        let control = try XCTUnwrap(p.controls.controls[try node("live-switch").id] as? UISwitch)
-        flip.performWithSender(nil, target: nil)
-        until("the switch flipped: on \(control.isOn), says \((try? node("live"))?.accessibleText ?? "")") { (try? node("live"))?.accessibleText == "on" }
-        until("its entry follows") { (row.menuRepresentation as? UIAction)?.state == .on }
-        // A readout's buttons, a submenu by its name: its command, and not
-        // the button in its closed dialog or the one `visibility` hides.
-        let readout = try XCTUnwrap(offline.menuRepresentation as? UIMenu, "the readout's buttons")
-        XCTAssertEqual(readout.title, "Offline, retried 0")
-        XCTAssertEqual(readout.children.compactMap { ($0 as? UIAction)?.title }, ["Retry", "Details"])
-        let retry = try XCTUnwrap(readout.children.first as? UIAction)
-        retry.performWithSender(nil, target: nil)
-        until("Retry pressed") { (try? node("retried"))?.accessibleText == "1" }
+        // A row and a readout do nothing of their own: each is its name,
+        // dimmed. What is inside them is reached in the bar.
+        for (hosted, name) in [(row, "the row"), (offline, "the readout")] {
+            let entry = try XCTUnwrap(hosted.menuRepresentation as? UIAction, name)
+            XCTAssertTrue(entry.attributes.contains(.disabled), name)
+            XCTAssertFalse(entry.title.isEmpty, name)
+        }
+        XCTAssertEqual((offline.menuRepresentation as? UIAction)?.title, "Offline, retried 0")
+        p.press(try node("retry").id)
+        until("Retry, in the bar, presses") { (try? node("retried"))?.accessibleText == "1" }
         // A switch that hears `press` is hosted, not a blank button, and its
         // entry shows and flips its state.
         let alerts = try item("alerts-switch", on: home)
@@ -479,25 +478,22 @@ final class BarHostedIOSTests: XCTestCase {
         let alert = try XCTUnwrap(alerts.menuRepresentation as? UIAction)
         XCTAssertEqual(alert.title, "Alerts")
         XCTAssertEqual(alert.state, .off)
+        XCTAssertFalse(alert.attributes.contains(.disabled))
         alert.performWithSender(nil, target: nil)
         until("the alerts switch flipped and pressed") { (try? node("alerts"))?.accessibleText == "on" && (try? node("noted"))?.accessibleText == "1" }
         until("its entry follows") { (alerts.menuRepresentation as? UIAction)?.state == .on }
+        // The entry offered before that change does nothing now.
+        alert.performWithSender(nil, target: nil)
+        spin(0.3)
+        XCTAssertEqual(try node("alerts").accessibleText, "on", "not flipped back by a stale entry")
+        XCTAssertEqual(try node("noted").accessibleText, "1")
         // The readout's command opens the dialog written in it, as a tap on it
         // in the page does.
-        let commands = try XCTUnwrap(offline.menuRepresentation as? UIMenu)
-        try XCTUnwrap(commands.children.compactMap { $0 as? UIAction }.first { $0.title == "Details" }).performWithSender(nil, target: nil)
+        p.press(try node("details-button").id)
         let details = try node("details")
         until("Details opens its dialog") { p.menus.isOpen(details) }
         p.press(try node("close-details").id)
         until("and it closes") { !p.menus.isOpen(details) && !p.menus.inTransition }
-        // An entry chosen after its readout is hidden does nothing.
-        let stale = try XCTUnwrap((offline.menuRepresentation as? UIMenu)?.children.first as? UIAction)
-        XCTAssertEqual(stale.title, "Retry")
-        p.press(try node("hush").id)
-        until("the readout is hidden") { (try? node("offline"))?.style["display"]?.string == "none" }
-        stale.performWithSender(nil, target: nil)
-        spin(0.3)
-        XCTAssertEqual(try node("retried").accessibleText, "1", "no press from an entry the bar no longer offers")
         // An entry from a menu made while Home showed does nothing once
         // another route's bar shows.
         let later = try XCTUnwrap(alerts.menuRepresentation as? UIAction)

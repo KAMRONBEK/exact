@@ -38,10 +38,9 @@ package struct BadgeFace: Equatable {
     package init?(box: NodeView, authored: Bool = false) {
         guard box.channels("background_color") != nil else { return nil }
         var text = "", symbol: String?, ink: NodeView?, pictured: NodeView?
-        // Shown parts only: a part hidden as authored, or a leaf `visibility` hides, is not drawn.
+        // Shown parts only: a part hidden as authored is not drawn.
         func walk(_ node: NodeView) {
-            for child in node.childNodes where child.style["display"]?.string != "none"
-                && !(child.cssVisibilityHidden && (child.isParagraph || child.kind == "image")) {
+            for child in node.childNodes where child.style["display"]?.string != "none" {
                 if child.kind == "image", let name = child.faceSymbol { symbol = symbol ?? name; ink = ink ?? child }
                 else if child.kind == "image", child.imageSource != nil { pictured = pictured ?? child }
                 else if child.isParagraph, text.isEmpty { text = child.accessibleText; ink = ink ?? child }

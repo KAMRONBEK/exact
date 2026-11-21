@@ -139,40 +139,27 @@ final class BarHosted: LiftedNodes {
         var source: String { "\(node.id)/\(name)/\(on.map(String.init) ?? "")/\(disabled)/\(invokes)" }
     }
 
-    /// The element as the overflow menu acts on it: itself where it is a
-    /// switch or presses (a `press`, a link's `href`, or a command it
-    /// invokes); else each switch and button in it, in order. What the page
-    /// does not show is passed over: a closed dialog or popover in it, which
-    /// the top layer shows when open, an inert subtree, and a node whose
-    /// computed `visibility` hides it (a child that computes `visible` still
-    /// shows). A field or a slider has no entry: a menu cannot hold one.
+    /// What the overflow menu does for the element: its own action, where it
+    /// is a switch or presses (a `press`, a link's `href`, or a command it
+    /// invokes); else nothing, and its entry is its name, dimmed. What is
+    /// inside an element is reached in the bar, where the element shows.
     private func entries(_ node: NodeView) -> [Entry] {
-        func entry(_ n: NodeView) -> Entry? {
-            guard !n.cssVisibilityHidden else { return nil }
-            let disabled = n.disabled || n.inert, invocation = presenter.invocation(of: n)
-            let invokes = invocation.map { "\($0.target.id) \($0.action)" } ?? n.defaultLink ?? ""
-            if let s = presenter.controls.controls[n.id] as? UISwitch { return Entry(node: n, name: n.accessibleName, on: s.isOn, disabled: disabled || !s.isEnabled, invokes: invokes) }
-            if n.handlers.contains("press") || n.defaultLink != nil || invocation != nil { return Entry(node: n, name: n.accessibleName, on: nil, disabled: disabled, invokes: invokes) }
-            return nil
+        guard !node.cssVisibilityHidden else { return [] }
+        let disabled = node.disabled || node.inert, invocation = presenter.invocation(of: node)
+        // Everything a press may do: a link `presenter.press` follows first, and a command.
+        let invokes = "\(node.defaultLink ?? "") \(invocation.map { "\($0.target.id) \($0.action)" } ?? "")"
+        if let s = presenter.controls.controls[node.id] as? UISwitch {
+            return [Entry(node: node, name: node.accessibleName, on: s.isOn, disabled: disabled || !s.isEnabled, invokes: invokes)]
         }
-        if let own = entry(node) { return [own] }
-        var out: [Entry] = []
-        func walk(_ n: NodeView) {
-            for child in HeaderShape.Item.shown(n) {
-                if child.props["popover"] != nil || child.props["semanticTag"] == "dialog" || child.inert { continue }
-                if let e = entry(child) { out.append(e) } else { walk(child) }
-            }
-        }
-        walk(node)
-        return out
+        guard node.handlers.contains("press") || node.defaultLink != nil || invocation != nil else { return [] }
+        return [Entry(node: node, name: node.accessibleName, on: nil, disabled: disabled, invokes: invokes)]
     }
 
     /// In UIKit's overflow menu a custom view shows nothing: the item is
-    /// there by its element's name and does what the element does (LLP
-    /// 1141.004 D3): one entry for what it presses or flips, a submenu of
-    /// them where it holds several, else a dimmed line. Made again as the
-    /// element changes, and an entry chosen acts only while the element
-    /// still offers it.
+    /// there by its element's name (LLP 1141.004 D3), an entry that does
+    /// what the element itself does, else a dimmed line. Made again as the
+    /// element changes, and an entry chosen acts only while it is still
+    /// what the bar that shows offers.
     private func name(_ id: UInt32) {
         guard let entry = hosted[id] else { return }
         let node = entry.view.node, name = node.accessibleName
@@ -188,6 +175,7 @@ final class BarHosted: LiftedNodes {
                 guard let self, let presenter, let root, let node, presenter.views[node.id] === node,
                       let held = self.hosted[root.id], held.view.node === root, root.style["display"]?.string != "none",
                       let route = held.route, route.navigationController?.topViewController === route, route.viewIfLoaded?.window != nil,
+                      !self.navigation.isInactiveRoute(containing: route.node, layout: false),
                       self.offered(root, self.entries(root)) == source, !disabled else { return }
                 if let s = presenter.controls.controls[node.id] as? UISwitch {
                     // As a tap flips it: the switch's own change.
@@ -199,8 +187,7 @@ final class BarHosted: LiftedNodes {
                 }
             }
         }
-        if actions.count > 1 { entry.item.menuRepresentation = UIMenu(title: name, children: actions) }
-        else if let one = actions.first { entry.item.menuRepresentation = one }
+        if let one = actions.first { entry.item.menuRepresentation = one }
         else { entry.item.menuRepresentation = name.isEmpty ? nil : UIAction(title: name, attributes: .disabled) { _ in } }
     }
 

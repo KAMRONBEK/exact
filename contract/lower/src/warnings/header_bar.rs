@@ -122,7 +122,9 @@ fn holds_heading(node: Visit<'_>) -> bool {
     node.regions()[0]
         .walk_regions_with((), |k, _| {
             [
-                matches!(part(k), Part::Box | Part::Pressable | Part::Status).then_some(()),
+                (matches!(part(k), Part::Box | Part::Pressable | Part::Status)
+                    || matches!(k.element(), Some(("button" | "link", _, _))))
+                .then_some(()),
                 None,
             ]
         })
@@ -366,6 +368,8 @@ impl<'a> Bar<'a> {
                 bar.tap = true;
                 return true;
             }
+            // One that does not press around the heading is walked for it.
+            Part::Pressable if !has_press(node) && holds_heading(node) => return true,
             Part::Pressable => bar.placed = true,
             // A status around the heading is no readout: walked for it.
             Part::Status if holds_heading(node) => return true,

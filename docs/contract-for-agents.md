@@ -4234,8 +4234,10 @@ main navigationKey=`${top(nav).id}` navigationBack="close" navigate=follow displ
   presses sits on the bar with no glass; one with a control the bar has no object for (a
   switch, a slider, a field) shares the bar's glass; `backgroundMaterial` written on it
   is drawn as its own. Where the bar is too narrow, UIKit's "⋯" menu lists an item by its
-  accessible name (give it an `aria-label`): the entry presses it, flips a switch in it,
-  or presses each button inside it, and is dimmed when nothing does. Outside a readout, a button or a link is never inside an item: the
+  accessible name (give it an `aria-label`): the entry does what the element itself does
+  (presses it, follows its link, flips it when it is a switch), and is dimmed when the
+  element does nothing of its own; what is inside a row or a readout is reached in the
+  bar. Outside a readout, a button or a link is never inside an item: the
   bar walks a box that holds one, and the button is an item of its own when it presses. A
   readout nothing presses (a "● Clock", "Updating" beside a spinner) says
   `role="status"`, so VoiceOver speaks a change of it, and its texts are never the
