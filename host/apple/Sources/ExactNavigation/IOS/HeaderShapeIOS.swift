@@ -101,12 +101,12 @@ struct HeaderShape: Equatable {
                 walk(button)
             }
             // Up the authored tree: a hosted element the bar lifted keeps its group.
-            let presenter = button.presenter
-            var parent = presenter?.logicalParent(of: button.id).flatMap { presenter?.views[$0] }
             var grouped: UInt32?
-            while let node = parent, node.props["semanticTag"] != "header" {
-                if node.props["accessibilityRole"] == "group" { grouped = node.id; break }
-                parent = presenter?.logicalParent(of: node.id).flatMap { presenter?.views[$0] }
+            if let presenter = button.presenter {
+                for case let node as NodeView in presenter.logicalAncestry(of: button).dropFirst() {
+                    if node.props["semanticTag"] == "header" { break }
+                    if node.props["accessibilityRole"] == "group" { grouped = node.id; break }
+                }
             }
             toolbarGroup = grouped
             id = button.id
@@ -173,18 +173,23 @@ struct HeaderShape: Equatable {
             NodeView.committed(node.container.subviews).filter { $0.style["display"]?.string != "none" }
         }
         /// Whether the bar can draw `button`'s face whole as UIKit's item: a
-        /// native button's, a badge, or texts, symbols and boxes of them, which
-        /// a title, an image or a painted face draws. A spinner or a picture
-        /// outside a badge it cannot, and such a button is hosted (D1).
+        /// native button's, or texts, symbols and boxes of them, which a
+        /// title, an image or a painted face draws, and in a badge a picture
+        /// too. A spinner or a control anywhere in it, or a picture outside a
+        /// badge, it cannot, and such a button is hosted (D1).
         static func drawsFace(_ button: NodeView) -> Bool {
+            if button.isNativeButton { return true }
+            let badge = BadgeFace(button) != nil
             func whole(_ node: NodeView) -> Bool {
-                shown(node).allSatisfy { $0.isParagraph || ($0.kind == "image" && $0.faceSymbol != nil) || ($0.kind == "view" && whole($0)) }
+                shown(node).allSatisfy {
+                    $0.isParagraph || ($0.kind == "image" && ($0.faceSymbol != nil || badge && $0.imageSource != nil)) || ($0.kind == "view" && whole($0))
+                }
             }
-            return button.isNativeButton || BadgeFace(button) != nil || whole(button)
+            return whole(button)
         }
-        /// Whether `node` shows words: a paragraph in it says something.
+        /// Whether `node` shows words: a paragraph in it, shown, says something.
         static func shows(words node: NodeView) -> Bool {
-            node.isParagraph ? !node.accessibleText.isEmpty : NodeView.committed(node.container.subviews).contains { shows(words: $0) }
+            node.isParagraph ? !node.accessibleText.isEmpty : shown(node).contains { shows(words: $0) }
         }
         /// Everything a bar item is made from. A hosted element is not: its
         /// views follow it in place (`BarHosted.show`).
@@ -259,7 +264,7 @@ struct HeaderShape: Equatable {
         // What the author keeps in the page is not the title's to read either.
         let candidates = rule.hosted.filter(projects)
         let apart = rule.items + rule.readouts + [rule.search, rule.segments].compactMap { $0 } + authored
-        let group = heading.flatMap { HeaderTitle(header: rule.header, heading: $0, tap: tap, apart: apart, atomic: candidates) }
+        let group = heading.flatMap { HeaderTitle(header: rule.header, heading: $0, tap: tap, apart: apart, atomic: candidates, kept: authored) }
         #if os(tvOS)
         // tvOS's bar has no item that focus passes by undimmed: none hosted.
         let hosted: [NodeView] = []
@@ -268,10 +273,12 @@ struct HeaderShape: Equatable {
         // from a drawn title, whose glyph line is then an item of its own.
         let titled = HeaderShape.presented(group, segments: segments)?.placed ?? []
         // A readout is never the title's, even inside a glyph line it takes.
-        // A button whose face the bar cannot draw is hosted with its press.
+        // Read in the authored tree: an element the bar lifted is still in its box.
+        // A button whose face the bar cannot draw is hosted with its press;
+        // the Back control UIKit's back button stands for is no item.
         let hosted = candidates.filter { node in
-            rule.readouts.contains { $0 === node } || !titled.contains { $0 === node || $0.isDescendant(of: node) || node.isDescendant(of: $0) }
-        } + rule.items.filter { projects($0) && !Item.drawsFace($0) }
+            rule.readouts.contains { $0 === node } || !titled.contains { Self.inside($0, node) || Self.inside(node, $0) }
+        } + (rule.leading + rule.trailing).filter { node in rule.items.contains { $0 === node } && projects(node) && !Item.drawsFace(node) }
         #endif
         self.hosted = hosted
         let item = { (node: NodeView) -> Item? in
@@ -289,6 +296,12 @@ struct HeaderShape: Equatable {
         let wrapper = titleProjects ? tap.flatMap { tap in authored.contains { $0.isDescendant(of: tap) } ? nil : tap } : nil
         placed = ([rule.heading].compactMap { $0 } + rule.items.filter { item in !hosted.contains { $0 === item } } + [search, tablist, wrapper].compactMap { $0 }
                   + (HeaderShape.presented(group, segments: segments)?.placed ?? [])).filter(projects)
+    }
+
+    /// Whether `node` is `box` or inside it in the authored tree, where an
+    /// element the bar lifted is still in its parent (LLP 1141.004 D3).
+    static func inside(_ node: NodeView, _ box: NodeView) -> Bool {
+        node.presenter?.logicalAncestry(of: node).contains { $0 === box } ?? node.isDescendant(of: box)
     }
 
     /// The tabs of a header's tablist the segmented title shows (§9.8).

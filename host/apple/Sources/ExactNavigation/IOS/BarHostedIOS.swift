@@ -32,7 +32,9 @@ final class HostedItemView: UIView {
     var inset: CGFloat = 0 {
         didSet { if inset != oldValue { resize() } }
     }
-    /// The element's laid-out size, its margins included, as last shown.
+    /// The element's laid-out size as last shown: its frame's far edges in
+    /// the block. The bridge sends no margins, so a trailing or bottom
+    /// margin is not kept (LLP 1141.004 D3).
     private(set) var size = CGSize.zero
     private var relay: MountRelay?
 
@@ -48,9 +50,9 @@ final class HostedItemView: UIView {
     /// Follow the element's laid-out size, and its logical ancestors' `aria-hidden`
     /// and `inert`, which UIKit does not see past the lift; whether the size changed.
     func refit() -> Bool {
-        let hidden = node.inert || node.presenter.map { $0.logicalAncestry(of: node).contains { ($0 as? NodeView)?.props["accessibilityElementsHidden"] == "true" } } == true
+        let hidden = node.inert || node.authoredLine.contains { $0.props["accessibilityElementsHidden"] == "true" }
         if accessibilityElementsHidden != hidden { accessibilityElementsHidden = hidden }
-        let laid = CGSize(width: max(0, node.frame.maxX + node.number("margin_right")), height: max(0, node.frame.maxY + node.number("margin_bottom")))
+        let laid = CGSize(width: max(0, node.frame.maxX), height: max(0, node.frame.maxY))
         guard laid != size else { return false }
         size = laid
         resize()
@@ -86,6 +88,8 @@ final class BarHosted: LiftedNodes {
         let view: HostedItemView
         weak var route: RouteController?
         var room: CGSize
+        /// What the overflow menu's entry was made from (`name`).
+        var menu = ""
     }
     private var hosted: [UInt32: Hosted] = [:]
     /// Each parent's children as the tree last gave them, flat leaves
@@ -101,7 +105,7 @@ final class BarHosted: LiftedNodes {
         let node = presenter.views[i.id]
         if let entry = hosted[i.id], entry.view.node === node {
             hosted[i.id]?.route = c
-            style(entry, i)
+            style(i)
             return entry.item
         }
         release(i.id)
@@ -114,29 +118,76 @@ final class BarHosted: LiftedNodes {
         presenter.flats.containerChanged(parent.id)
         let entry = Hosted(item: UIBarButtonItem(customView: view), view: view, route: c, room: room(in: c, inset: i.hostedInset))
         hosted[i.id] = entry
-        style(entry, i)
+        style(i)
         _ = view.refit()
         presenter.owners.publish()
         return entry.item
     }
 
-    private func style(_ entry: Hosted, _ i: HeaderShape.Item) {
+    private func style(_ i: HeaderShape.Item) {
+        guard let entry = hosted[i.id] else { return }
         entry.item.accessibilityIdentifier = i.testId
         entry.view.inset = i.hostedInset
         if #available(iOS 26.0, *) { entry.item.hidesSharedBackground = !i.hostedGlass }
-        name(entry)
+        name(i.id)
+    }
+
+    /// What the overflow menu does for a hosted element: press it, or flip
+    /// a switch in it.
+    private struct Entry {
+        let node: NodeView, name: String, on: Bool?, disabled: Bool
+        var source: String { "\(node.id)/\(name)/\(on.map(String.init) ?? "")/\(disabled)" }
+    }
+
+    /// The element as the overflow menu acts on it: itself where it presses
+    /// (a `press`, or a link's `href`) or is a switch; else each button and
+    /// switch in it, in order. A field or a slider has no entry: a menu
+    /// cannot hold one.
+    private func entries(_ node: NodeView) -> [Entry] {
+        func entry(_ n: NodeView) -> Entry? {
+            if n.handlers.contains("press") || n.defaultLink != nil { return Entry(node: n, name: n.accessibleName, on: nil, disabled: n.disabled) }
+            if let s = presenter.controls.controls[n.id] as? UISwitch { return Entry(node: n, name: n.accessibleName, on: s.isOn, disabled: n.disabled || !s.isEnabled) }
+            return nil
+        }
+        if let own = entry(node) { return [own] }
+        var out: [Entry] = []
+        func walk(_ n: NodeView) {
+            for child in HeaderShape.Item.shown(n) {
+                if let e = entry(child) { out.append(e) } else { walk(child) }
+            }
+        }
+        walk(node)
+        return out
     }
 
     /// In UIKit's overflow menu a custom view shows nothing: the item is
-    /// there by its element's name, pressing what it presses, or dimmed. The
-    /// name follows the element.
-    private func name(_ entry: Hosted) {
+    /// there by its element's name and does what the element does (LLP
+    /// 1141.004 D3): one entry for what it presses or flips, a submenu of
+    /// them where it holds several, else a dimmed line. Made again as the
+    /// element changes.
+    private func name(_ id: UInt32) {
+        guard let entry = hosted[id] else { return }
         let node = entry.view.node, name = node.accessibleName
-        let presses = node.handlers.contains("press") || node.defaultLink != nil
-        let shown = entry.item.menuRepresentation as? UIAction
-        guard shown?.title != name || shown?.attributes.contains(.disabled) == presses else { return }
-        entry.item.menuRepresentation = name.isEmpty ? nil
-            : UIAction(title: name, attributes: presses ? [] : .disabled) { [weak presenter = node.presenter, id = node.id] _ in presenter?.press(id) }
+        let entries = entries(node)
+        let source = ([name] + entries.map(\.source)).joined(separator: "\u{1F}")
+        guard source != entry.menu else { return }
+        hosted[id]?.menu = source
+        let actions = entries.map { e in
+            UIAction(title: e.name.isEmpty ? name : e.name, attributes: e.disabled ? .disabled : [], state: e.on == true ? .on : .off) { [weak presenter, weak node = e.node] _ in
+                guard let presenter, let node, presenter.views[node.id] === node, !node.disabled else { return }
+                if let s = presenter.controls.controls[node.id] as? UISwitch {
+                    // As a tap flips it: the switch's own change.
+                    guard s.isEnabled else { return }
+                    s.setOn(!s.isOn, animated: false)
+                    s.sendActions(for: .valueChanged)
+                } else {
+                    presenter.press(node.id)
+                }
+            }
+        }
+        if actions.count > 1 { entry.item.menuRepresentation = UIMenu(title: name, children: actions) }
+        else if let one = actions.first { entry.item.menuRepresentation = one }
+        else { entry.item.menuRepresentation = name.isEmpty ? nil : UIAction(title: name, attributes: .disabled) { _ in } }
     }
 
     /// The room the bar gives a hosted item: a third of its width, so a
@@ -226,8 +277,8 @@ final class BarHosted: LiftedNodes {
 
     /// After a batch: each item follows its element's laid-out size.
     func place() {
-        for entry in hosted.values {
-            name(entry)
+        for (id, entry) in hosted {
+            name(id)
             if entry.view.refit() { entry.route?.navigationController?.navigationBar.setNeedsLayout() }
         }
     }

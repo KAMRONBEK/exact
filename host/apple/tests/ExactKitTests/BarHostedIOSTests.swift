@@ -140,7 +140,12 @@ final class BarHostedIOSTests: XCTestCase {
         XCTAssertEqual(spinner.hostedInset, 0)
         let live = try item([text(6, "Live"), toggle], [6, 7])
         XCTAssertTrue(live.hostedGlass)
-        XCTAssertEqual(live.hostedInset, HeaderShape.Item.titleInset)
+        // The inset is for iOS 26's glass, whose capsule's round ends cut into words.
+        var glass = false
+        if #available(iOS 26.0, *) { glass = true }
+        XCTAssertEqual(live.hostedInset, glass ? HeaderShape.Item.titleInset : 0)
+        let unworded = try item([text(6, "Live", style: ["display": "none"]), toggle], [6, 7])
+        XCTAssertEqual(unworded.hostedInset, 0, "a hidden label shows no words")
         let sided = try item([text(6, "Live"), toggle], [6, 7], style: ["padding_left": 4, "written": ["padding_left"]])
         XCTAssertEqual(sided.hostedInset, 0, "the author's side")
         let own = try item([text(6, "Live"), toggle], [6, 7], props: ["backgroundMaterial": "glass"])
@@ -172,6 +177,34 @@ final class BarHostedIOSTests: XCTestCase {
         XCTAssertEqual(NavigationHost.cover(of: try XCTUnwrap(p.views[5]), in: route), .bar)
     }
 
+    /// A badge UIKit draws whole is its item; a spinner in the badge it
+    /// cannot draw, so that button is hosted with its press. The Back
+    /// control UIKit's back button stands for is never hosted, whatever
+    /// its face.
+    func testABadgeWithASpinnerIsHostedAndBackNever() throws {
+        let fill: [String: Any] = ["background_color": [40, 100, 200, 255], "border_radius": 16]
+        let p = route([["op": "create", "id": 4, "kind": "button", "handlers": ["press"], "props": ["accessibilityLabel": "Me"]],
+                       ["op": "create", "id": 5, "kind": "view", "style": fill], text(6, "AB"),
+                       ["op": "create", "id": 7, "kind": "button", "handlers": ["press"], "props": ["accessibilityLabel": "Busy"]],
+                       ["op": "create", "id": 8, "kind": "view", "style": fill], text(9, "AB"), progress(10)],
+                      kids: [4, 7], more: [["op": "children", "id": 4, "ids": [5]], ["op": "children", "id": 5, "ids": [6]],
+                                           ["op": "children", "id": 7, "ids": [8]], ["op": "children", "id": 8, "ids": [9, 10]]])
+        let shape = try bar(p)
+        XCTAssertEqual(shape.trailing.map(\.id), [4, 7])
+        XCTAssertEqual(shape.trailing.map(\.hosted), [false, true], "the badge drawn; the badge with a spinner hosted")
+        XCTAssertNotNil(shape.trailing.first?.badge)
+        // A pushed route whose authored Back control holds a spinner, a
+        // sibling kept in the page: UIKit's back button stands for it, and
+        // the bar hides it with what it places.
+        let back = route([["op": "create", "id": 4, "kind": "button", "handlers": ["press"], "props": ["id": "back", "accessibilityLabel": "Back"]], progress(5),
+                          text(6, "Kept", style: ["appearance": "none", "written": ["appearance"]])],
+                         kids: [], more: [["op": "children", "id": 4, "ids": [5]]], header: [4, 3, 6])
+        let pushed = try XCTUnwrap(HeaderShape(route: try XCTUnwrap(back.views[1]), back: "back", projected: true))
+        XCTAssertTrue(pushed.hosted.isEmpty, "Back is UIKit's")
+        XCTAssertTrue(pushed.leading.isEmpty)
+        XCTAssertTrue(pushed.placed.contains { $0.id == 4 }, "hidden with what the bar places")
+    }
+
     /// The title's ownership is the title presented: with segments in the
     /// title view, a glyph line after the heading is an item of its own. A
     /// text its author keeps in the page (`appearance: none`) is not the
@@ -189,6 +222,37 @@ final class BarHostedIOSTests: XCTestCase {
         let segmented = try bar(p)
         XCTAssertNotNil(segmented.segments)
         XCTAssertEqual(segmented.hosted.map(\.id), [4], "the glyph line, which the segments' title cannot show")
+        // A status in the glyph line has the row walked: beside segments its
+        // glyphs are items of their own, lifted. When the segments go, the
+        // title takes the line again, in the authored tree, and the glyphs
+        // are the title's alone.
+        let live = route([["op": "create", "id": 4, "kind": "view"],
+                          ["op": "create", "id": 5, "kind": "image", "props": ["imageSource": "symbol:sf/bell.slash", "symbolName": "bell.slash"]],
+                          text(6, "Muted"), text(7, "Live", ["accessibilityRole": "status"]),
+                          ["op": "create", "id": 10, "kind": "view", "props": ["accessibilityRole": "tablist"]], tab(11, "All", true), text(13, "All"), tab(12, "Missed", false), text(14, "Missed")],
+                         kids: [4, 10], more: [["op": "children", "id": 4, "ids": [5, 6, 7]], ["op": "children", "id": 10, "ids": [11, 12]],
+                                               ["op": "children", "id": 11, "ids": [13]], ["op": "children", "id": 12, "ids": [14]]])
+        let liveRoute = RouteController(try XCTUnwrap(live.views[1]))
+        let tabbed = try bar(live)
+        XCTAssertEqual(tabbed.hosted.map(\.id), [5, 6, 7])
+        _ = live.navigationHost.barItems(tabbed.trailing, liveRoute)
+        XCTAssertFalse(try XCTUnwrap(live.views[5]).isDescendant(of: try XCTUnwrap(live.views[4])), "lifted")
+        live.apply(wireBatch([["op": "children", "id": 2, "ids": [3, 4]]]))
+        let untabbed = try bar(live)
+        XCTAssertEqual(untabbed.group?.glyphs.map(\.symbol), ["bell.slash", nil], "the title's glyph line")
+        XCTAssertEqual(untabbed.hosted.map(\.id), [7], "the glyphs are the title's alone")
+        XCTAssertEqual(untabbed.trailing.map(\.id), [7])
+        // A status kept in the page inside the glyph line stays there: the
+        // bar hides the glyphs the title draws, not the row that holds it.
+        let optOut = route([["op": "create", "id": 4, "kind": "view"],
+                            ["op": "create", "id": 5, "kind": "image", "props": ["imageSource": "symbol:sf/bell.slash", "symbolName": "bell.slash"]],
+                            text(6, "Muted"), text(7, "Live", ["accessibilityRole": "status"], style: ["appearance": "none", "written": ["appearance"]])],
+                           kids: [4], more: [["op": "children", "id": 4, "ids": [5, 6, 7]]])
+        let partial = try bar(optOut)
+        XCTAssertEqual(partial.authored.map(\.id), [7])
+        XCTAssertEqual(partial.group?.subtitle, "Muted")
+        XCTAssertTrue(partial.hosted.isEmpty)
+        XCTAssertEqual(Set(partial.placed.map(\.id)).intersection([4, 5, 6, 7]), [5, 6], "the glyphs, not the row")
         let kept = route([text(5, "3 left", style: ["appearance": "none", "written": ["appearance"]])], kids: [5])
         let shape = try XCTUnwrap(HeaderShape(route: try XCTUnwrap(kept.views[1]), back: nil, projected: true))
         XCTAssertEqual(shape.group?.subtitle ?? "", "", "kept in the page, not the bar's subtitle")
@@ -279,5 +343,67 @@ final class BarHostedIOSTests: XCTestCase {
         for (got, want) in zip(try share(), [255.0, 0, 0, 51]) { XCTAssertEqual(got, want, accuracy: 2, "a fifth of the red tint, undimmed, while dimmed") }
     }
 
+    private func until(_ what: String, _ seconds: Double = 5, _ done: () -> Bool) {
+        let deadline = Date().addingTimeInterval(seconds)
+        while !done(), Date() < deadline { RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02)) }
+        XCTAssertTrue(done(), what)
+    }
+
+    /// `bar-hosted.contract` booted in a window of a phone's size, its first route shown.
+    private func session() throws -> ExactSession {
+        let plan = try fixturePlan("BAR_HOSTED")
+        let session = ExactApp.shared.makeSession(label: "bar-hosted-\(UUID().uuidString)")
+        sessions.append(session)
+        let view = ExactView(session: session), host = UIViewController()
+        let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene
+        window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        host.view.addSubview(view)
+        XCTAssertNil(session.boot(plan: plan, size: CGSize(width: 402, height: 874)).error)
+        view.frame = host.view.bounds
+        view.layoutIfNeeded()
+        until("the first route") { session.presenter.navigationHost.primaryNavigation?.topViewController is RouteController }
+        return session
+    }
+
+    /// What a link item and a hosted item do (LLP 1141.004 D1, D3): a link
+    /// is UIKit's item and follows its `href` under the agent's tap and under
+    /// a tap on the item; in UIKit's overflow menu a hosted row's switch
+    /// flips, its entry showing the switch's state, and a readout's Retry
+    /// presses.
+    func testALinkItemAndAHostedItemDoWhatTheElementDoes() throws {
+        guard UIApplication.shared.connectedScenes.first is UIWindowScene else { throw missing("scene", "a switch sends its actions through the app, which a hosted test has") }
+        let session = try session(), p = session.presenter
+        func node(_ testId: String) throws -> NodeView { try XCTUnwrap(p.views.values.first { $0.props["testId"] == testId }, testId) }
+        let nav = try XCTUnwrap(p.navigationHost.primaryNavigation)
+        let home = try XCTUnwrap(nav.topViewController as? RouteController)
+        func item(_ testId: String, on c: UIViewController) throws -> UIBarButtonItem {
+            try XCTUnwrap((c.navigationItem.rightBarButtonItems ?? []).first { $0.accessibilityIdentifier == testId }, testId)
+        }
+        let row = try item("live-row", on: home), offline = try item("offline", on: home)
+        XCTAssertTrue(row.customView is HostedItemView && offline.customView is HostedItemView)
+        let flip = try XCTUnwrap(row.menuRepresentation as? UIAction, "the switch, an entry of its own")
+        XCTAssertEqual(flip.title, "Live")
+        XCTAssertEqual(flip.state, .off)
+        XCTAssertFalse(flip.attributes.contains(.disabled))
+        let control = try XCTUnwrap(p.controls.controls[try node("live-switch").id] as? UISwitch)
+        flip.performWithSender(nil, target: nil)
+        until("the switch flipped: on \(control.isOn), says \((try? node("live"))?.accessibleText ?? "")") { (try? node("live"))?.accessibleText == "on" }
+        until("its entry follows") { (row.menuRepresentation as? UIAction)?.state == .on }
+        let retry = try XCTUnwrap(offline.menuRepresentation as? UIAction, "the readout's Retry")
+        XCTAssertEqual(retry.title, "Retry")
+        retry.performWithSender(nil, target: nil)
+        until("Retry pressed") { (try? node("retried"))?.accessibleText == "1" }
+        let link = try node("history-link")
+        XCTAssertNil(try item("history-link", on: home).customView, "UIKit's own item")
+        let reply = p.navigationHost.activateChrome(link)
+        XCTAssertNil(reply?["error"], "\(reply ?? [:])")
+        until("the agent's tap followed the link") { nav.viewControllers.count == 2 && nav.transitionCoordinator == nil }
+        let history = try XCTUnwrap(nav.topViewController)
+        try XCTUnwrap(item("about-link", on: history).target as? BarPress).press()
+        until("a tap on the item followed the link") { nav.viewControllers.count == 3 }
+    }
 }
 #endif

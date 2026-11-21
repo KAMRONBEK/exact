@@ -52,8 +52,9 @@ struct HeaderTitle: Equatable {
 
     /// `apart`: the nodes the title never reads (the items, the readouts, the
     /// search field, the tablist); `atomic`: the hosted elements (LLP
-    /// 1141.004 D1), which it takes whole as the subtitle or not at all.
-    init?(header: NodeView, heading: NodeView, tap: NodeView?, apart: [NodeView], atomic: [NodeView] = []) {
+    /// 1141.004 D1), which it takes whole as the subtitle or not at all;
+    /// `kept`: the opted-out nodes, which stay in the page.
+    init?(header: NodeView, heading: NodeView, tap: NodeView?, apart: [NodeView], atomic: [NodeView] = [], kept: [NodeView] = []) {
         // The heading's ancestors below the header, innermost first.
         var chain: [NodeView] = [], at = heading.superview
         while let view = at, view !== header {
@@ -101,13 +102,15 @@ struct HeaderTitle: Equatable {
         /// A passive box of symbol images and texts only, one of each at
         /// least: a glyph line. A symbol with no name or an empty text adds
         /// nothing and costs the line nothing; any other child is not one.
-        func line(_ node: NodeView) -> [Glyph]? {
+        /// With the line, the children it is drawn from.
+        func line(_ node: NodeView) -> (glyphs: [Glyph], drawn: [NodeView])? {
             guard !node.isParagraph, passive(node) else { return nil }
-            var out: [Glyph] = [], symbols = false
+            var out: [Glyph] = [], drawn: [NodeView] = [], symbols = false
             for child in shown(node) {
                 // A readout beside the glyphs is its own item.
                 if apart.contains(where: { $0 === child }) { continue }
                 guard passive(child) else { return nil }
+                drawn.append(child)
                 if child.kind == "image", child.props["imageSource"]?.hasPrefix("symbol:") == true {
                     // A symbol source counts toward the shape even while its
                     // name is blank, so the line keeps its texts and label.
@@ -117,16 +120,19 @@ struct HeaderTitle: Equatable {
                     if !child.accessibleText.isEmpty { out.append(Glyph(symbol: nil, text: child.accessibleText)) }
                 } else { return nil }
             }
-            return symbols && out.contains { $0.symbol == nil } ? out : nil
+            return symbols && out.contains { $0.symbol == nil } ? (out, drawn) : nil
         }
         /// A control or a link is its own (a bar item), not the title's to
         /// read, unless it holds the heading (the pressable group).
         func control(_ node: NodeView) -> Bool {
             (node.isButton || node.actsAsButton || node.handlers.contains("press")) && !heading.isDescendant(of: node)
         }
-        func take(_ child: NodeView, _ pieces: [Glyph]) {
+        func take(_ child: NodeView, _ line: (glyphs: [Glyph], drawn: [NodeView])) {
+            let pieces = line.glyphs
             glyphs = pieces
-            placed.append(child)
+            // The line, unless an opted-out node in it stays in the page: then
+            // what the title draws of it, which the bar hides, and not the rest.
+            if kept.contains(where: { inside($0, child) }) { placed += line.drawn } else { placed.append(child) }
             subtitle = pieces.compactMap { $0.symbol == nil ? $0.text : nil }.joined(separator: "  ")
             // What it says, as the author named it, else its texts.
             spoken = child.authoredLabel ?? subtitle
@@ -242,7 +248,9 @@ extension HeaderShape {
             if let box = view as? NodeView, box.props["popover"] != nil || box.props["semanticTag"] == "dialog" { return true }
             at = view.superview
         }
-        return (placed + hosted).contains { node === $0 || node.isDescendant(of: $0) || $0.isDescendant(of: node) }
+        // A hosted element the bar lifted is still in its box in the authored tree.
+        return placed.contains { node === $0 || node.isDescendant(of: $0) || $0.isDescendant(of: node) }
+            || hosted.contains { node.isDescendant(of: $0) || Self.inside($0, node) }
     }
 }
 

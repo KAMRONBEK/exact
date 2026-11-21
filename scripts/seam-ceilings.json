@@ -19,7 +19,7 @@
   },
   "counts": {
     "nodeViewCasts": {
-      "ceiling": 608,
+      "ceiling": 606,
       "sites": [
         "host/apple/Sources/ExactAnimations/CssAnimationPlay.swift: (layer.delegate as? NodeView",
         "host/apple/Sources/ExactCollections/Collection.swift: current as? NodeView",
@@ -95,7 +95,6 @@
         "host/apple/Sources/ExactHeavyLeaves/HeavyLeavesIOS.swift: current as? NodeView",
         "host/apple/Sources/ExactHeavyLeaves/HeavyLeavesMac.swift: current as? NodeView",
         "host/apple/Sources/ExactKit/Accessibility.swift: ?? (view as? NodeView",
-        "host/apple/Sources/ExactKit/Accessibility.swift: ($0 as? NodeView",
         "host/apple/Sources/ExactKit/Accessibility.swift: ($0 as? NodeView",
         "host/apple/Sources/ExactKit/Accessibility.swift: ($0 as? NodeView",
         "host/apple/Sources/ExactKit/Accessibility.swift: (at as? NodeView",
@@ -573,7 +572,6 @@
         "host/apple/Sources/ExactNativeViews/ScopeHatches.swift: $0 as? NodeView",
         "host/apple/Sources/ExactNavigation/IOS/BarFaceIOS.swift: ($0 as? NodeView",
         "host/apple/Sources/ExactNavigation/IOS/BarFaceIOS.swift: ($0 as? NodeView",
-        "host/apple/Sources/ExactNavigation/IOS/BarHostedIOS.swift: ($0 as? NodeView",
         "host/apple/Sources/ExactNavigation/IOS/HeaderShapeIOS.swift: $0 as? NodeView",
         "host/apple/Sources/ExactNavigation/IOS/ModalIOS.swift: $0 as? NodeView",
         "host/apple/Sources/ExactNavigation/IOS/ModalIOS.swift: context.sourceView as? NodeView",

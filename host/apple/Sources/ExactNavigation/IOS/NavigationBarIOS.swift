@@ -403,6 +403,11 @@ final class BarPress: NSObject {
                 return
             }
         }
+        // A link with no press of its own follows its `href`, as a tap does.
+        if node.defaultLink != nil {
+            if !node.disabled { host.presenter.press(id) }
+            return
+        }
         _ = host.presenter.hatchAct(id, 0)
     }
 }
@@ -500,9 +505,10 @@ extension NavigationHost {
             case nil: return ["error": "unsupported: bar item #\(id) opens its menu as UIKit's pull-down from the bar, which only a real touch opens: under --touch platform `tap` opens it and `tap <row>` picks a row (LLP 1021 D4)"]
             }
         }
-        // A button with no press of its own that shows a dialog modally: its command, as `BarPress` runs it.
+        // A button with no press of its own that shows a dialog modally, or
+        // a link that follows its `href`: as `BarPress` runs it.
         let showsModal = presenter.invocation(of: node)?.action == .showModal
-        guard node.handlers.contains("press") || showsModal, !node.disabled else { return ["error": "bar item #\(id) is disabled or presses nothing"] }
+        guard node.handlers.contains("press") || showsModal || node.defaultLink != nil, !node.disabled else { return ["error": "bar item #\(id) is disabled or presses nothing"] }
         presenter.press(node.id)
         return ["tapped": id, "pressed": id, "delivery": "host-activation", "native": "bar-button-item"]
     }
