@@ -1006,3 +1006,66 @@ component App
         assert_eq!(batch["motion"], !played, "{clip}");
     }
 }
+
+#[test]
+fn views_told_their_appearance_together_build_each_scene_once() {
+    let app = r##"component App
+  view
+    column testId="page"
+      row testId="bar"
+        svg testId="a" width=100 height=100 color="#000000"
+          rect width=20 height=10 filter="drop-shadow(8px 8px 0px light-dark(#00aa00, #ff00ff))"
+      svg testId="b" width=100 height=100 color="#000000"
+        rect width=20 height=10 filter="drop-shadow(8px 8px 0px light-dark(#0000aa, #ffff00))"
+"##;
+    let boot = || {
+        let (mut host, _) = Host::boot(
+            &contract::compile(app).unwrap().encode(),
+            NoData,
+            Box::new(MonospaceMeasurer::default()),
+            200.0,
+            300.0,
+        )
+        .unwrap();
+        host.set_scheme(false);
+        let kernel = host.runner.kernel();
+        let views = ["page", "bar", "a", "b"].map(|name| {
+            kernel
+                .node_by_key(kernel.find_by_test_id(name)[0])
+                .unwrap()
+                .id
+        });
+        (host, views)
+    };
+    let scenes = |batch: &str, into: &mut std::collections::BTreeMap<u64, serde_json::Value>| {
+        let batch: serde_json::Value = serde_json::from_str(batch).unwrap();
+        for op in batch["ops"].as_array().unwrap() {
+            if op["op"] == "svg" {
+                into.insert(op["id"].as_u64().unwrap(), op["scene"].clone());
+            }
+        }
+    };
+    // One host at a time: a session's colour roles are its thread's.
+    let mut each = std::collections::BTreeMap::new();
+    {
+        let (mut apart, views) = boot();
+        let builds = apart.svg.scene_builds;
+        for view in views {
+            scenes(&apart.set_view_scheme(view, true), &mut each);
+        }
+        assert_eq!(
+            apart.svg.scene_builds - builds,
+            8,
+            "told apart, every scene for every view"
+        );
+    }
+    let (mut together, views) = boot();
+    let builds = together.svg.scene_builds;
+    let mut told = std::collections::BTreeMap::new();
+    for view in views {
+        scenes(&together.set_view_scheme(view, true), &mut told);
+    }
+    assert_eq!(together.svg.scene_builds - builds, 2, "each scene once");
+    assert_eq!(told.len(), 2, "both scenes changed: {told:?}");
+    assert_eq!(told, each);
+}
