@@ -456,8 +456,9 @@ final class SplitIOSTests: XCTestCase {
         until("the column is in") { split.controller.transitionCoordinator == nil && !agent.nativeInFlight() }
         XCTAssertNil(agent.tap(["id": Int(try node(session, "info-close").id)])["error"])
         until("the info's route is gone") { !session.presenter.views.values.contains { $0.props["testId"] == "info-page" } }
+        // UIKit opens the close's animation as it lays the columns out (`SplitIOS.moveAlong`)
+        until("the detail's content moves back inside the column's animation") { Self.longest(notes.layer) != nil }
         XCTAssertTrue(route.view.window != nil && !route.view.subviews.isEmpty, "the column goes with the route's last pixels")
-        XCTAssertNotNil(Self.longest(notes.layer), "the detail's content moves back inside the column's animation")
         until("closed") { split.controller.transitionCoordinator == nil && !agent.nativeInFlight() }
         XCTAssertEqual(notes.frame.width, wide.width, accuracy: 0.5)
     }
