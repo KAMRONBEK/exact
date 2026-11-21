@@ -1105,7 +1105,9 @@ impl Game for BuildInputs {
       const servePath = ${JSON.stringify(resolve(import.meta.dir, '../host/web/serve.mjs'))};
       const serve = await import(servePath), cards = serve.publicFileCards;
       mock.module(servePath, () => ({ ...serve, publicFileCards(stage) {
-        if (${game && edit}) writeFileSync(${JSON.stringify(resolve(dir, 'assets/authored.txt'))}, 'authored after');
+        // An authored input the prune removes while the build runs, where the others are edited
+        if (${game && edit && operation !== 'prune'}) writeFileSync(${JSON.stringify(resolve(dir, 'assets/authored.txt'))}, 'authored after');
+        if (${operation === 'prune'}) rmSync(${JSON.stringify(resolve(dir, 'assets/authored.txt'))});
         if (${operation === 'update'}) writeFileSync(${JSON.stringify(resolve(dir, 'assets', asset))}, 'edited during packaging');
         return cards(stage);
       } }));
@@ -1170,10 +1172,12 @@ impl Game for BuildInputs {
     const finished = new Date(Date.now() + 10_000);
     utimesSync(markerPath, finished, finished);
     const shown = game ? source : relative(resolve(import.meta.dir, '..'), source);
+    // A removed input is listed after the edited ones
     const changed = !edit ? [] : game ? [
-      source, resolve(dir, 'assets/authored.txt'), resolve(dir, 'assets/config.level.json'),
+      source, ...(operation === 'prune' ? [] : [resolve(dir, 'assets/authored.txt')]), resolve(dir, 'assets/config.level.json'),
       ...(['update', 'release'].includes(operation) ? [resolve(dir, 'assets', asset)] : []),
       ...(level ? [resolve(dir, asset)] : []),
+      ...(operation === 'prune' ? [resolve(dir, 'assets/authored.txt')] : []),
     ] : [shown];
     assert.deepEqual(webChanges(dist, app).app, changed);
     if (edit) assert.throws(() => refuseStale('web', markerPath, webChanges(dist, app).all, 'bun host/web/build.mjs --wasm'), /web build is stale/);
@@ -1182,6 +1186,8 @@ impl Game for BuildInputs {
     if (game) assert.equal(marker.inputs[resolve(dir, 'assets/config.level.json')], createHash('sha1').update('{"seed":1}').digest('hex'));
     if (level) assert.equal(marker.inputs[resolve(dir, asset)], createHash('sha1').update(baked).digest('hex'));
     if (operation === 'prune') assert.equal(marker.inputs[resolve(dir, 'assets', asset)], null);
+    // Removed while the build ran, it keeps what the build read at the start, which the check above sees changed
+    if (operation === 'prune') assert.equal(marker.inputs[resolve(dir, 'assets/authored.txt')], createHash('sha1').update('authored before').digest('hex'));
     if (operation === 'release') assert.equal(marker.inputs[resolve(dir, 'assets', asset)], createHash('sha1').update('{"seed":1}').digest('hex'));
     assert.ok(marker.inputsAt <= JSON.parse(readFileSync(resolve(dist, 'bake.json'), 'utf8')).started);
     writeFileSync(source, before);
