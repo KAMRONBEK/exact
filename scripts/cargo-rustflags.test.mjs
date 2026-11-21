@@ -33,14 +33,41 @@ test('added target rustflags join a configured string or array', () => {
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+// A link's real path, which rustRemapFlags remaps beside the given spelling, may hold a space a configured string
+// cannot carry: that alias is left out of a string, kept in an array, and a spaced remap nothing covers is refused.
+test('a string of rustflags leaves out a spaced remap another spelling of its directory covers', () => {
+  const dir = mkdtempSync(resolve(tmpdir(), 'exact-rustflags-alias-'));
+  try {
+    const env = { CARGO_HOME: resolve(dir, 'home') }, cwd = resolve(dir, 'app'), real = resolve(dir, 'Build Cache/capture'), link = resolve(dir, 'capture');
+    mkdirSync(resolve(cwd, '.cargo'), { recursive: true });
+    mkdirSync(real, { recursive: true });
+    symlinkSync(real, link);
+    const flags = [`--remap-path-prefix=${realpathSync.native(link)}=source`, `--remap-path-prefix=${link}=source`];
+    writeFileSync(resolve(cwd, '.cargo/config.toml'), '[target.wasm32-unknown-unknown]\nrustflags = "--cfg a"\n');
+    assert.deepEqual(targetRustflags('wasm32-unknown-unknown', flags, { cwd, env }),
+      ['--config', `target.wasm32-unknown-unknown.rustflags="--cfg a --remap-path-prefix=${link}=source"`]);
+    assert.throws(() => targetRustflags('wasm32-unknown-unknown', [flags[0]], { cwd, env }), /rustflags is a string/);
+    // A given spelling with a space is never left out, even beside its real path's remap.
+    const spacedLink = resolve(dir, 'a link');
+    symlinkSync(resolve(dir, 'plain'), spacedLink);
+    mkdirSync(resolve(dir, 'plain'));
+    assert.throws(() => targetRustflags('wasm32-unknown-unknown', [`--remap-path-prefix=${realpathSync.native(spacedLink)}=source`, `--remap-path-prefix=${spacedLink}=source`], { cwd, env }), /rustflags is a string/);
+    writeFileSync(resolve(cwd, '.cargo/config.toml'), '[target.wasm32-unknown-unknown]\nrustflags = ["--cfg", "a"]\n');
+    assert.deepEqual(targetRustflags('wasm32-unknown-unknown', flags, { cwd, env }), ['--config', `target.wasm32-unknown-unknown.rustflags=${JSON.stringify(flags)}`]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 // A web build's wasm remap is such a flag: an app configuring its wasm rustflags as a string failed in Cargo's merge.
 test('a wasm build takes its remap over the app\'s configured wasm rustflags, a string or an array', () => {
+  // As the temporary directory is named, which on macOS is a link (/var -> /private/var) Cargo reads through
   const dir = mkdtempSync(resolve(tmpdir(), 'exact-wasm-config-'));
   const workspace = resolve(dir, 'app'), previousRoot = process.env.EXACT_SOURCE_ROOT;
   try {
     process.env.EXACT_SOURCE_ROOT = dir;
     mkdirSync(resolve(workspace, 'src'), { recursive: true });
     mkdirSync(resolve(workspace, '.cargo'), { recursive: true });
+    // exact2's toolchain, which a generated workspace carries (app-shells.mjs), not the machine's rustup default
+    writeFileSync(resolve(workspace, 'rust-toolchain.toml'), readFileSync(new URL('../rust-toolchain.toml', import.meta.url), 'utf8'));
     mkdirSync(resolve(dir, 'shared/src'), { recursive: true });
     writeFileSync(resolve(dir, 'shared/Cargo.toml'), '[workspace]\n[package]\nname="shared"\nversion="0.1.0"\nedition="2021"\n');
     writeFileSync(resolve(dir, 'shared/src/lib.rs'), 'pub fn path() -> &\'static str { file!() }\n');

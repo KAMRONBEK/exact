@@ -405,6 +405,11 @@ export function targetRustflags(target, flags, { cwd = process.cwd(), env = proc
   const configured = cargoConfigurations(cwd, env, `pass ${target}'s rustflags`).findLast(({ configuration }) => configuration.target?.[target]?.rustflags !== undefined);
   const value = configured?.configuration.target[target].rustflags;
   if (typeof value !== 'string') return ['--config', `target.${target}.rustflags=${JSON.stringify(flags)}`];
+  // A string cannot carry a remap whose prefix has a space: one whose prefix is the real path of another flag's,
+  // remapped alike (the alias rustRemapFlags adds for a link), is left out, and a given spelling never is
+  const remap = (flag) => /^--remap-path-prefix=(.*)=([^=]*)$/.exec(flag), real = (path) => { try { return realpathSync.native(path); } catch { return path; } };
+  const covered = (flag) => flags.some(other => other !== flag && !/\s/.test(other) && remap(other)?.[2] === remap(flag)[2] && real(remap(other)[1]) === remap(flag)[1]);
+  flags = flags.filter(flag => !(/\s/.test(flag) && remap(flag) && covered(flag)));
   const spaced = flags.find(flag => /\s/.test(flag));
   if (spaced) throw new Error(`${configured.path}: [target.${target}] rustflags is a string, which Cargo splits at whitespace, so the build cannot add ${spaced} to it; write it as an array, rustflags = ${JSON.stringify(value.trim().split(/\s+/).filter(Boolean))}`);
   return ['--config', `target.${target}.rustflags=${JSON.stringify([value.trim(), ...flags].filter(Boolean).join(' '))}`];
