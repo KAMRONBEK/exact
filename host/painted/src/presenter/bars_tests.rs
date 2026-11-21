@@ -380,6 +380,16 @@ fn a_link_item_follows_its_href() {
     assert_eq!(top(&mut p).title, "History");
 }
 
+/// An inert link is no enabled item and follows nothing.
+#[test]
+fn an_inert_link_item_is_dimmed_and_follows_nothing() {
+    let source = LINKED.replace("testId=\"history\"", "testId=\"history\" inert=true");
+    let (mut p, _) = barred(&source);
+    assert!(!top(&mut p).trailing[0].enabled, "inert: no enabled item");
+    touch(&mut p, TOP, Some("history"));
+    assert_eq!(top(&mut p).title, "Inbox");
+}
+
 #[test]
 fn a_pushed_route_has_the_up_arrow_which_goes_back() {
     let (mut p, _) = barred(APP);

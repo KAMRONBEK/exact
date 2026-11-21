@@ -569,6 +569,28 @@ fn an_element_the_bar_has_no_object_for_is_a_hosted_item() {
 
 type Props = &'static [(PropId, &'static str)];
 
+/// A heading's level is its own three bits: an `href` on the heading
+/// (`fact::HREF`, above them) leaves a level-1 heading level 1.
+#[test]
+fn a_heading_with_an_href_keeps_its_level() {
+    const LINKED_HEADING: Props = &[
+        (PropId::AccessibilityRole, "heading"),
+        (PropId::AccessibilityHeadingLevel, "1"),
+        (PropId::Href, "/history"),
+    ];
+    let tree = kernel(view(
+        10,
+        vec![Node(
+            11,
+            NodeType::View,
+            HEADER,
+            vec![text(12, LINKED_HEADING)],
+        )],
+    ));
+    let shape = tree.header_shape(10, None, true, &pressed).unwrap();
+    assert_eq!((shape.heading, shape.level), (Some(12), 1));
+}
+
 /// Whether a header button with no `press` is an item is whether what it
 /// invokes, as HTML resolves it (`exact_kernel::Invocation`), opens what it
 /// names: a popover, or a dialog shown modally (#387: an alert's button that

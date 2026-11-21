@@ -444,7 +444,7 @@ pub fn header_shape<T: Tree>(
     };
     walk.walk(tree, header, back_is_platforms, false);
     let (heading, level) = match walk.headings[..] {
-        [heading] => match tree.facts(heading) >> fact::LEVEL {
+        [heading] => match (tree.facts(heading) >> fact::LEVEL) & 0b111 {
             level @ 1..=6 => (Some(heading), level),
             _ => (Some(heading), 2),
         },

@@ -85,7 +85,7 @@ struct HeaderShape: Equatable {
         init(_ button: NodeView, hosted: Bool = false) {
             var symbol: String?, text = "", ink: (NodeView, String)?
             func walk(_ node: NodeView) {
-                for case let child as NodeView in node.container.subviews {
+                for child in Self.shown(node) {
                     if child.kind == "image", let name = child.faceSymbol {
                         if symbol == nil { symbol = name; ink = (child, "text_color") }
                     } else if child.isParagraph, text.isEmpty { text = child.accessibleText; ink = ink ?? (child, "text_color") }
@@ -172,28 +172,31 @@ struct HeaderShape: Equatable {
         static func shown(_ node: NodeView) -> [NodeView] {
             NodeView.committed(node.container.subviews).filter { $0.style["display"]?.string != "none" }
         }
-        /// Whether the bar can draw `button`'s face whole as UIKit's item: a
-        /// native button's; a box or a bare button of texts, symbols and boxes
-        /// of them, which a title, an image or a painted face draws; or a
-        /// badge of one text, one symbol or one picture, which is all a badge
-        /// draws. A spinner or a control anywhere in it, a picture outside a
-        /// badge, or an element that is itself a control, a text or a picture
-        /// (a switch that hears `press`), it cannot, and such an item is hosted
-        /// (D1).
+        /// Whether the bar can draw `button`'s face whole as UIKit's item, as
+        /// each face draws it, shown parts only: a native button's; a badge of
+        /// one text, one symbol or one picture, which is all a badge draws; a
+        /// painted face, which draws every text, symbol and dot; else UIKit's
+        /// own item, one title and one image. An item holding anything else (a
+        /// spinner or a control anywhere in it, a picture outside a badge, a
+        /// second text UIKit's title would drop), or that is itself a control,
+        /// a text or a picture (a switch that hears `press`), is hosted (D1).
         static func drawsFace(_ button: NodeView) -> Bool {
             if button.isNativeButton { return true }
             guard button.kind == "view" || button.kind == "button" else { return false }
-            func leaves(_ node: NodeView, pictures: Bool) -> Int? {
-                var count = 0
+            var texts = 0, symbols = 0, pictures = 0
+            func count(_ node: NodeView) -> Bool {
                 for child in shown(node) {
-                    if child.isParagraph || (child.kind == "image" && (child.faceSymbol != nil || pictures && child.imageSource != nil)) { count += 1 }
-                    else if child.kind == "view", let inner = leaves(child, pictures: pictures) { count += inner }
-                    else { return nil }
+                    if child.isParagraph { texts += 1 }
+                    else if child.kind == "image", child.faceSymbol != nil { symbols += 1 }
+                    else if child.kind == "image", child.imageSource != nil { pictures += 1 }
+                    else if child.kind == "view" { if !count(child) { return false } }
+                    else { return false }
                 }
-                return count
+                return true
             }
-            if BadgeFace(button) != nil { return leaves(button, pictures: true) == 1 }
-            return leaves(button, pictures: false) != nil
+            guard count(button) else { return false }
+            if BadgeFace(button) != nil { return texts + symbols + pictures == 1 }
+            return pictures == 0 && (ChipFace(button) != nil || texts <= 1 && symbols <= 1)
         }
         /// Whether `node` shows words: a paragraph in it, shown, says something.
         static func shows(words node: NodeView) -> Bool {

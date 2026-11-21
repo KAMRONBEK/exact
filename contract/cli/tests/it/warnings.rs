@@ -56,6 +56,13 @@ fn a_header_node_the_ios_bar_still_hides_is_named_with_its_repair() {
         )),
         [(UNPLACED.to_string(), 14)]
     );
+    // Nor does a link with an empty `href`, which follows nothing.
+    assert_eq!(
+        warned(&route(
+            "  text \"List\" role=\"heading\" aria-level=1\n  link href=\"\" aria-label=\"Nowhere\"\n    text \"Nowhere\""
+        )),
+        [(UNPLACED.to_string(), 13)]
+    );
     // A second search field has no place either.
     assert_eq!(
         warned(&route(

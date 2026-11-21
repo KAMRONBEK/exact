@@ -67,7 +67,9 @@ fn part(node: Visit<'_>) -> Part {
         || (has(attrs, "popovertarget") && literal(attrs, "popovertargetaction") != Some("hide"))
         || (has(attrs, "commandfor")
             && (computed(attrs, "command") || literal(attrs, "command").is_some_and(opens)));
-    if has(attrs, "press") || (tag == "button" && item) || tag == "link" {
+    // A link follows its `href`, unless it has none or an empty one (`fact::HREF`).
+    let follows = has(attrs, "href") && literal(attrs, "href") != Some("");
+    if has(attrs, "press") || (tag == "button" && item) || (tag == "link" && follows) {
         return Part::Pressable;
     }
     if role == Some("status") && tag != "header" {
@@ -99,7 +101,7 @@ fn holds_placed(node: Visit<'_>) -> bool {
                     | Part::Tablist
                     | Part::Pressable
                     | Part::Status
-            ) || matches!(k.element(), Some(("button", _, _)))
+            ) || matches!(k.element(), Some(("button" | "link", _, _)))
         })
 }
 
@@ -382,6 +384,9 @@ impl<'a> Bar<'a> {
                 Some(("button", _, _)) => bar
                     .unplaced
                     .push((span, "a `button` that presses nothing".into())),
+                Some(("link", _, _)) => bar
+                    .unplaced
+                    .push((span, "a `link` with no `href` that presses nothing".into())),
                 Some((tag, _, _)) => hide(format!("this `{tag}`")),
                 _ => hide("this node".into()),
             },

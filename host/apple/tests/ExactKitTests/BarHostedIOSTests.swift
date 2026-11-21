@@ -276,6 +276,19 @@ final class BarHostedIOSTests: XCTestCase {
         let shape = try bar(p)
         XCTAssertEqual(shape.trailing.map(\.id), [4, 5], "no link that follows nothing")
         XCTAssertEqual(shape.trailing.map(\.hosted), [true, true])
+        // A pressed row of two texts, of which UIKit's title keeps one, is
+        // hosted; a badge whose symbol is hidden as authored draws its text.
+        let more = route([["op": "create", "id": 4, "kind": "view", "handlers": ["press"]], text(5, "Retry"), text(6, "later"),
+                          ["op": "create", "id": 7, "kind": "button", "handlers": ["press"], "props": ["accessibilityLabel": "Me"]],
+                          ["op": "create", "id": 8, "kind": "view", "style": fill],
+                          ["op": "create", "id": 9, "kind": "image", "props": ["imageSource": "symbol:sf/person", "symbolName": "person"], "style": ["display": "none"]],
+                          text(10, "AB")],
+                         kids: [4, 7], more: [["op": "children", "id": 4, "ids": [5, 6]], ["op": "children", "id": 7, "ids": [8]],
+                                              ["op": "children", "id": 8, "ids": [9, 10]]])
+        let drawn = try bar(more)
+        XCTAssertEqual(drawn.trailing.map(\.hosted), [true, false])
+        XCTAssertEqual(drawn.trailing.last?.badge?.text, "AB")
+        XCTAssertNil(drawn.trailing.last?.badge?.symbol, "the hidden symbol is not drawn")
     }
 
     /// A title wrapper that opts out after the bar lifted its readout keeps
@@ -381,6 +394,8 @@ final class BarHostedIOSTests: XCTestCase {
         for (got, want) in zip(try share(), [255.0, 0, 0, 51]) { XCTAssertEqual(got, want, accuracy: 2, "a fifth of the red tint, undimmed, while dimmed") }
     }
 
+    private func spin(_ seconds: Double) { RunLoop.main.run(until: Date().addingTimeInterval(seconds)) }
+
     private func until(_ what: String, _ seconds: Double = 5, _ done: () -> Bool) {
         let deadline = Date().addingTimeInterval(seconds)
         while !done(), Date() < deadline { RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02)) }
@@ -431,7 +446,7 @@ final class BarHostedIOSTests: XCTestCase {
         until("the switch flipped: on \(control.isOn), says \((try? node("live"))?.accessibleText ?? "")") { (try? node("live"))?.accessibleText == "on" }
         until("its entry follows") { (row.menuRepresentation as? UIAction)?.state == .on }
         // A readout's buttons, a submenu by its name: its command, and not
-        // the button in its closed dialog.
+        // the button in its closed dialog or the one `visibility` hides.
         let readout = try XCTUnwrap(offline.menuRepresentation as? UIMenu, "the readout's buttons")
         XCTAssertEqual(readout.title, "Offline, retried 0")
         XCTAssertEqual(readout.children.compactMap { ($0 as? UIAction)?.title }, ["Retry", "Details"])
@@ -448,6 +463,22 @@ final class BarHostedIOSTests: XCTestCase {
         alert.performWithSender(nil, target: nil)
         until("the alerts switch flipped and pressed") { (try? node("alerts"))?.accessibleText == "on" && (try? node("noted"))?.accessibleText == "1" }
         until("its entry follows") { (alerts.menuRepresentation as? UIAction)?.state == .on }
+        // The readout's command opens the dialog written in it, as a tap on it
+        // in the page does.
+        let commands = try XCTUnwrap(offline.menuRepresentation as? UIMenu)
+        try XCTUnwrap(commands.children.compactMap { $0 as? UIAction }.first { $0.title == "Details" }).performWithSender(nil, target: nil)
+        let details = try node("details")
+        until("Details opens its dialog") { p.menus.isOpen(details) }
+        p.press(try node("close-details").id)
+        until("and it closes") { !p.menus.isOpen(details) && !p.menus.inTransition }
+        // An entry chosen after its readout is hidden does nothing.
+        let stale = try XCTUnwrap((offline.menuRepresentation as? UIMenu)?.children.first as? UIAction)
+        XCTAssertEqual(stale.title, "Retry")
+        p.press(try node("hush").id)
+        until("the readout is hidden") { (try? node("offline"))?.style["display"]?.string == "none" }
+        stale.performWithSender(nil, target: nil)
+        spin(0.3)
+        XCTAssertEqual(try node("retried").accessibleText, "1", "no press from an entry the bar no longer offers")
         let link = try node("history-link")
         XCTAssertNil(try item("history-link", on: home).customView, "UIKit's own item")
         let reply = p.navigationHost.activateChrome(link)

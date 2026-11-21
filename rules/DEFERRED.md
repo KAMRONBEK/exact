@@ -436,10 +436,12 @@ host platforms"):** on iOS, a header element the bar has no object of its own
 for is a bar item holding the element's own views, drawn as written and live
 (LLP 1141.004): a spinner beside its words, a picture, two lines of text, a
 switch. The readout's redrawn face (`ReadoutView`, `ChipFace`'s readout mode)
-goes. Lexy's "Updating" spinner in its bar is the consumer. Take: none
-offered; waived by that instruction. Still out: such an item on the Mac,
-Android and tvOS; a subtree that holds a button as one item, but for a
-readout; the heading's own box drawn as written.
+goes. Lexy's "Updating" spinner in its bar is the consumer. Take: pending,
+a take from the doing-list or Charlie's waiver in his words ("Moving
+something off this list"). Still out: such an item on the Mac, Android and
+tvOS; a passive box that holds a button as one item (a readout, or an element
+that hears `press` and whose face UIKit cannot draw, is one); the heading's
+own box drawn as written.
 **Expanded (Charlie, 2026-10-03: "A native grouped-list role mapped to
 UICollectionView list layout"):** `list appearance="auto"` is a grouped list
 (LLP 1084): sections with a header and footer, rows read by shape, UIKit's

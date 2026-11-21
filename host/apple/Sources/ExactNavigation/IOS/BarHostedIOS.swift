@@ -143,10 +143,12 @@ final class BarHosted: LiftedNodes {
     /// switch or presses (a `press`, a link's `href`, or a command it
     /// invokes); else each switch and button in it, in order. What the page
     /// does not show is passed over: a closed dialog or popover in it, which
-    /// the top layer shows when open, and an inert subtree. A field or a
-    /// slider has no entry: a menu cannot hold one.
+    /// the top layer shows when open, an inert subtree, and a node whose
+    /// computed `visibility` hides it (a child that computes `visible` still
+    /// shows). A field or a slider has no entry: a menu cannot hold one.
     private func entries(_ node: NodeView) -> [Entry] {
         func entry(_ n: NodeView) -> Entry? {
+            guard !n.cssVisibilityHidden else { return nil }
             let disabled = n.disabled || n.inert
             if let s = presenter.controls.controls[n.id] as? UISwitch { return Entry(node: n, name: n.accessibleName, on: s.isOn, disabled: disabled || !s.isEnabled) }
             if n.handlers.contains("press") || n.defaultLink != nil || presenter.invocation(of: n) != nil { return Entry(node: n, name: n.accessibleName, on: nil, disabled: disabled) }
@@ -179,7 +181,9 @@ final class BarHosted: LiftedNodes {
         hosted[id]?.menu = source
         let actions = entries.map { e in
             UIAction(title: e.name.isEmpty ? name : e.name, attributes: e.disabled ? .disabled : [], state: e.on == true ? .on : .off) { [weak self, weak presenter, weak root = node, weak node = e.node] _ in
+                // Still the bar's item, shown, and still offering this entry.
                 guard let self, let presenter, let root, let node, presenter.views[node.id] === node,
+                      self.hosted[root.id]?.view.node === root, root.style["display"]?.string != "none",
                       self.entries(root).contains(where: { $0.node === node && !$0.disabled }) else { return }
                 if let s = presenter.controls.controls[node.id] as? UISwitch {
                     // As a tap flips it: the switch's own change.

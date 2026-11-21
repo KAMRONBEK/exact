@@ -279,7 +279,8 @@ impl<D: DataSource> Presenter<D> {
             title: row.title,
             direction: row.direction,
             symbol: row.symbol,
-            enabled: row.enabled,
+            // An inert button is no enabled item, as an inert tab is none.
+            enabled: row.enabled && !self.host.authored_visibility(id).1,
             destructive: row.destructive,
             tint,
         })
@@ -630,15 +631,21 @@ impl<D: DataSource> Presenter<D> {
                 self.system_back(now_ms);
             }
             What::Item(node) => {
-                // A link follows its `href` after its press, as a tap on it
-                // in the page does (LLP 1038 §7, LLP 1141.004 D1).
+                // A link follows its `href` after its press, and at once where
+                // nothing hears the press, as a tap on it in the page does
+                // (LLP 1038 §7, LLP 1141.004 D1); an inert one follows nothing.
                 let kernel = self.host.kernel();
-                let href = kernel
-                    .node(node)
-                    .and_then(|n| n.props.link().map(str::to_owned));
-                self.activate(node, now_ms);
-                if let Some(href) = href {
-                    self.follow(node, &href, now_ms);
+                let href = (kernel.node(node))
+                    .and_then(|n| n.props.link().map(str::to_owned))
+                    .filter(|_| !self.host.authored_visibility(node).1);
+                let presses = (self.host.runner().handlers_of(node)).contains(&EventKind::Press);
+                match href {
+                    Some(href) if !presses => self.follow(node, &href, now_ms),
+                    Some(href) => {
+                        self.activate(node, now_ms);
+                        self.follow(node, &href, now_ms);
+                    }
+                    None => self.activate(node, now_ms),
                 }
             }
             What::Tab(node) => {
