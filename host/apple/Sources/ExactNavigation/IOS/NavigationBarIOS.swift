@@ -433,8 +433,13 @@ extension NavigationHost {
     /// authored source changed, then run the route hatch — before UIKit lays
     /// the stack out (LLP 1075.003 §3.2, §3.5 "projected defaults"). A plain
     /// tab (PlainTabIOS) has no bar: its route's header is its content. A
-    /// split's detail counts as pushed from its first route (`firstPushed`).
+    /// split's detail counts as pushed from its first route; `firstPushed`
+    /// says the same of another stack (the list's results on top).
     func prepareRoutes(_ routes: [RouteController], in stack: UIViewController, firstPushed: Bool = false) {
+        // A split's detail counts as pushed, its first route included (LLP 1127 D7), whatever projects its stack again
+        // (an appearance change, a bar's picture arriving): projected as a root, its first route would lose its Back,
+        // and its bar where it has no header of its own
+        let firstPushed = firstPushed || split.map { stack === $0.detail } == true
         let nav = stack as? UINavigationController
         if let nav {
             hatchNavigation(nav)
@@ -452,7 +457,6 @@ extension NavigationHost {
             // the system Back alone on a pushed route with none of its own
             // (no header, a hidden one, one that is not a bar's), or no bar
             // where the route says so or has nothing to go back to.
-            // A split's detail counts as pushed, its first route included (LLP 1127 D7).
             c.pushed = index + front > 0 || firstPushed
             let transparent = RouteGeometry.transparentBar(c.node)
             let (shape, bar) = barShape(of: c, in: nav)

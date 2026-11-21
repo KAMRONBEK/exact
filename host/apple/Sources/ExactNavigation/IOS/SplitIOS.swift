@@ -448,7 +448,7 @@ extension NavigationHost {
         self.split = split
         primaryNavigation = list
         prepareRoutes(Array(first.prefix(1)), in: list)
-        prepareRoutes(Array(first.dropFirst()), in: detail, firstPushed: true)
+        prepareRoutes(Array(first.dropFirst()), in: detail)
         detail.setNavigationBarHidden(false, animated: false)
         split.show(first, animated: false)
         noteDetail(split, first)
@@ -470,7 +470,7 @@ extension NavigationHost {
         let stack = placingResults(stack, on: split.controller.isCollapsed ? split.list : nil, inPlace: !split.settledExpanded,
                                    collapsed: split.settledCollapsed)
         prepareRoutes(Array(stack.prefix(1)), in: split.list)
-        prepareRoutes(Array(stack.dropFirst()), in: split.detail, firstPushed: true)
+        prepareRoutes(Array(stack.dropFirst()), in: split.detail)
         if let results = resultsInPlace { prepareRoutes([results], in: split.list, firstPushed: true) }
         let shown = split.shown
         // A list over the detail stays as its search's results come or go: only another page shows the detail
