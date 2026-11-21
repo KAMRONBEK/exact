@@ -783,10 +783,11 @@ extension NavigationHost {
         presenter.afterBatch { [weak self] in self?.deliverCovers() }
     }
 
-    /// What the bar's projection covers `node` with: a lifted header the bar
-    /// replaces, laying out only the blocks of its hosted items inside it
-    /// (LLP 1141.004 D2), and a node the bar places, whole.
-    static func cover(of node: NodeView, in c: RouteController) -> HostCover { node === c.lifted ? .bar : .whole }
+    /// What the bar's projection covers `node` with: a header or a node the
+    /// bar replaces lays out only the blocks of the hosted items inside it
+    /// (LLP 1141.004 D2: a readout in a glyph line the title takes, under a
+    /// partial lift); the search scope's filter, whole.
+    static func cover(of node: NodeView, in c: RouteController) -> HostCover { node === c.scoped ? .whole : .bar }
 
     /// Write the defaults an authored header gives a navigation item, and
     /// lift the header out of the route's layout while the bar shows it. A

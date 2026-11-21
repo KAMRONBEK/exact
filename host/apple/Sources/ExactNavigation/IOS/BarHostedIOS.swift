@@ -32,7 +32,7 @@ final class HostedItemView: UIView {
     var inset: CGFloat = 0 {
         didSet { if inset != oldValue { resize() } }
     }
-    /// The element's laid-out size, with the margins before it, as last shown.
+    /// The element's laid-out size, its margins included, as last shown.
     private(set) var size = CGSize.zero
     private var relay: MountRelay?
 
@@ -50,7 +50,7 @@ final class HostedItemView: UIView {
     func refit() -> Bool {
         let hidden = node.inert || node.presenter.map { $0.logicalAncestry(of: node).contains { ($0 as? NodeView)?.props["accessibilityElementsHidden"] == "true" } } == true
         if accessibilityElementsHidden != hidden { accessibilityElementsHidden = hidden }
-        let laid = CGSize(width: max(0, node.frame.maxX), height: max(0, node.frame.maxY))
+        let laid = CGSize(width: max(0, node.frame.maxX + node.number("margin_right")), height: max(0, node.frame.maxY + node.number("margin_bottom")))
         guard laid != size else { return false }
         size = laid
         resize()
@@ -124,6 +124,19 @@ final class BarHosted: LiftedNodes {
         entry.item.accessibilityIdentifier = i.testId
         entry.view.inset = i.hostedInset
         if #available(iOS 26.0, *) { entry.item.hidesSharedBackground = !i.hostedGlass }
+        name(entry)
+    }
+
+    /// In UIKit's overflow menu a custom view shows nothing: the item is
+    /// there by its element's name, pressing what it presses, or dimmed. The
+    /// name follows the element.
+    private func name(_ entry: Hosted) {
+        let node = entry.view.node, name = node.accessibleName
+        let presses = node.handlers.contains("press") || node.defaultLink != nil
+        let shown = entry.item.menuRepresentation as? UIAction
+        guard shown?.title != name || shown?.attributes.contains(.disabled) == presses else { return }
+        entry.item.menuRepresentation = name.isEmpty ? nil
+            : UIAction(title: name, attributes: presses ? [] : .disabled) { [weak presenter = node.presenter, id = node.id] _ in presenter?.press(id) }
     }
 
     /// The room the bar gives a hosted item: a third of its width, so a
@@ -213,7 +226,10 @@ final class BarHosted: LiftedNodes {
 
     /// After a batch: each item follows its element's laid-out size.
     func place() {
-        for entry in hosted.values where entry.view.refit() { entry.route?.navigationController?.navigationBar.setNeedsLayout() }
+        for entry in hosted.values {
+            name(entry)
+            if entry.view.refit() { entry.route?.navigationController?.navigationBar.setNeedsLayout() }
+        }
     }
 
     func focusChildren(of view: UIView) -> [UIView] { view.subviews }

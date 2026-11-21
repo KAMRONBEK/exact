@@ -119,8 +119,9 @@ pub mod fact {
     /// as one); never the title's tap.
     pub const DISABLED: u32 = 1 << 12;
     /// A button, native or bare, pressed or not: an item when it presses,
-    /// opens or is disabled, and otherwise none, never hosted (LLP 1141.004
-    /// D1), so a button whose press comes and goes is an item or nothing.
+    /// opens, is a link or is disabled, and otherwise none, never hosted (LLP
+    /// 1141.004 D1), so a button whose press comes and goes is an item or
+    /// nothing.
     pub const BUTTON: u32 = 1 << 19;
     /// A site's `nav`, including one inside a menu.
     pub const NAV: u32 = 1 << 13;
@@ -377,6 +378,8 @@ impl<N: Copy + PartialEq> Walk<N> {
                 self.unplaced |= self.segments.is_some();
                 self.segments.get_or_insert(child);
             } else if facts & (fact::PRESS | fact::OPENS) != 0
+                // A link with nothing pressing it follows its `href` (LLP 1141.004 D1).
+                || (facts & fact::LINK != 0 && facts & fact::BUTTON != 0 && !holds_heading(tree, child))
                 // A disabled button around the heading is walked for it, as a box is.
                 || (facts & fact::DISABLED != 0 && !holds_heading(tree, child))
             {

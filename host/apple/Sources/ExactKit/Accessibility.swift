@@ -330,6 +330,9 @@ extension NodeView {
     }
     var accessibilityVisible: Bool {
         guard paragraphOwner.window != nil, !inert, accessibilityExposed else { return false }
+        // `aria-hidden` in the authored tree, which a node a navigation bar
+        // lifted out of its parent still has above it (LLP 1141.004 D3).
+        if presenter?.logicalAncestry(of: self).contains(where: { ($0 as? NodeView)?.props["accessibilityElementsHidden"] == "true" }) == true { return false }
         #if os(macOS)
         var ancestor: NSView? = paragraphOwner
         #else

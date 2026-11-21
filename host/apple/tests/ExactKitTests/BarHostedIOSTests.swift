@@ -150,6 +150,51 @@ final class BarHostedIOSTests: XCTestCase {
         XCTAssertEqual(try bar(p).trailing.map(\.id), [6, 7], "after the subtitle, the text hosted and the button an item")
     }
 
+    /// Native where UIKit can keep the action and the face (LLP 1141.004 D1):
+    /// a link with nothing pressing it is UIKit's item, which follows its
+    /// `href`, as is a pressed row of words; a pressed row holding a spinner,
+    /// whose face UIKit's item cannot draw, is hosted with its press, in the
+    /// glass. What the bar replaces is covered by a bar, so a readout lifted
+    /// out of it is laid out.
+    func testABarItemIsNativeWhereUIKitKeepsItsActionAndItsFace() throws {
+        let link: [String: Any] = ["op": "create", "id": 4, "kind": "button", "props": ["href": "/history", "accessibilityLabel": "History"]]
+        let words: [String: Any] = ["op": "create", "id": 5, "kind": "view", "handlers": ["press"]]
+        let spinner: [String: Any] = ["op": "create", "id": 7, "kind": "view", "handlers": ["press"]]
+        let p = route([link, text(9, "History"), words, text(6, "Sync"), spinner, progress(8)], kids: [4, 5, 7],
+                      more: [["op": "children", "id": 4, "ids": [9]], ["op": "children", "id": 5, "ids": [6]], ["op": "children", "id": 7, "ids": [8]]])
+        let shape = try bar(p)
+        XCTAssertEqual(shape.trailing.map(\.id), [4, 5, 7])
+        XCTAssertEqual(shape.trailing.map(\.hosted), [false, false, true])
+        XCTAssertEqual(shape.trailing.last?.hostedGlass, true, "it presses")
+        XCTAssertEqual(shape.hosted.map(\.id), [7])
+        XCTAssertFalse(shape.placed.contains { $0.id == 7 }, "hosted, not hidden with what the bar places")
+        let route = RouteController(try XCTUnwrap(p.views[1]))
+        XCTAssertEqual(NavigationHost.cover(of: try XCTUnwrap(p.views[5]), in: route), .bar)
+    }
+
+    /// The title's ownership is the title presented: with segments in the
+    /// title view, a glyph line after the heading is an item of its own. A
+    /// text its author keeps in the page (`appearance: none`) is not the
+    /// subtitle.
+    func testTheTitleOwnsWhatItPresents() throws {
+        let tab: (Int, String, Bool) -> [String: Any] = { id, words, on in
+            ["op": "create", "id": id, "kind": "button", "handlers": ["press"], "props": ["accessibilityRole": "tab", "accessibilityLabel": words, "accessibilitySelected": on ? "true" : "false"]]
+        }
+        let p = route([["op": "create", "id": 4, "kind": "view"],
+                       ["op": "create", "id": 5, "kind": "image", "props": ["imageSource": "symbol:sf/bell.slash", "symbolName": "bell.slash"]],
+                       text(6, "Muted"),
+                       ["op": "create", "id": 10, "kind": "view", "props": ["accessibilityRole": "tablist"]], tab(11, "All", true), text(13, "All"), tab(12, "Missed", false), text(14, "Missed")],
+                      kids: [4, 10], more: [["op": "children", "id": 4, "ids": [5, 6]], ["op": "children", "id": 10, "ids": [11, 12]],
+                                            ["op": "children", "id": 11, "ids": [13]], ["op": "children", "id": 12, "ids": [14]]])
+        let segmented = try bar(p)
+        XCTAssertNotNil(segmented.segments)
+        XCTAssertEqual(segmented.hosted.map(\.id), [4], "the glyph line, which the segments' title cannot show")
+        let kept = route([text(5, "3 left", style: ["appearance": "none", "written": ["appearance"]])], kids: [5])
+        let shape = try XCTUnwrap(HeaderShape(route: try XCTUnwrap(kept.views[1]), back: nil, projected: true))
+        XCTAssertEqual(shape.group?.subtitle ?? "", "", "kept in the page, not the bar's subtitle")
+        XCTAssertTrue(shape.hosted.isEmpty)
+    }
+
     /// The item holds the element's own view, lifted out of the header; the
     /// next projection finds the element at its place, and a bar that stops
     /// showing it puts it back there.

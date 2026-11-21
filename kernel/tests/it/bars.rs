@@ -487,6 +487,13 @@ fn an_element_the_bar_has_no_object_for_is_a_hosted_item() {
                 view(75, vec![Node(76, NodeType::Control, IDLE, vec![])]),
                 // A box of spacers shows nothing.
                 view(77, vec![view(78, vec![])]),
+                // A link with nothing pressing it follows its `href`: an item.
+                Node(
+                    79,
+                    NodeType::Pressable,
+                    &[(PropId::Href, "/history")],
+                    vec![],
+                ),
             ],
         )],
     ));
@@ -494,10 +501,10 @@ fn an_element_the_bar_has_no_object_for_is_a_hosted_item() {
     assert_eq!(shape.leading, vec![60], "the row whole");
     assert_eq!(
         shape.trailing,
-        vec![13, 71, 72],
+        vec![13, 71, 72, 79],
         "beside the button, as written"
     );
-    assert_eq!(shape.items, vec![13], "nothing presses a hosted item");
+    assert_eq!(shape.items, vec![13, 79], "nothing presses a hosted item");
     // The heading's wrapper: its picture and its second line are the title's.
     let wrapped = kernel(view(
         10,

@@ -54,6 +54,8 @@ package struct HeaderRule {
         if node.isHeading { facts |= 1 | UInt32(node.headingLevel ?? 0) << 16 }
         if node.kind == "input", node.props["type"] == "search" { facts |= 2 }
         if node.props["accessibilityRole"] == "tablist" { facts |= 4 }
+        // An `href` or `role="link"` (`fact::LINK`): a link the bar's item follows.
+        if node.props["href"] != nil || node.props["accessibilityRole"] == "link" { facts |= 1 << 14 }
         if node.props["accessibilityRole"] == "status" { facts |= 1024 }
         if node.props["popover"] != nil || node.props["semanticTag"] == "dialog" { facts |= 2048 }
         if node.handlers.contains("press") { facts |= 8 }

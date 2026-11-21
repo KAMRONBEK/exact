@@ -100,14 +100,13 @@ struct HeaderShape: Equatable {
             } else {
                 walk(button)
             }
-            var parent = button.superview
+            // Up the authored tree: a hosted element the bar lifted keeps its group.
+            let presenter = button.presenter
+            var parent = presenter?.logicalParent(of: button.id).flatMap { presenter?.views[$0] }
             var grouped: UInt32?
-            while let view = parent {
-                if let node = view as? NodeView {
-                    if node.props["semanticTag"] == "header" { break }
-                    if node.props["accessibilityRole"] == "group" { grouped = node.id; break }
-                }
-                parent = view.superview
+            while let node = parent, node.props["semanticTag"] != "header" {
+                if node.props["accessibilityRole"] == "group" { grouped = node.id; break }
+                parent = presenter?.logicalParent(of: node.id).flatMap { presenter?.views[$0] }
             }
             toolbarGroup = grouped
             id = button.id
@@ -118,8 +117,10 @@ struct HeaderShape: Equatable {
             // is its own.
             hostedGlass = hosted && Self.presses(button) && button.props["backgroundMaterial"] == nil
             // A bare custom view hugs its capsule, whose round ends then cut
-            // into its words, so words in the glass keep a title item's inset.
-            hostedInset = hostedGlass && Self.shows(words: button) && !button.wrote("padding_left") && !button.wrote("padding_right") ? Self.titleInset : 0
+            // into its words, so words in the glass (iOS 26's) keep a title item's inset.
+            var glassed = false
+            if #available(iOS 26.0, tvOS 26.0, *) { glassed = hostedGlass }
+            hostedInset = glassed && Self.shows(words: button) && !button.wrote("padding_left") && !button.wrote("padding_right") ? Self.titleInset : 0
             badge = button.isNativeButton || hosted ? nil : BadgeFace(button)
             chip = badge == nil && !hosted ? ChipFace(button) : nil
             let invocation = button.presenter?.invocation(of: button)
@@ -165,7 +166,21 @@ struct HeaderShape: Equatable {
         static func presses(_ node: NodeView) -> Bool {
             node.isButton || node.actsAsButton || node.handlers.contains("press") || node.kind == "input"
                 || (node.kind == "control" && node.props["type"] != "progress")
-                || node.props["href"] != nil || NodeView.committed(node.container.subviews).contains(where: presses)
+                || node.props["href"] != nil || shown(node).contains(where: presses)
+        }
+        /// `node`'s children that show (none `display: none`).
+        static func shown(_ node: NodeView) -> [NodeView] {
+            NodeView.committed(node.container.subviews).filter { $0.style["display"]?.string != "none" }
+        }
+        /// Whether the bar can draw `button`'s face whole as UIKit's item: a
+        /// native button's, a badge, or texts, symbols and boxes of them, which
+        /// a title, an image or a painted face draws. A spinner or a picture
+        /// outside a badge it cannot, and such a button is hosted (D1).
+        static func drawsFace(_ button: NodeView) -> Bool {
+            func whole(_ node: NodeView) -> Bool {
+                shown(node).allSatisfy { $0.isParagraph || ($0.kind == "image" && $0.faceSymbol != nil) || ($0.kind == "view" && whole($0)) }
+            }
+            return button.isNativeButton || BadgeFace(button) != nil || whole(button)
         }
         /// Whether `node` shows words: a paragraph in it says something.
         static func shows(words node: NodeView) -> Bool {
@@ -241,18 +256,22 @@ struct HeaderShape: Equatable {
         // The title decides first, with the buttons, readouts, search field
         // and tablist apart from it; it takes a hosted element whole or not
         // at all (D1), and the rest are the bar's hosted items.
+        // What the author keeps in the page is not the title's to read either.
         let candidates = rule.hosted.filter(projects)
-        let apart = rule.items + rule.readouts + [rule.search, rule.segments].compactMap { $0 }
+        let apart = rule.items + rule.readouts + [rule.search, rule.segments].compactMap { $0 } + authored
         let group = heading.flatMap { HeaderTitle(header: rule.header, heading: $0, tap: tap, apart: apart, atomic: candidates) }
         #if os(tvOS)
         // tvOS's bar has no item that focus passes by undimmed: none hosted.
         let hosted: [NodeView] = []
         #else
-        let titled = group?.placed ?? []
+        // What the title shows, as presented: segments take the title view
+        // from a drawn title, whose glyph line is then an item of its own.
+        let titled = HeaderShape.presented(group, segments: segments)?.placed ?? []
         // A readout is never the title's, even inside a glyph line it takes.
+        // A button whose face the bar cannot draw is hosted with its press.
         let hosted = candidates.filter { node in
             rule.readouts.contains { $0 === node } || !titled.contains { $0 === node || $0.isDescendant(of: node) || node.isDescendant(of: $0) }
-        }
+        } + rule.items.filter { projects($0) && !Item.drawsFace($0) }
         #endif
         self.hosted = hosted
         let item = { (node: NodeView) -> Item? in
@@ -268,7 +287,8 @@ struct HeaderShape: Equatable {
         // The title's pressable wrapper goes with the title it holds, unless
         // it holds an opted-out node, which stays where it is.
         let wrapper = titleProjects ? tap.flatMap { tap in authored.contains { $0.isDescendant(of: tap) } ? nil : tap } : nil
-        placed = ([rule.heading].compactMap { $0 } + rule.items + [search, tablist, wrapper].compactMap { $0 } + (HeaderShape.presented(group, segments: segments)?.placed ?? [])).filter(projects)
+        placed = ([rule.heading].compactMap { $0 } + rule.items.filter { item in !hosted.contains { $0 === item } } + [search, tablist, wrapper].compactMap { $0 }
+                  + (HeaderShape.presented(group, segments: segments)?.placed ?? [])).filter(projects)
     }
 
     /// The tabs of a header's tablist the segmented title shows (§9.8).

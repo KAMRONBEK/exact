@@ -541,11 +541,18 @@ final class NavigationBasicsIOSTests: XCTestCase {
         XCTAssertTrue(plain.navigationItem.rightBarButtonItems?.first === item, "the same item")
         XCTAssertTrue(item.customView === view && view.node === readout, "the same view")
         XCTAssertEqual(readout.accessibilityLabel, "1 composed")
+        // In UIKit's overflow menu the item is there by its name, dimmed.
+        let entry = try XCTUnwrap(item.menuRepresentation as? UIAction)
+        XCTAssertEqual(entry.title, "1 composed")
+        XCTAssertTrue(entry.attributes.contains(.disabled), "nothing presses a readout")
         // `aria-hidden` on the tabpanel, which UIKit holds the route apart
-        // from, takes the readout off the accessibility tree.
+        // from, takes the readout off the accessibility tree, and it speaks
+        // no change while hidden.
+        XCTAssertTrue(readout.liveSpeaks("2 sent", launching: false))
         let panel = try node(session, "panel-home")
         session.presenter.apply(wireBatch([["op": "props", "id": Int(panel.id), "set": ["accessibilityElementsHidden": "true"], "clear": []]]))
         until("hidden by its logical ancestor") { view.accessibilityElementsHidden }
+        XCTAssertFalse(readout.liveSpeaks("2 sent", launching: false), "a hidden status says nothing")
         session.presenter.apply(wireBatch([["op": "props", "id": Int(panel.id), "set": [:], "clear": ["accessibilityElementsHidden"]]]))
         until("shown again") { !view.accessibilityElementsHidden }
         // A sibling button kept authored lifts the header only in part; the
