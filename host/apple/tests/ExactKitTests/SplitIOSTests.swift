@@ -440,7 +440,8 @@ final class SplitIOSTests: XCTestCase {
         let books = try node(session, "books"), notes = try node(session, "notes-a")
         let wide = notes.frame
         XCTAssertNil(agent.tap(["id": Int(try node(session, "info-a").id)])["error"])
-        until("its info is in the inspector's column") { split.inspecting != nil }
+        // UIKit puts the column in place as it lays the columns out, inside its animation (`SplitIOS.moveAlong`)
+        until("its info is in the inspector's column") { split.inspecting?.navigationController?.view.superview != nil }
         let route = try XCTUnwrap(split.inspecting), info = try node(session, "info-page")
         let column = try XCTUnwrap(route.navigationController?.view.superview)
         let slide = try XCTUnwrap(Self.longest(column.layer), "the column slides in")

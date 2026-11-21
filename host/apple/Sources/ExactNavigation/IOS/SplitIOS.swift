@@ -54,10 +54,14 @@ final class SplitIOS: NSObject, UISplitViewControllerDelegate {
     var collapsedUnderResults: () -> Void = {}
     /// UIKit is moving the columns, inside its animation (`moveAlong`).
     var columnsMove: () -> Void = {}
-    /// UIKit has said the columns will move and has yet to open its animation. It lays them out itself, inside that
-    /// animation, as it does a view constrained to the safe area: nothing here may lay them out before then, or what
-    /// the safe area moves jumps to its end.
-    private(set) var columnsAboutToMove = false
+    /// UIKit has said the columns will move, or has opened a transition for a column Exact showed or hid (`moveAlong`),
+    /// and has yet to open its animation. It lays them out itself, inside that animation, as it does a view constrained
+    /// to the safe area: nothing here may lay them out before then, or the columns and what the safe area moves jump
+    /// to their end (an inspector shown beside the sidebar would hide it at once: UIKit says the display mode will change
+    /// only as it lays the columns out).
+    var columnsAboutToMove: Bool { aboutToMove != nil }
+    /// The transition whose animation UIKit has yet to open (`columnsAboutToMove`)
+    private weak var aboutToMove: UIViewControllerTransitionCoordinator?
     /// The list whose rows made the stack a split, which keeps it one while
     /// it has no row to act on (a search that matches nothing).
     var listNode: UInt32?
@@ -292,8 +296,28 @@ final class SplitIOS: NSObject, UISplitViewControllerDelegate {
     /// (`columnsMove`), so their content moves with the columns, as a
     /// hand-built detail's does.
     private func moveAlong() {
-        controller.transitionCoordinator?.animate(alongsideTransition: { [weak self] _ in self?.columnsMove() })
+        // One move per transition: a sync before UIKit lays the columns out shows the column again
+        guard let coordinator = controller.transitionCoordinator, coordinator !== along else { return }
+        along = coordinator
+        holdLayout(until: coordinator) { [weak self] in self?.columnsMove() }
     }
+
+    /// Nothing here lays the columns out until `coordinator` opens its animation (`columnsAboutToMove`), which then
+    /// runs `alongside`. Only this transition's start or end lets go of its own hold: a later one that took over keeps its own.
+    private func holdLayout(until coordinator: UIViewControllerTransitionCoordinator, alongside: (() -> Void)? = nil) {
+        aboutToMove = coordinator
+        let letGo = { [weak self, weak coordinator] in
+            guard let self, let coordinator, aboutToMove === coordinator else { return }
+            aboutToMove = nil
+        }
+        let taken = coordinator.animate(alongsideTransition: { _ in
+            letGo()
+            alongside?()
+        }, completion: { _ in letGo() })
+        if !taken { letGo() }
+    }
+    /// The transition `moveAlong` moves the routes' content in
+    private weak var along: UIViewControllerTransitionCoordinator?
 
     /// Exact's close of the inspector's column, until its transition ends:
     /// UIKit's report of it is not the person's. Each close has its number,
@@ -387,10 +411,7 @@ final class SplitIOS: NSObject, UISplitViewControllerDelegate {
         DispatchQueue.main.async { self.changed() }
     }
     func splitViewController(_ svc: UISplitViewController, willChangeTo displayMode: UISplitViewController.DisplayMode) {
-        if let coordinator = svc.transitionCoordinator {
-            columnsAboutToMove = coordinator.animate(alongsideTransition: { [weak self] _ in self?.columnsAboutToMove = false },
-                                                     completion: { [weak self] _ in self?.columnsAboutToMove = false })
-        }
+        if let coordinator = svc.transitionCoordinator { holdLayout(until: coordinator) }
         DispatchQueue.main.async { self.changed() }
     }
 }
