@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { OFFLINE_MISSING, withHostDeployment } from './filesystem.mjs';
 import { throwContractErrors } from './contract-diagnosis.mjs';
-import { basename, delimiter, dirname, relative, resolve, sep } from 'node:path';
+import { basename, delimiter, dirname, isAbsolute, parse, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 
@@ -433,6 +433,19 @@ export function cargoBuildEnv(cwd, env) {
  * keeps an argument with a space whole, and Cargo appends it to a configured array. Cargo refuses to merge an array
  * into a configured string ("expected string, but found array"), so over a string the flags are one string, the
  * configured flags first, which replaces it; a flag with a space cannot join one. */
+/** `path` as the system reaches it, each link followed before a later `..` (which `path.resolve`, and Bun's
+ * `realpathSync.native`, collapse first), or null when a part of it cannot be read. */
+export function physicalPath(path) {
+  const absolute = isAbsolute(path) ? path : process.cwd() + sep + path, { root } = parse(absolute);
+  const parts = absolute.slice(root.length).split(/[\\/]+/).filter(part => part && part !== '.');
+  try {
+    if (!parts.includes('..')) return realpathSync.native(absolute);
+    let at = realpathSync.native(root);
+    for (const part of parts) at = part === '..' ? dirname(at) : realpathSync.native(resolve(at, part));
+    return at;
+  } catch { return null; }
+}
+
 export function targetRustflags(target, flags, { cwd = process.cwd(), env = process.env } = {}) {
   const configured = cargoConfigurations(cwd, env, `pass ${target}'s rustflags`).findLast(({ configuration }) => configuration.target?.[target]?.rustflags !== undefined);
   const value = configured?.configuration.target[target].rustflags;
