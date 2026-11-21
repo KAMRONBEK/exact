@@ -184,8 +184,10 @@ struct HeaderShape: Equatable {
         /// drop; one that shows nothing UIKit's item would; and an element that
         /// is itself a control, a text or a picture (a switch that hears `press`).
         static func drawsFace(_ button: NodeView) -> Bool {
+            // An element `visibility` hides is drawn as written: hidden.
+            guard !button.cssVisibilityHidden else { return false }
             if button.isNativeButton { return button.face.map { !$0.hasSubtitleOrPicture } ?? true }
-            guard button.kind == "view" || button.kind == "button", !button.cssVisibilityHidden else { return false }
+            guard button.kind == "view" || button.kind == "button" else { return false }
             var texts = 0, symbols = 0, pictures = 0, boxes = 0, dots = 0, layers = false
             func count(_ node: NodeView) -> Bool {
                 if let flats = node.presenter?.flats, (flats.children(of: node.id) ?? []).contains(where: { id in
@@ -193,12 +195,19 @@ struct HeaderShape: Equatable {
                 }) { layers = true }
                 for child in shown(node) {
                     guard !child.cssVisibilityHidden else { return false }
+                    // A paragraph with a picture inline is more than a title.
+                    if child.isParagraph, child.inlineText.contains(where: { $0.props["inlineBox"] != nil }) { return false }
                     if child.isParagraph { texts += 1 }
                     else if child.kind == "image", child.faceSymbol != nil { symbols += 1 }
                     else if child.kind == "image", child.imageSource != nil { pictures += 1 }
                     else if child.kind == "view" {
                         boxes += 1
-                        if shown(child).isEmpty, child.channels("background_color") != nil { dots += 1 }
+                        if shown(child).isEmpty {
+                            // A dot is a fill; a box that paints only a border or a shadow no face draws.
+                            if child.channels("background_color") != nil { dots += 1 }
+                            else if child.style["box_shadow"] != nil || child.number("border_width") > 0
+                                        || ["top", "right", "bottom", "left"].contains(where: { child.number("border_width_" + $0) > 0 }) { return false }
+                        }
                         if !count(child) { return false }
                     }
                     else { return false }

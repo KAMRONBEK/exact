@@ -63,8 +63,7 @@ fn a_header_node_the_ios_bar_still_hides_is_named_with_its_repair() {
         )),
         [(UNPLACED.to_string(), 13)]
     );
-    // Nor does a spinner in the heading's box, read through a link that
-    // follows nothing.
+    // Nor does a spinner in the heading's box, read through a link that follows nothing.
     assert_eq!(
         warned(&route(
             "  column\n    link href=\"\"\n      text \"List\" role=\"heading\" aria-level=1\n    progress"
@@ -164,6 +163,15 @@ fn a_header_with_no_heading_or_two_is_named_as_no_bar() {
         assert_ne!(drawn, none);
         assert_eq!(warned(&drawn), [], "{attr}");
     }
+    // A button that opens a dialog around the only heading is an item: no heading.
+    let opens = route(
+        "  button commandfor=\"about\" command=\"show-modal\"\n    text \"List\" role=\"heading\" aria-level=1\n  progress\n  dialog id=\"about\"\n    text \"About\"",
+    );
+    assert_eq!(
+        warned(&opens).first().map(|w| w.0.as_str()),
+        Some(NO_BAR),
+        "{opens}"
+    );
     let two = route("  text \"A\" role=\"heading\" aria-level=1\n  text \"B\" role=\"heading\" aria-level=2\n  image \"symbol:heart\"");
     assert_eq!(warned(&two), [(NO_BAR.to_string(), 11)]);
     let (_, warnings) = contract::compile_warned(&two);

@@ -312,6 +312,20 @@ final class BarHostedIOSTests: XCTestCase {
         XCTAssertEqual(painted.trailing.map(\.hosted), [true, true, true, false])
         XCTAssertEqual(painted.trailing.last?.symbol, "arrow.clockwise")
         XCTAssertEqual(painted.trailing.last?.title, "Retry", "spoken by the item")
+        // A pressed row `visibility` hides is drawn as written, hidden; a box
+        // that paints only a shadow beside words is drawn as written; a badge
+        // beside a sibling hidden as authored is still the badge.
+        let edges = route([["op": "create", "id": 4, "kind": "view", "handlers": ["press"], "style": ["visibility": "hidden"]], text(5, "Gone"),
+                           ["op": "create", "id": 6, "kind": "view", "handlers": ["press"]],
+                           ["op": "create", "id": 7, "kind": "view", "style": ["box_shadow": "0 0 2px #000", "width": 8, "height": 8]], text(8, "Live"),
+                           ["op": "create", "id": 9, "kind": "button", "handlers": ["press"], "props": ["accessibilityLabel": "Me"]],
+                           ["op": "create", "id": 10, "kind": "view", "style": fill], text(11, "AB"),
+                           ["op": "create", "id": 12, "kind": "control", "props": ["type": "progress"], "style": ["display": "none"]]],
+                          kids: [4, 6, 9], more: [["op": "children", "id": 4, "ids": [5]], ["op": "children", "id": 6, "ids": [7, 8]],
+                                                  ["op": "children", "id": 9, "ids": [10, 12]], ["op": "children", "id": 10, "ids": [11]]])
+        let edged = try bar(edges)
+        XCTAssertEqual(edged.trailing.map(\.hosted), [true, true, false])
+        XCTAssertEqual(edged.trailing.last?.badge?.text, "AB", "the hidden sibling is no part")
     }
 
     /// A title wrapper that opts out after the bar lifted its readout keeps

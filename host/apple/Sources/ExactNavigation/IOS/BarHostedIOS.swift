@@ -140,18 +140,18 @@ final class BarHosted: LiftedNodes {
     }
 
     /// What the overflow menu does for the element: its own action, where it
-    /// is a switch or presses (a `press`, a link's `href`, or a command it
-    /// invokes); else nothing, and its entry is its name, dimmed. What is
-    /// inside an element is reached in the bar, where the element shows.
+    /// is a switch or presses (a `press` or a link's `href`); else nothing,
+    /// and its entry is its name, dimmed. A command alone opens from the item
+    /// in the bar, where the item has a window, so its entry is dimmed too.
+    /// What is inside an element is reached in the bar, where it shows.
     private func entries(_ node: NodeView) -> [Entry] {
-        guard !node.cssVisibilityHidden else { return [] }
-        let disabled = node.disabled || node.inert, invocation = presenter.invocation(of: node)
+        let disabled = node.disabled || node.inert || node.cssVisibilityHidden, invocation = presenter.invocation(of: node)
         // Everything a press may do: a link `presenter.press` follows first, and a command.
         let invokes = "\(node.defaultLink ?? "") \(invocation.map { "\($0.target.id) \($0.action)" } ?? "")"
         if let s = presenter.controls.controls[node.id] as? UISwitch {
             return [Entry(node: node, name: node.accessibleName, on: s.isOn, disabled: disabled || !s.isEnabled, invokes: invokes)]
         }
-        guard node.handlers.contains("press") || node.defaultLink != nil || invocation != nil else { return [] }
+        guard node.handlers.contains("press") || node.defaultLink != nil else { return [] }
         return [Entry(node: node, name: node.accessibleName, on: nil, disabled: disabled, invokes: invokes)]
     }
 

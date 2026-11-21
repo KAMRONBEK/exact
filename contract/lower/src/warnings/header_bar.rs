@@ -104,7 +104,8 @@ fn holds_placed(node: Visit<'_>) -> bool {
                     | Part::Tablist
                     | Part::Pressable
                     | Part::Status
-            ) || matches!(k.element(), Some(("button" | "link", _, _)))
+            ) || !matches!(part(k), Part::Hidden)
+                && matches!(k.element(), Some(("button" | "link", _, _)))
         })
 }
 
@@ -123,7 +124,8 @@ fn holds_heading(node: Visit<'_>) -> bool {
         .walk_regions_with((), |k, _| {
             [
                 (matches!(part(k), Part::Box | Part::Pressable | Part::Status)
-                    || matches!(k.element(), Some(("button" | "link", _, _))))
+                    || matches!(part(k), Part::Other)
+                        && matches!(k.element(), Some(("button" | "link", _, _))))
                 .then_some(()),
                 None,
             ]
@@ -368,8 +370,11 @@ impl<'a> Bar<'a> {
                 bar.tap = true;
                 return true;
             }
-            // One that does not press around the heading is walked for it.
-            Part::Pressable if !has_press(node) && holds_heading(node) => return true,
+            // One that neither presses nor opens around the heading (a link,
+            // a disabled button) is walked for it, as the kernel walks it.
+            Part::Pressable if !has_press(node) && !opens_named(node) && holds_heading(node) => {
+                return true
+            }
             Part::Pressable => bar.placed = true,
             // A status around the heading is no readout: walked for it.
             Part::Status if holds_heading(node) => return true,
@@ -407,6 +412,21 @@ impl<'a> Bar<'a> {
         }
         false
     }
+}
+
+/// Whether the node opens what it names, a popover or a dialog
+/// (`Invocation::opens`); a computed command is given the benefit.
+fn opens_named(node: Visit<'_>) -> bool {
+    node.element().is_some_and(|(_, _, attrs)| {
+        let opens = |c: &str| {
+            ["show-modal", "show-popover", "toggle-popover"]
+                .iter()
+                .any(|w| c.eq_ignore_ascii_case(w))
+        };
+        (has(attrs, "popovertarget") && literal(attrs, "popovertargetaction") != Some("hide"))
+            || (has(attrs, "commandfor")
+                && (computed(attrs, "command") || literal(attrs, "command").is_some_and(opens)))
+    })
 }
 
 fn has_press(node: Visit<'_>) -> bool {
