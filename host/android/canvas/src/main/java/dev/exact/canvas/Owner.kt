@@ -87,6 +87,10 @@ internal class Owner(private val hwbuf: Boolean, private val fast: Boolean, prio
     private val thread = HandlerThread("exact", priority).apply { start() }
     private val handler = Handler(thread.looper)
     private val main = Handler(Looper.getMainLooper())
+    /** Past a pending traversal's barrier, for what that traversal is to draw: at a launch the system's hand-off of the
+     * starting window's view has one pending, and behind it the boot's first picture and chrome would be drawn a frame
+     * late. Messages it posts keep their order with the others when no barrier is pending. */
+    private val mainNow = Handler.createAsync(Looper.getMainLooper())
     /** Every paint in order (each may define and free pictures and rows); moves are coalesced by the reader. */
     val queue = ConcurrentLinkedQueue<Pub>()
     private val notifying = AtomicBoolean(false)
@@ -105,9 +109,10 @@ internal class Owner(private val hwbuf: Boolean, private val fast: Boolean, prio
     private val readerSampling get() = timerReports.sampling
     private var idlePosted = false
 
-    private fun postMain(work: () -> Unit) {
+    private fun postMain(work: () -> Unit) = postMain(main, work)
+    private fun postMain(to: Handler, work: () -> Unit) {
         timerReports.mainWork++
-        main.post {
+        to.post {
             try { work() } finally {
                 handler.post {
                     timerReports.mainWork--
@@ -258,7 +263,7 @@ internal class Owner(private val hwbuf: Boolean, private val fast: Boolean, prio
                 wakes?.sync()
                 produce()
             }
-            postMain { done(ok) }
+            postMain(mainNow) { done(ok) }
         }
     }
 
@@ -577,7 +582,8 @@ internal class Owner(private val hwbuf: Boolean, private val fast: Boolean, prio
             Native.timerObservation(readerScrolling, readerSampling, true, false)
             if (!notifying.getAndSet(true)) postMain { notifying.set(false); published() }
         }
-        Native.chrome()?.let { c -> postMain { chrome(c) } }
+        // Ahead of the first picture: its frame shows the page's background and place.
+        Native.chrome()?.let { c -> postMain(mainNow) { chrome(c) } }
         requests()
         schedule()
     }
@@ -867,7 +873,13 @@ internal object Exact {
      * foreground service with a live claim, or an active media playback service. Agent claims grant no device execution. */
     internal fun executionEligible(): Boolean = !pageHidden || Claims.keepsExecution
     /** The page freeze drops gated streams before returning; socket close handshakes finish asynchronously. */
-    fun hidden(hidden: Boolean) { pageHidden = hidden; publishExecution() }
+    fun hidden(hidden: Boolean) {
+        // Telling the host waits for its thread. A cold launch's start says what the host boots with, and the wait
+        // would hold the main thread for the whole boot, with the window's own setup behind it.
+        if (pageHidden == hidden) return
+        pageHidden = hidden
+        publishExecution()
+    }
     /** The page of a host [Headless] boots is hidden from the start. What tells the host so, for its thread to run as
      * the host boots ([Owner.boot]): told later, the first turn and the data module's activation would run in a
      * visible page. What an activity or a claim says afterwards reaches that thread behind the boot. */
