@@ -48,7 +48,7 @@ import { buildEditor, buildFlow, compilerSet } from '../web-js/module.mjs';
 import { RustMissing, WEB_CRATES, fromSets, rustMissing, setMetadata } from '../../scripts/tools.mjs';
 import { closeFilesystemReader, offlineMiss } from '../../scripts/filesystem.mjs';
 import { guardFlags, reportBuilt } from '../../scripts/help.mjs';
-import { BINARYEN_DOWNLOAD, optimizeWasm, splitStages, stripWasm, Unsplittable, unsplitReason } from './stages.mjs';
+import { BINARYEN_DOWNLOAD, optimizeWasm, placeholderImports, splitStages, stripWasm, Unsplittable, unsplitReason } from './stages.mjs';
 import { interfaceStyle, launchBackground, schemeHead, withInterfaceStyle, withLook } from './look.mjs';
 import { webIconLinks, webThemeColors } from '../../scripts/app-icons.mjs';
 import { appManifestDigest, appSources, buildFileCards, copyStaticTreeIfPresent, listAssets, hostingNotes, planRouteTable, publicFileCards, replaceBuild, webEnvelope, moduleCards, MODULE_FILES } from './serve.mjs';
@@ -564,10 +564,8 @@ if (bakeOnly) planBytes = readFileSync(resolve(buildEnv.EXACT_BAKE_OUTPUT, 'web-
 else {
 wasm = readFileSync(out);
 const unbooted = () => { throw new Error('app logic ran while extracting baked bytes'); };
-// A split core's stage placeholders (stages.mjs) are imports too, from a `placeholder.<stage>` namespace each.
 const compiled = new WebAssembly.Module(wasm);
-const placeholders = Object.fromEntries(WebAssembly.Module.imports(compiled).filter(({ module }) => module.startsWith('placeholder.')).map(({ module }) => [module, new Proxy({}, { get: () => unbooted })]));
-const instance = await WebAssembly.instantiate(compiled, { ...placeholders, exact_grants: grantOrigins(() => instance.exports.memory), exact_js: { call: unbooted }, exact_rust: { load: unbooted, call: unbooted, read: unbooted, drop: unbooted }, exact_data: { random: unbooted, agent_seed: unbooted }, exact_clock: { now: unbooted }, exact_geometry: { scroll_metrics: unbooted, range: unbooted, read: unbooted, point: unbooted, points: unbooted, shown: unbooted } });
+const instance = await WebAssembly.instantiate(compiled, { ...placeholderImports(compiled, unbooted), exact_grants: grantOrigins(() => instance.exports.memory), exact_js: { call: unbooted }, exact_rust: { load: unbooted, call: unbooted, read: unbooted, drop: unbooted }, exact_data: { random: unbooted, agent_seed: unbooted }, exact_clock: { now: unbooted }, exact_geometry: { scroll_metrics: unbooted, range: unbooted, read: unbooted, point: unbooted, points: unbooted, shown: unbooted } });
 exports = instance.exports;
 if (typeof exports.exact_plan !== 'function' || typeof exports.exact_out !== 'function' || !(exports.memory instanceof WebAssembly.Memory)) {
   throw new Error('the web wasm does not export exact_plan, exact_out, and memory');

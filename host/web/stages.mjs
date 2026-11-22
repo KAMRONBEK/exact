@@ -94,14 +94,12 @@ export class Unsplittable extends Error {}
 
 /** Each stage's functions (raw names) in `named`, a wasm that keeps its name
  * section: what its seam reaches and the core does not. Throws an `Error`,
- * which fails the build, when no function matches a seam or the core calls one
- * directly (LLP 1047.000 §9), and `Unsplittable` when the planner cannot tell
- * that the seam is the one way into the stage that the glue gates: the seam is
- * exported or fills other than one table slot, its pattern matches functions of
- * two crates, or a start function runs at instantiation, which the call graph
- * does not root. */
+ * which fails the build, when no function matches a seam or the call graph
+ * shows the core calling one directly (LLP 1047.000 §9). Throws `Unsplittable`
+ * when the call graph cannot be read, or cannot show that the seam is the one
+ * way into the stage that the glue gates: the seam is exported or not in
+ * exactly one table slot, or its pattern matches functions of two crates. */
 export function planStages(named, stages = STAGES) {
-  if (hasStart(readFileSync(named))) throw new Unsplittable(`${named} has a start function, which the call graph does not root, so the planner cannot tell whether instantiation reaches a stage`);
   const { nodes, calls, callers } = callGraph(named), raw = [...nodes.keys()];
   const plain = run('c++filt', [], { input: raw.join('\n') }).stdout.split('\n');
   const demangled = new Map(raw.map((name, i) => [name, normalizeDemangled(plain[i] ?? name)]));
@@ -118,16 +116,21 @@ export function planStages(named, stages = STAGES) {
     return seen;
   };
   const core = reach(raw.filter(name => nodes.get(name).root && !all.has(name)), all);
-  return stages.map((stage) => {
+  for (const stage of stages) {
     const seam = seams.get(stage.name);
     if (!seam.length) throw new Error(`stage ${stage.name}: no function matches its seam ${stage.seam}`);
+    for (const entry of seam) {
+      // A seam the core calls directly may be in no slot, once nothing takes its address, which would otherwise ship
+      // the module whole.
+      const direct = [...callers.get(entry) ?? []].filter(caller => core.has(caller));
+      if (direct.length) throw new Error(`stage ${stage.name}: the core calls its seam ${demangled.get(entry)} directly from ${direct.slice(0, 3).map(c => demangled.get(c)).join(', ')}`);
+    }
+  }
+  return stages.map((stage) => {
+    const seam = seams.get(stage.name);
     const crates = new Set(seam.map(entry => stage.seam.exec(entry)[1]));
     if (crates.size > 1) throw new Unsplittable(`stage ${stage.name}: its seam ${stage.seam} matches functions of ${crates.size} crates, so another crate shares the SDK's path`);
     for (const entry of seam) {
-      // A direct call fails the build first: a seam the core calls is in no slot once nothing takes its address,
-      // and would otherwise ship whole.
-      const direct = [...callers.get(entry) ?? []].filter(caller => core.has(caller));
-      if (direct.length) throw new Error(`stage ${stage.name}: the core calls its seam ${demangled.get(entry)} directly from ${direct.slice(0, 3).map(c => demangled.get(c)).join(', ')}`);
       // The glue gates a seam's one table slot. An export, or another slot (a function wasm-opt merged with the seam
       // once filled its own), is a way the core may call the stage before it loads.
       const { exported, slots } = nodes.get(entry);
@@ -137,15 +140,21 @@ export function planStages(named, stages = STAGES) {
   });
 }
 
-/** Binaryen's call graph of the module at `named`: each function's node (exported, the table slots it fills), and its
- * calls each way. */
+/** Binaryen's call graph of the module at `named`: each function's node (exported, the table slots it fills, the
+ * start function, which runs at instantiation, rooted as they are), and its calls each way. */
 function callGraph(named) {
-  const graph = run('wasm-opt', [named, '--print-call-graph', ...FEATURES, '-o', devNull]);
+  const graph = run('wasm-opt', [named, '--print-function-map', '--print-call-graph', ...FEATURES, '-o', devNull]);
   if (graph.status !== 0) throw new Error(`wasm-opt --print-call-graph failed: ${graph.stderr}`);
+  // The printer writes names unescaped, so the graph is read only when every function's name, as the function map
+  // printed first gives it, one `index:name` line each, holds no quote or line break.
+  const [map, dot] = graph.stdout.split(/^digraph call \{$/m);
+  const names = map.split('\n').slice(0, -1).map((line, i) => line.startsWith(`${i}:`) ? line.slice(`${i}:`.length) : null);
+  const unreadable = () => new Unsplittable(`${named}: a function name holds a quote or a line break, which the call graph prints unescaped, so its calls cannot be read`);
+  if (names.some(name => name === null || name.includes('"'))) throw unreadable();
   const nodes = new Map(), calls = new Map(), callers = new Map();
   // The graph's key is a subgraph of example nodes, which a function may share a name with ("B").
   let key = false;
-  for (const line of graph.stdout.split('\n')) {
+  for (const line of dot.split('\n')) {
     if (/^\s*subgraph cluster_key\b/.test(line)) { key = true; continue; }
     if (key) { if (/^\s*}\s*$/.test(line)) key = false; continue; }
     const edge = /^\s*"(.+?)" -> "(.+?)";?\s*(\/\/.*)?$/.exec(line);
@@ -164,20 +173,34 @@ function callGraph(named) {
       nodes.set(node[1], { ...seen, root: seen.exported || seen.slots > 0 });
     }
   }
-  for (const name of [...calls.keys(), ...callers.keys()]) if (!nodes.has(name)) nodes.set(name, { exported: false, slots: 0, root: false });
+  // A line break the map's lines did not show splits the last name's node line.
+  if (names.some(name => !nodes.has(name))) throw unreadable();
+  const start = startFunction(readFileSync(named));
+  if (start !== null) nodes.get(names[start]).root = true;
   return { nodes, calls, callers };
 }
 
-/** Whether the module in `bytes` has a start section (id 8). */
-function hasStart(bytes) {
-  for (let at = 8; at < bytes.length;) {
-    const id = bytes[at++];
-    let size = 0;
-    for (let shift = 0, byte = 0x80; byte & 0x80; shift += 7) { byte = bytes[at++]; size += (byte & 0x7f) * 2 ** shift; }
-    if (id === 8) return true;
+/** The index of the start function of the module in `bytes`, from its start section (id 8), or null. */
+function startFunction(bytes) {
+  let at = 8;
+  const leb = () => {
+    let value = 0;
+    for (let shift = 0, byte = 0x80; byte & 0x80; shift += 7) { byte = bytes[at++]; value += (byte & 0x7f) * 2 ** shift; }
+    return value;
+  };
+  while (at < bytes.length) {
+    const id = bytes[at++], size = leb();
+    if (id === 8) return leb();
     at += size;
   }
-  return false;
+  return null;
+}
+
+/** Imports that let a split core instantiate outside the page: each `placeholder.<stage>` namespace the compiled
+ * `module` imports, whose every placeholder is `call`. */
+export function placeholderImports(module, call) {
+  const namespaces = WebAssembly.Module.imports(module).map(entry => entry.module).filter(name => name.startsWith('placeholder.'));
+  return Object.fromEntries(namespaces.map(name => [name, new Proxy({}, { get: () => call })]));
 }
 
 /** `from` without its names and producers, written at `to`; its bytes. */
