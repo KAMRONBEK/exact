@@ -232,6 +232,9 @@ package protocol NavigationHosting: AnyObject {
     func installInitialOwner(_ batch: Batch)
     var syncOwed: Bool { get }
     func batchApplied(_ batch: Batch, rowsOnly: Bool)
+    #if os(iOS)
+    func hostedSwitchChanged(_ id: UInt32)
+    #endif
     func reset(clearFocus: Bool)
     func rebooting()
     func retheme()
@@ -383,9 +386,9 @@ package protocol NavigationHosting: AnyObject {
 package protocol LiftedNodes: AnyObject {
     /// The parent a lifted node, or a view in its place, is under in the authored tree.
     func parent(of view: UIView) -> NodeView?
-    /// Whether UIKit holds `view` away from its parent's box, so a press that
-    /// bubbles to the parent lands in the lifted view's box.
-    func heldApart(_ view: UIView) -> Bool
+    /// The release bounds when a press bubbles out of a lift that UIKit
+    /// holds away from its parent's box.
+    func pressBox(crossing view: UIView, from start: UIView) -> UIView?
     /// Whether `parent` lifted `node`, which `parent`'s children op then leaves where it is.
     func holds(_ node: NodeView, under parent: NodeView) -> Bool
     /// A children op on `parent`, before the presenter places it.
@@ -414,6 +417,9 @@ extension Presenter {
 }
 
 extension NavigationHosting {
+    #if os(iOS)
+    package func hostedSwitchChanged(_ id: UInt32) {}
+    #endif
     package func reset() { reset(clearFocus: true) }
     package func routeKey(containing view: UIView) -> String? { routeKey(containing: view, layout: false) }
     package func isInactiveRoute(containing view: UIView) -> Bool { isInactiveRoute(containing: view, layout: false) }

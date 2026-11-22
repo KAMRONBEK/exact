@@ -16,6 +16,8 @@ component BarHosted
   state alerts = false
   state noted = 0
   state headerPresses = 0
+  state specimen = ""
+  state refusals = 0
   action follow(url: string)
     nav = go(nav, url)
   action flip(on: bool)
@@ -32,16 +34,27 @@ component BarHosted
     headerPresses = headerPresses + 1
   action wipe
     retried = 0
+  action show(name: string)
+    specimen = name
+  action refuse(on: bool)
+    refusals = refusals + 1
   view
     main navigationKey=`${top(nav).id}` navigate=follow width="100%" height="100%"
       for e in stack(nav) key=e.id
         column navigationKey=`${e.id}` position="absolute" inset=0
-          header display="flex" align-items="center" press=pressHeader
-            if e.name == "home"
+          header display="flex" align-items="center" press=pressHeader inert=(specimen == "inert") aria-hidden=(specimen == "active")
+            if e.name == "home" and specimen == ""
               row role="status" testId="sync-status"
                 text (retried == 0 ? "Ready" : "Retrying") font-size=13
+            if e.name == "home" and (specimen == "inert" or specimen == "active")
+              input type="checkbox" role="switch" checked=live change=flip aria-label="Live" testId="inert-switch"
+            if e.name == "home" and specimen == "stops"
+              text (retried == 0 ? "1:05.32" : "1:06.10") role="status" aria-label="Elapsed time" testId="elapsed"
+            if e.name == "home" and specimen == "slide"
+              row role="status" padding-left=8 testId="padded-status"
+                text "Ready" testId="padded-words"
             text (e.name == "home" ? "Inbox" : e.name == "history" ? "History" : "About") role="heading" aria-level=2 flex=1
-            if e.name == "home"
+            if e.name == "home" and specimen == ""
               link href="/history" aria-label="History" testId="history-link"
                 image "symbol:history" width=20 height=20
               row gap=6 align-items="center" testId="live-row"
@@ -59,17 +72,44 @@ component BarHosted
                   button commandfor="details" command="close" aria-label="Close" testId="close-details"
                     text "Close"
               input type="checkbox" role="switch" checked=alerts change=setAlerts press=note aria-label="Alerts" testId="alerts-switch"
+            if e.name == "home" and specimen == "switches"
+              input type="checkbox" role="switch" aria-label="Unbound" testId="unbound-switch"
+              input type="checkbox" role="switch" checked=false change=refuse aria-label="Refused" testId="refused-switch"
+            if e.name == "home" and specimen == "stops"
+              button role="status" press=note aria-label="Mark" testId="status-button"
+                text "Mark" font-size=13
+              input type="checkbox" role="status" aria-label="Check" testId="status-check"
+              row role="status" testId="unnamed-status"
+                progress
+              row role="status" testId="mixed-status"
+                text "Offline"
+                button press=retry aria-label="Retry"
+                  text "Retry"
             if e.name == "history"
               link href="/history/about" aria-label="About" testId="about-link"
                 image "symbol:info" width=20 height=20
               button buttonStyle="glass" press=note testId="stop"
+                image "symbol:stop"
                 text "Stop" color="-exact-system-red"
               button press=note background-color="-exact-fill" testId="note-button"
                 text "Note"
+              button press=note background-color="-exact-fill" opacity=0.5 testId="faded-button"
+                text "Fade"
+              button press=note translate="2px 0px" scale=1.1 rotate="10deg" testId="moving-button"
+                text "Move"
+              button press=note aria-label="Profile" testId="italic-badge"
+                box background-color="-exact-fill"
+                  text "AB" font-style="italic"
           text (live ? "on" : "off") testId="live"
           text `${retried}` testId="retried"
           text (alerts ? "on" : "off") testId="alerts"
           text `${noted}` testId="noted"
           text `${headerPresses}` testId="header-presses"
+          text `${refusals}` testId="refusals"
           button press=enableAlerts testId="enable-alerts"
             text "Enable alerts"
+          for name in ["inert", "active", "slide", "switches", "stops"] key=name
+            button press=show(name) testId=`show-${name}`
+              text name
+          button press=retry testId="advance-status"
+            text "Advance"

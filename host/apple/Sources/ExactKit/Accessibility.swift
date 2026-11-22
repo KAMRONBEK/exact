@@ -66,7 +66,7 @@ extension NodeView {
     /// inside a link counts in the link's name, as on the web.
     /// `unshown`: the words of a subtree CSS or `aria-hidden` hides are read
     /// too, which only an explicit reference to it asks for (`labelledBy`).
-    private func contentText(naming: Bool, unshown: Bool = false) -> String {
+    private func contentText(naming: Bool, unshown: Bool = false, passive: Bool = false) -> String {
         // A Markdown text reads as the words it draws, its syntax hidden (LLP 1045,
         // "Accessibility"), each inline atom its accessible name (LLP 1045.000 D8).
         if let text = props["text"], props["markup"] == "markdown", let plain = MarkdownLink.installed?.plain(text, range: nil, atoms: props["atoms"] ?? "", faces: props["atomFaces"] ?? "", spoken: true) { return plain }
@@ -79,8 +79,10 @@ extension NodeView {
         // nothing (habits F16: a tab's icon glyph). One the host hides still
         // names: a native control draws its words (a grouped list's sections,
         // a segmented control's tabs).
-        let children = childNodes.filter { unshown || !$0.leftOut }
-        return children.map { naming ? $0.authoredLabel ?? $0.contentText(naming: true) : $0.contentText(naming: false, unshown: unshown) }.filter { !$0.isEmpty }.joined(separator: " ")
+        let children = childNodes.filter { (unshown || !$0.leftOut) && (!passive || !$0.isAccessibilityControl) }
+        return children.map {
+            naming ? $0.authoredLabel ?? $0.contentText(naming: true, passive: passive) : $0.contentText(naming: false, unshown: unshown)
+        }.filter { !$0.isEmpty }.joined(separator: " ")
     }
     /// Not rendered (`display: none`) or left out of the accessibility tree (`aria-hidden`).
     private var leftOut: Bool { style["display"]?.string == "none" || props["accessibilityElementsHidden"] == "true" }
@@ -106,6 +108,10 @@ extension NodeView {
         return text.isEmpty ? nil : text
     }
     package var accessibleName: String { authoredLabel ?? contentText(naming: true) }
+    package var passiveAccessibleName: String { contentText(naming: true, passive: true) }
+    package var isAccessibilityControl: Bool {
+        actsAsButton || isNativeButton || kind == "input" || kind == "control" || defaultLink != nil || rangeRole != nil
+    }
     #if !os(macOS)
     /// Referenced labels can arrive or disappear without an image props update.
     func updateImageAccessibility() {

@@ -52,7 +52,9 @@ final class HostedItemView: UIView {
     /// see `aria-hidden` and `inert` on logical ancestors past the lift.
     /// Returns whether the size changed.
     func refit() -> Bool {
-        let hidden = node.inert || node.authoredLine.contains { $0.props["accessibilityElementsHidden"] == "true" }
+        let inert = node.inert
+        isUserInteractionEnabled = !inert
+        let hidden = inert || node.authoredLine.contains { $0.props["accessibilityElementsHidden"] == "true" }
         if accessibilityElementsHidden != hidden { accessibilityElementsHidden = hidden }
         updateReadout(hidden: hidden)
         let laid = CGSize(width: max(0, node.frame.maxX), height: max(0, node.frame.maxY))
@@ -63,18 +65,30 @@ final class HostedItemView: UIView {
     }
 
     private func updateReadout(hidden: Bool) {
-        guard !hidden, !node.cssVisibilityHidden, node.props["accessibilityRole"] == "status" else {
+        guard !hidden, !node.cssVisibilityHidden, node.props["accessibilityRole"] == "status",
+              !node.isAccessibilityControl, !(node.isAccessibilityElement && Self.isControl(node)) else {
+            readout = nil
+            return
+        }
+        let label = node.authoredLabel ?? node.passiveAccessibleName
+        guard !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             readout = nil
             return
         }
         let element = readout ?? UIAccessibilityElement(accessibilityContainer: self)
-        let label = node.accessibleName
         if element.accessibilityLabel != label { element.accessibilityLabel = label }
+        if element.accessibilityValue != node.accessibilityValue { element.accessibilityValue = node.accessibilityValue }
         if readout == nil {
             element.accessibilityTraits = .staticText
             element.accessibilityFrameInContainerSpace = bounds
             readout = element
         }
+    }
+
+    private static func isControl(_ object: NSObject) -> Bool {
+        let traits: UIAccessibilityTraits = [.button, .link, .adjustable, .toggleButton, .searchField]
+        return object is UIControl || object.accessibilityRespondsToUserInteraction
+            || !object.accessibilityTraits.intersection(traits).isEmpty
     }
 
     override var accessibilityElements: [Any]? {
@@ -91,10 +105,7 @@ final class HostedItemView: UIView {
         let view = object as? UIView
         if let view, view.isHidden || view.alpha <= 0.01 || view.accessibilityElementsHidden { return [] }
         if object.isAccessibilityElement {
-            let traits: UIAccessibilityTraits = [.button, .link, .adjustable, .toggleButton, .searchField]
-            let control = object is UIControl || object.accessibilityRespondsToUserInteraction
-                || !object.accessibilityTraits.intersection(traits).isEmpty
-            return control ? [object] : []
+            return isControl(object) ? [object] : []
         }
         let children: [Any]
         if let declared = object.accessibilityElements {
@@ -138,9 +149,10 @@ final class BarHosted: LiftedNodes {
     private struct Hosted {
         let item: UIBarButtonItem
         let view: HostedItemView
+        let parentID: UInt32
         weak var route: RouteController?
         var room: CGSize
-        /// What the overflow menu's entry was made from (`name`).
+        /// The last overflow action's signature.
         var menu = ""
     }
     private var hosted: [UInt32: Hosted] = [:]
@@ -168,7 +180,7 @@ final class BarHosted: LiftedNodes {
         view.stand.addSubview(node)
         NodeView.containerMoves -= 1
         presenter.flats.containerChanged(parent.id)
-        let entry = Hosted(item: UIBarButtonItem(customView: view), view: view, route: c, room: room(in: c, inset: i.hostedInset))
+        let entry = Hosted(item: UIBarButtonItem(customView: view), view: view, parentID: parent.id, route: c, room: room(in: c, inset: i.hostedInset))
         hosted[i.id] = entry
         style(i)
         _ = view.refit()
@@ -181,7 +193,7 @@ final class BarHosted: LiftedNodes {
         entry.item.accessibilityIdentifier = i.testId
         entry.view.inset = i.hostedInset
         if #available(iOS 26.0, *) { entry.item.hidesSharedBackground = !i.hostedGlass }
-        name(i.id)
+        refreshOverflow(i.id)
     }
 
     /// What the overflow menu does for a hosted element: press it, or flip
@@ -202,7 +214,8 @@ final class BarHosted: LiftedNodes {
         // Everything a press may do: a link `presenter.press` follows first, and a command.
         let invokes = "\(node.defaultLink ?? "") \(invocation.map { "\($0.target.id) \($0.action)" } ?? "")"
         if let s = presenter.controls.controls[node.id] as? UISwitch {
-            return [Entry(node: node, name: node.accessibleName, on: s.isOn, disabled: disabled || !s.isEnabled, invokes: invokes)]
+            let on = node.props["checked"].map { $0 == "true" } ?? s.isOn
+            return [Entry(node: node, name: node.accessibleName, on: on, disabled: disabled || !s.isEnabled, invokes: invokes)]
         }
         guard node.handlers.contains("press") || node.defaultLink != nil else { return [] }
         return [Entry(node: node, name: node.accessibleName, on: nil, disabled: disabled || invocation != nil, invokes: invokes)]
@@ -213,7 +226,7 @@ final class BarHosted: LiftedNodes {
     /// what the element itself does, else a dimmed line. Made again as the
     /// element changes, and an entry chosen acts only while it is still
     /// what the bar that shows offers.
-    private func name(_ id: UInt32) {
+    func refreshOverflow(_ id: UInt32) {
         guard let entry = hosted[id] else { return }
         let node = entry.view.node, name = node.accessibleName
         let entries = entries(node)
@@ -291,8 +304,13 @@ final class BarHosted: LiftedNodes {
                 node.removeFromSuperview()
             }
         }
-        if let parent, !hosted.values.contains(where: { $0.view.stand.parent === parent }) { homes[parent.id] = nil }
+        if !hosted.values.contains(where: { $0.parentID == entry.parentID }) { homes[entry.parentID] = nil }
         presenter.owners.publish()
+    }
+
+    func reset() {
+        for id in hosted.keys { release(id) }
+        homes.removeAll()
     }
 
     private func putBack(_ node: NodeView, into parent: NodeView) {
@@ -309,7 +327,7 @@ final class BarHosted: LiftedNodes {
     // MARK: LiftedNodes
 
     func parent(of view: UIView) -> NodeView? { (view.superview as? HostedStand)?.parent }
-    func heldApart(_ view: UIView) -> Bool { parent(of: view) != nil }
+    func pressBox(crossing view: UIView, from start: UIView) -> UIView? { parent(of: view) == nil ? nil : view }
 
     func holds(_ node: NodeView, under parent: NodeView) -> Bool {
         guard let entry = hosted[node.id] else { return false }
@@ -342,14 +360,17 @@ final class BarHosted: LiftedNodes {
         }
     }
 
-    /// Read the switch state once the control host has applied the batch.
     func refreshOverflow() {
-        for id in hosted.keys { name(id) }
+        for id in hosted.keys { refreshOverflow(id) }
     }
 
     func focusChildren(of view: UIView) -> [UIView] { view.subviews }
     func accessibilityElements(of view: UIView) -> [Any]? { nil }
     func absoluteNodes(after view: UIView, in parent: UIView) -> [NodeView] { [] }
+}
+
+extension NavigationHost {
+    func hostedSwitchChanged(_ id: UInt32) { barHosted.refreshOverflow(id) }
 }
 
 /// The navigation's lifted nodes: those beside the tab panels (LLP 1083.000
@@ -358,7 +379,9 @@ final class LiftedPair: LiftedNodes {
     let first: any LiftedNodes, second: any LiftedNodes
     init(_ first: any LiftedNodes, _ second: any LiftedNodes) { (self.first, self.second) = (first, second) }
     func parent(of view: UIView) -> NodeView? { first.parent(of: view) ?? second.parent(of: view) }
-    func heldApart(_ view: UIView) -> Bool { first.heldApart(view) || second.heldApart(view) }
+    func pressBox(crossing view: UIView, from start: UIView) -> UIView? {
+        first.pressBox(crossing: view, from: start) ?? second.pressBox(crossing: view, from: start)
+    }
     func holds(_ node: NodeView, under parent: NodeView) -> Bool { first.holds(node, under: parent) || second.holds(node, under: parent) }
     func children(_ parent: NodeView, _ ids: [UInt32], _ want: [NodeView]) {
         first.children(parent, ids, want)

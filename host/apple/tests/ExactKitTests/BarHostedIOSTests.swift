@@ -442,6 +442,37 @@ final class BarHostedIOSTests: XCTestCase {
         XCTAssertEqual(p.views[2]?.container.subviews.compactMap { ($0 as? NodeView)?.id }, [3, 4, 5], "at its place")
     }
 
+    func testAHostedItemForgetsItsDestroyedWrapperAndResets() throws {
+        let wrapper: [String: Any] = ["op": "create", "id": 20, "kind": "view"]
+        let button: [String: Any] = ["op": "create", "id": 21, "kind": "button", "handlers": ["press"]]
+        let p = route([wrapper, button, progress(22), text(24, "Record")], kids: [20],
+                      more: [["op": "children", "id": 20, "ids": [21, 22]], ["op": "children", "id": 21, "ids": [24]]])
+        let navigation = p.navigationHost
+        let route = RouteController(try XCTUnwrap(p.views[1]))
+        _ = navigation.barItems(try bar(p).trailing, route)
+        XCTAssertEqual(navigation.barHosted.blocks.keys.sorted(), [22])
+        weak var removed = p.views[20]
+
+        autoreleasepool {
+            p.apply(wireBatch([["op": "children", "id": 2, "ids": [3]]] +
+                              [20, 21, 22, 24].map { ["op": "destroy", "id": $0] }))
+        }
+        XCTAssertNil(removed, "the wrapper is gone before the bar releases its child")
+        navigation.barHosted.show([], in: route)
+        XCTAssertTrue(navigation.barHosted.blocks.isEmpty)
+
+        p.apply(wireBatch([wrapper]))
+        let replacement = try XCTUnwrap(p.views[20])
+        XCTAssertNil(navigation.barHosted.recordedIDs(of: replacement), "a recycled ID has no saved children")
+        p.apply(wireBatch([progress(23), ["op": "children", "id": 20, "ids": [23]], ["op": "children", "id": 2, "ids": [3, 20]]]))
+        XCTAssertEqual(replacement.authoredChildNodes.map(\.id), [23], "a recycled ID has its new children")
+        _ = navigation.barHosted.item(HeaderShape.Item(try XCTUnwrap(p.views[23]), hosted: true), in: route)
+        XCTAssertEqual(navigation.barHosted.blocks.keys.sorted(), [23])
+        navigation.reset()
+        XCTAssertTrue(navigation.barHosted.blocks.isEmpty, "reset also releases items whose route is outside the controller cache")
+        XCTAssertNil(navigation.barHosted.recordedIDs(of: replacement))
+    }
+
     /// A readout in the heading's box, lifted into its item, leaves the title as
     /// the first projection made it: the box holds a bar item, so it is no
     /// wrapper and the filled box in it no avatar, before the lift and after.
@@ -542,24 +573,77 @@ final class BarHostedIOSTests: XCTestCase {
         return try XCTUnwrap(items.first { $0.accessibilityIdentifier == testId }, testId)
     }
 
+    private func show(_ specimen: String, in p: Presenter) throws {
+        p.press(try node("show-\(specimen)", in: p).id)
+    }
+
+    private func goToHistory(in p: Presenter) throws -> UIViewController {
+        let nav = try XCTUnwrap(p.navigationHost.primaryNavigation)
+        p.press(try node("history-link", in: p).id)
+        waitFor("History shows") { nav.viewControllers.count == 2 && nav.transitionCoordinator == nil }
+        return try XCTUnwrap(nav.topViewController)
+    }
+
     private func tap(_ point: CGPoint, with touch: TouchRunner) throws {
         var request = try TouchRunner.aim(point, in: window)
         request["op"] = "tap"
         XCTAssertEqual(try touch.ask(request)["done"] as? Bool, true)
     }
 
-    func testATapOnAHostedReadoutPressesItsHeader() throws {
+    func testAHostedSwitchIgnoresTouchesUnderAnInertHeader() throws {
         guard ProcessInfo.processInfo.environment["EXACT_TOUCH_PORT"] != nil else {
-            throw missing("touch", "a touch in the bar reaches the header through UIKit")
+            throw missing("touch", "the switch must receive a UIKit touch")
         }
         let touch = try TouchRunner(self)
         defer { touch.connection.cancel() }
         let session = try session(), p = session.presenter
-        let words = try node("offline-text", in: p), presses = try node("header-presses", in: p)
-        waitFor("the readout's words are laid out in the bar") { words.window != nil && !words.bounds.isEmpty }
-        XCTAssertEqual(presses.accessibleText, "0")
-        try tap(words.convert(CGPoint(x: words.bounds.midX, y: words.bounds.midY), to: window), with: touch)
+        try show("inert", in: p)
+        let node = try node("inert-switch", in: p)
+        let value = try self.node("live", in: p)
+        let toggle = try XCTUnwrap(p.controls.controls[node.id] as? UISwitch)
+        waitFor("the inert switch is drawn in the bar") { node.inert && toggle.window === self.window && !toggle.bounds.isEmpty }
+        func point() -> CGPoint { toggle.convert(CGPoint(x: toggle.bounds.midX, y: toggle.bounds.midY), to: window) }
+        try tap(point(), with: touch)
+        waitForMainQueue()
+        XCTAssertFalse(toggle.isOn)
+        XCTAssertEqual(value.accessibleText, "off")
+
+        try show("active", in: p)
+        waitFor("the header is active") { !node.inert && toggle.window === self.window }
+        try tap(point(), with: touch)
+        waitFor("the touch toggles the switch") { toggle.isOn && value.accessibleText == "on" }
+    }
+
+    func testAReleaseInTheHostedRowsPaddingPressesItsHeader() throws {
+        guard ProcessInfo.processInfo.environment["EXACT_TOUCH_PORT"] != nil else {
+            throw missing("touch", "start on the label and release in the row's padding")
+        }
+        let touch = try TouchRunner(self)
+        defer { touch.connection.cancel() }
+        let session = try session(), p = session.presenter
+        try show("slide", in: p)
+        let row = try node("padded-status", in: p), words = try node("padded-words", in: p)
+        let presses = try node("header-presses", in: p)
+        let center = { words.convert(CGPoint(x: words.bounds.midX, y: words.bounds.midY), to: self.window) }
+        waitFor("the label is hit-testable in the front window", cap: 5) {
+            words.window === self.window && words.bounds.width > 2 && Agent.frontRefusal(self.window) == nil
+                && self.window.hitTest(center(), with: nil)?.isDescendant(of: words) == true
+        }
+        CATransaction.flush()
+        waitForMainQueue()
+        try tap(center(), with: touch)
         waitFor("the hosted readout's tap pressed the header", cap: 5) { presses.accessibleText == "1" }
+        let start = CGPoint(x: 2, y: words.bounds.midY), finish = CGPoint(x: -2, y: words.bounds.midY)
+        XCTAssertFalse(words.bounds.contains(finish))
+        XCTAssertTrue(row.bounds.contains(words.convert(finish, to: row)))
+        let point = words.convert(start, to: window)
+        XCTAssertTrue(window.hitTest(point, with: nil)?.isDescendant(of: words) == true, "the touch begins on the label")
+        var request = try TouchRunner.aim(point, in: window)
+        let end = try TouchRunner.aim(words.convert(finish, to: window), in: window)
+        request.merge(["op": "drag", "to": end["point"]!, "screenTo": end["screen"]!,
+                       "press": 0.02, "hold": 0.0, "velocity": 25]) { _, new in new }
+        XCTAssertEqual(try touch.ask(request)["done"] as? Bool, true)
+        waitFor("the release pressed the header", cap: 5) { presses.accessibleText == "2" }
     }
 
     func testMoreShowsAndFlipsASwitchChangedByTheApp() throws {
@@ -630,6 +714,31 @@ final class BarHostedIOSTests: XCTestCase {
         waitFor("More flipped the switch and dispatched its press", cap: 5) { value.accessibleText == "off" && noted.accessibleText == "1" }
     }
 
+    func testMoreKeepsOfferingUnboundAndRefusedSwitches() throws {
+        guard hostedWindowScene() != nil else { throw missing("scene", "the active bar offers More entries") }
+        let session = try session(), p = session.presenter
+        try show("switches", in: p)
+        let home = try XCTUnwrap(p.navigationHost.primaryNavigation?.topViewController)
+        let unbound = try item("unbound-switch", on: home), refused = try item("refused-switch", on: home)
+        let nativeUnbound = try XCTUnwrap(p.controls.controls[node("unbound-switch", in: p).id] as? UISwitch)
+        let nativeRefused = try XCTUnwrap(p.controls.controls[node("refused-switch", in: p).id] as? UISwitch)
+        let refusals = try node("refusals", in: p)
+        waitForActivation(session)
+        let before = session.appliedBatches
+        for state: UIAction.State in [.on, .off] {
+            try XCTUnwrap(unbound.menuRepresentation as? UIAction).performWithSender(nil, target: nil)
+            XCTAssertEqual(nativeUnbound.isOn, state == .on)
+            XCTAssertEqual((unbound.menuRepresentation as? UIAction)?.state, state, "the entry follows the native switch")
+        }
+        XCTAssertEqual(session.appliedBatches, before, "both selections ran without a presenter batch")
+        for attempt in 1...2 {
+            try XCTUnwrap(refused.menuRepresentation as? UIAction).performWithSender(nil, target: nil)
+            XCTAssertEqual(refusals.accessibleText, "\(attempt)")
+            XCTAssertFalse(nativeRefused.isOn)
+            XCTAssertEqual((refused.menuRepresentation as? UIAction)?.state, .off, "the entry follows the committed switch")
+        }
+    }
+
     private func stops(in object: NSObject) -> [NSObject] {
         if let view = object as? UIView, view.isHidden || view.accessibilityElementsHidden { return [] }
         if object.isAccessibilityElement { return [object] }
@@ -661,6 +770,52 @@ final class BarHostedIOSTests: XCTestCase {
         XCTAssertTrue(readout.dropFirst().allSatisfy { $0.accessibilityTraits.contains(.button) })
         p.press(try node("retry", in: p).id)
         waitFor("the accessibility element's label follows the readout", cap: 5) { element.accessibilityLabel == "Offline, retried 1" }
+
+        try show("stops", in: p)
+        let expected = [
+            ("status-button", ["Mark"]),
+            ("status-check", ["Check"]),
+            ("unnamed-status", ["In progress"]),
+            ("mixed-status", ["Offline", "Retry"])
+        ]
+        for (id, labels) in expected {
+            let customView = try XCTUnwrap(item(id, on: home).customView)
+            XCTAssertEqual(stops(in: customView).map(\.accessibilityLabel), labels, id)
+        }
+    }
+
+    func testAHostedStatusParagraphKeepsItsSpokenValue() throws {
+        guard hostedWindowScene() != nil else { throw missing("scene", "the bar displays the status paragraph") }
+        let session = try session(), p = session.presenter
+        try show("stops", in: p)
+        let home = try XCTUnwrap(p.navigationHost.primaryNavigation?.topViewController)
+        let view = try XCTUnwrap(item("elapsed", on: home).customView)
+        let element = try XCTUnwrap(stops(in: view).first)
+        XCTAssertEqual(element.accessibilityLabel, "Elapsed time")
+        XCTAssertEqual(element.accessibilityValue, "1:05.32")
+        p.press(try node("advance-status", in: p).id)
+        XCTAssertEqual(element.accessibilityLabel, "Elapsed time")
+        XCTAssertEqual(element.accessibilityValue, "1:06.10")
+    }
+
+    func testCompiledButtonEffectsKeepTheAuthoredFaceInTheBar() throws {
+        guard hostedWindowScene() != nil else { throw missing("scene", "the bar projects compiled button styles") }
+        let session = try session(), p = session.presenter
+        let history = try goToHistory(in: p)
+        XCTAssertEqual(try node("faded-button", in: p).kind, "button")
+        for (id, rows) in [("faded-button", ["opacity"]), ("moving-button", ["translate", "scale", "rotate"])] {
+            let button = try node(id, in: p)
+            XCTAssertTrue(rows.allSatisfy(button.wrote), "\(id) carries the authored effects")
+            XCTAssertTrue(try item(id, on: history).customView is HostedItemView, "\(id) is hosted")
+        }
+    }
+
+    func testAStyledBadgeUsesItsOwnViews() throws {
+        guard hostedWindowScene() != nil else { throw missing("scene", "the bar projects the badge") }
+        let session = try session()
+        let history = try goToHistory(in: session.presenter)
+        let badge = try item("italic-badge", on: history)
+        XCTAssertTrue(badge.customView is HostedItemView, "the author's italic text requires the badge's views")
     }
 
     func testAHostedReadoutAnnouncesAnUpdateOnce() throws {
@@ -746,9 +901,9 @@ final class BarHostedIOSTests: XCTestCase {
         spin(0.3)
         XCTAssertEqual(try node("noted").accessibleText, "1", "no press from Home's bar under History's")
         let history = try XCTUnwrap(nav.topViewController)
-        // A native button's words' colour is its item's tint; a filled
-        // button of one compiled text is UIKit's own item.
-        let red = try XCTUnwrap(item("stop", on: history).tintColor, "the words' colour").resolvedColor(with: history.traitCollection)
+        let stop = try item("stop", on: history)
+        XCTAssertNotNil(stop.image, "the native item shows the symbol")
+        let red = try XCTUnwrap(stop.tintColor, "the authored title colour tints the uncoloured symbol").resolvedColor(with: history.traitCollection)
         var (r, g, b, a) = (CGFloat(0), CGFloat(0), CGFloat(0), CGFloat(0))
         red.getRed(&r, green: &g, blue: &b, alpha: &a)
         XCTAssertTrue(r > 0.8 && g < 0.4 && b < 0.4, "system red, not the bar's tint: \(red)")

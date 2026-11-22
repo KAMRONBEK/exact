@@ -22,6 +22,9 @@ struct HeaderShape: Equatable {
         /// badge: a shape holding a text or a symbol), when the button has
         /// one: the item's image, in the box's own colours and corners.
         let badge: BadgeFace?
+        #if os(tvOS)
+        let dot: BarDotFace?
+        #endif
         /// Whether the button opens a menu-shaped popover or a confirmation
         /// (`MenuHost.pullsDown`): the item's menu, its rows read when it
         /// opens, as LLP 1021 D3's pull-down. Any other popover opens as
@@ -120,6 +123,9 @@ struct HeaderShape: Equatable {
             if #available(iOS 26.0, tvOS 26.0, *) { glassed = hostedGlass }
             hostedInset = glassed && Self.shows(words: button) && !button.wrote("padding_left") && !button.wrote("padding_right") ? Self.titleInset : 0
             badge = button.isNativeButton || hosted ? nil : BadgeFace(button)
+            #if os(tvOS)
+            dot = badge == nil && symbol == nil && text.isEmpty ? BarDotFace(button) : nil
+            #endif
             let invocation = button.presenter?.invocation(of: button)
             menu = invocation.map { $0.opensPopover && button.presenter?.menus.pullsDown($0.target) == true } == true
             menuTitle = menu ? invocation?.target.props["accessibilityLabel"] ?? "" : ""
@@ -157,7 +163,7 @@ struct HeaderShape: Equatable {
             // its author wrote on the symbol, else on the title.
             let faceInk: BatchValue? = face.flatMap { face in
                 let owns = NativeButtonState.colorOwnership(face.rows)
-                if face.symbol != nil { return owns.image ? face.rows.symbol["tint_color"] ?? face.rows.symbol["text_color"] : nil }
+                if face.symbol != nil, owns.image, let ink = face.rows.symbol["tint_color"] ?? face.rows.symbol["text_color"] { return ink }
                 return owns.title ? face.rows.title["text_color"] : nil
             }
             followsTint = (faceInk ?? source?.style["text_color"])?.tintAlpha == 1
@@ -199,7 +205,7 @@ struct HeaderShape: Equatable {
         /// author's, a picture or a link inline) is hosted with its press and
         /// drawn as written, and so is one `visibility` hides.
         static func drawsFace(_ button: NodeView) -> Bool {
-            guard !button.cssVisibilityHidden else { return false }
+            guard !button.cssVisibilityHidden, !faceEffects.contains(where: button.wrote) else { return false }
             if button.isNativeButton { return button.face.map { !$0.hasSubtitleOrPicture } ?? true }
             guard button.kind == "button" else { return false }
             return badge(button) || plain(button)
@@ -211,9 +217,7 @@ struct HeaderShape: Equatable {
         /// handler of its own, no font of the author's. The button's own box is
         /// the bar's glass; a box between it and its parts is no plain face.
         static func plain(_ button: NodeView) -> Bool {
-            // The button's own box is the glass, but a font, an opacity or a
-            // filter on it reaches its words, which UIKit's title would drop.
-            guard !layered(button), !["font_family", "font_size", "font_weight", "font_style", "opacity", "filter"].contains(where: button.wrote) else { return false }
+            guard !layered(button), !["font_family", "font_size", "font_weight", "font_style"].contains(where: button.wrote) else { return false }
             let parts = shown(button)
             guard (1...2).contains(parts.count) else { return false }
             var texts: [NodeView] = [], symbols = 0
@@ -257,17 +261,12 @@ struct HeaderShape: Equatable {
         /// What a plain symbol may write besides: its size and weight, which
         /// the bar's image size replaces, and its tint.
         static let symbolRows: Set<String> = plainRows.union(["font_size", "font_weight", "tint_color", "object_fit"])
-        static let corners: Set<String> = ["border_radius_top_left", "border_radius_top_right", "border_radius_bottom_right",
-                                           "border_radius_bottom_left", "corner_shape"]
-        /// What a badge's box may write: its fill and corners, how it lays its
-        /// part out, and where it sits.
-        static let badgeRows: Set<String> = plainRows.union(corners).union(["background_color", "display", "flex_direction", "align_items",
-                                                                            "justify_content", "overflow_x", "overflow_y",
-                                                                            "aspect_ratio", "box_sizing"])
-        /// What a badge's part may write: a badge draws its text at its own
-        /// size in the author's font (§9.6), and a picture by its fit and corners.
-        static let badgePartRows: Set<String> = symbolRows.union(corners).union(["font_family", "font_style", "font_variant_numeric",
-                                                                                 "object_position", "aspect_ratio"])
+        static let faceEffects = ["opacity", "translate", "scale", "rotate", "filter"]
+        /// The badge draws the box's fill and radii at the bar's image size.
+        static let badgeRows: Set<String> = plainRows.union([
+            "background_color", "border_radius_top_left", "border_radius_top_right", "border_radius_bottom_right",
+            "border_radius_bottom_left", "display", "flex_direction", "align_items", "justify_content",
+        ])
         /// The style rows `node`'s author wrote.
         static func written(_ node: NodeView) -> [String] {
             guard case .array(let rows)? = node.style["written"] else { return [] }
@@ -276,11 +275,9 @@ struct HeaderShape: Equatable {
         /// The badge of §9.6, and only it: one box that writes its fill, its
         /// corners and where it sits (no border, shadow, picture fill,
         /// material or fade), holding one text (no picture or link inline),
-        /// one symbol or one picture that writes its type, colour, fit and
-        /// corners, and no layer beside it.
+        /// one symbol or one picture, and no layer beside it.
         static func badge(_ button: NodeView) -> Bool {
-            // An opacity or a filter on the button reaches the badge, which UIKit's item would drop.
-            guard button.kind == "button", BadgeFace(button) != nil, !layered(button), !button.wrote("opacity"), !button.wrote("filter") else { return false }
+            guard button.kind == "button", BadgeFace(button) != nil, !layered(button) else { return false }
             let kids = shown(button)
             guard kids.count == 1, let box = kids.first, box.kind == "view", !layered(box), !box.cssVisibilityHidden,
                   box.handlers.isEmpty, saysOnly(box), written(box).allSatisfy(badgeRows.contains),
@@ -288,10 +285,11 @@ struct HeaderShape: Equatable {
                   !["top", "right", "bottom", "left"].contains(where: { box.number("border_width_" + $0) > 0 }) else { return false }
             let parts = shown(box)
             guard parts.count == 1, let part = parts.first, !part.cssVisibilityHidden else { return false }
-            guard part.handlers.isEmpty, saysOnly(part), written(part).allSatisfy(badgePartRows.contains) else { return false }
-            // A badge draws its text at its own size (§9.6), a font of the author's or not.
-            if part.isParagraph { return part.inlineText.isEmpty && (part.props["href"] ?? "").isEmpty && part.props["markup"] == nil }
-            return part.kind == "image" && (part.faceSymbol != nil || part.imageSource != nil)
+            guard part.handlers.isEmpty, saysOnly(part) else { return false }
+            if part.isParagraph { return plainText(part) }
+            guard part.kind == "image" else { return false }
+            if part.faceSymbol != nil { return written(part).allSatisfy(plainRows.contains) }
+            return part.imageSource != nil && written(part).allSatisfy { $0 == "object_fit" || plainRows.contains($0) }
         }
         /// Whether `node` draws a child as a layer with no view (`FlatLeavesIOS`).
         static func layered(_ node: NodeView) -> Bool {
@@ -313,7 +311,24 @@ struct HeaderShape: Equatable {
         /// `source` but for whether the item is enabled.
         var face: String {
             if hosted { return source }
-            return "\(toolbarGroup.map(String.init) ?? ""):\(id):\(title):\(symbol ?? ""):\(label ?? ""):\(prominent):\(ownGlass):\(badge?.source ?? ""):\(menu):\(menuTitle):\(menuOrder):\(tint ?? []):\(followsTint):\(font.map { "\($0.fontName) \($0.pointSize) \(TextEngine.controlWeight($0))" } ?? ""):\(testId ?? ""):\(activeSignature)"
+            #if os(tvOS)
+            let paintedFace = badge?.source ?? dot?.source ?? ""
+            #else
+            let paintedFace = badge?.source ?? ""
+            #endif
+            return "\(toolbarGroup.map(String.init) ?? ""):\(id):\(title):\(symbol ?? ""):\(label ?? ""):\(prominent):\(ownGlass):\(paintedFace):\(menu):\(menuTitle):\(menuOrder):\(tint ?? []):\(followsTint):\(font.map { "\($0.fontName) \($0.pointSize) \(TextEngine.controlWeight($0))" } ?? ""):\(testId ?? ""):\(activeSignature)"
+        }
+        func hasSameImage(as other: Item) -> Bool {
+            #if os(tvOS)
+            guard dot == other.dot else { return false }
+            #endif
+            return symbol == other.symbol && badge == other.badge
+        }
+        func image(dimmed: Bool) -> UIImage? {
+            #if os(tvOS)
+            if let dot { return dot.image(dimmed: dimmed) }
+            #endif
+            return badge?.image(dimmed: dimmed) ?? symbol.flatMap { FaceSymbol.image($0, points: FaceSymbol.barItemPoints) }
         }
         private var activeSignature: String {
             let values = active.style.mapValues(\.any)

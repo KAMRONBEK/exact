@@ -272,6 +272,9 @@ extension ControlHost {
             #endif
             if let c = sender as? ExactCheckbox, c.isOn != committed { c.isOn = committed }
         }
+        #if os(iOS)
+        if sender is UISwitch { presenter.navigation.hostedSwitchChanged(id) }
+        #endif
     }
 }
 #endif

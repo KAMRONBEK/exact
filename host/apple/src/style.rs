@@ -134,15 +134,19 @@ pub(crate) fn style_json_rows(
             continue;
         }
         let size = matches!(name, "width" | "height");
-        if matches!(
+        let motion = matches!(
             name,
-            "translate" | "translate_velocity" | "scale" | "rotate" | "opacity" | "animation"
-        ) || !keep.has(id) && (presenter_ignores(name) || size)
+            "translate" | "scale" | "rotate" | "opacity" | "animation"
+        );
+        if motion
+            || name == "translate_velocity"
+            || !keep.has(id) && (presenter_ignores(name) || size)
         {
-            // A size is layout's and an animation the engine's; that its
-            // author wrote one is still said (a glass the author animates
-            // in does not also materialize).
-            if (size || name == "animation") && style.written.has(id) {
+            // A size is layout's, and motion and opacity the engine's, so
+            // their values are not sent; that the author wrote one still is
+            // (a glass the author animates in does not also materialize, and
+            // a bar button with a written opacity keeps its own views).
+            if (size || motion) && style.written.has(id) {
                 let comma = if written.is_empty() { "" } else { "," };
                 let _ = write!(written, "{comma}\"{name}\"");
             }

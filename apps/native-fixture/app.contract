@@ -417,7 +417,7 @@ component NativeFixture
                       // child is a filled box holding a text is an image item.
                       button press=compose aria-label="Profile" testId="badge-item" padding=0
                         column width=32 height=32 border-radius=16 background-color="#e3e3fe" align-items="center" justify-content="center"
-                          text "AB" font-size=13 color="#3838f5"
+                          text "AB" color="#3838f5"
                       // A popover's invoker is a bar item opening a UIMenu.
                       button popovertarget="bar-menu" aria-label="More" testId="menu-item" padding=6 background-color="#e5e7eb"
                         image "symbol:sf/ellipsis.circle" width=20 height=20
