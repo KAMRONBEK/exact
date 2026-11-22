@@ -234,7 +234,9 @@ fn a_header_element_a_targets_bar_has_no_place_for_is_named() {
             .collect()
     };
     let all = "\"ios\": {}, \"android\": {}, \"macos\": {}";
-    // A readout of words the Mac draws, and a spinner it has no place for.
+    // A readout of words the Mac draws, and a spinner it has no place for:
+    // each left out on Android, and the spinner sends the Mac's header to
+    // the page, said once.
     let words = app("            row role=\"status\" aria-label=\"Live\"\n              text \"Live\"\n            progress\n");
     assert_eq!(
         said("apple", "\"ios\": {}, \"web\": {}", &words),
@@ -242,7 +244,7 @@ fn a_header_element_a_targets_bar_has_no_place_for_is_named() {
         "iOS hosts both; the web draws them"
     );
     let both = said("all", all, &words);
-    assert_eq!(both.len(), 2, "{both:?}");
+    assert_eq!(both.len(), 3, "{both:?}");
     assert!(
         both[0].starts_with("this readout")
             && both[0].contains("android")
@@ -251,23 +253,79 @@ fn a_header_element_a_targets_bar_has_no_place_for_is_named() {
         both[0]
     );
     assert!(
-        both[1].starts_with("this `progress`")
-            && both[1].contains("android")
-            && both[1].contains("whole header is drawn in the page"),
+        both[1].starts_with("this `progress`") && both[1].contains("android"),
         "{}",
         both[1]
     );
-    // Inside an `if`, as the guide's spinner is, a readout holding a spinner
-    // sends the Mac's header to the page; a button whose face iOS hosts is an
-    // action everywhere; what its author keeps in the page is no item.
+    assert!(
+        both[2].starts_with("on macos") && both[2].contains("whole header is drawn in the page"),
+        "{}",
+        both[2]
+    );
+    // Inside an `if`, as the guide's spinner is: a readout holding a spinner,
+    // left out on Android, and no face for the Mac's toolbar; a button whose
+    // face iOS hosts is an action everywhere; what its author keeps in the
+    // page is no item.
     let more = app("            if true\n              row role=\"status\" aria-label=\"Updating\"\n                progress\n            button press=go aria-label=\"Live\"\n              column width=6 height=6 background-color=\"#0a0\"\n              text \"Live\"\n            progress appearance=\"none\"\n");
     let said_more = said("more", all, &more);
-    assert_eq!(said_more.len(), 1, "{said_more:?}");
+    assert_eq!(said_more.len(), 2, "{said_more:?}");
     assert!(
-        said_more[0].starts_with("this readout")
-            && said_more[0].contains("whole header is drawn in the page"),
+        said_more[0].starts_with("this readout") && said_more[0].contains("android"),
         "{}",
         said_more[0]
+    );
+    assert!(
+        said_more[1].starts_with("on macos")
+            && said_more[1].contains("a readout holding more than words"),
+        "{}",
+        said_more[1]
+    );
+    // A text in a box after the heading is the Mac's window subtitle; a
+    // `progress` that is itself the readout is no face for its toolbar.
+    let boxed = said(
+        "boxed",
+        "\"ios\": {}, \"macos\": {}",
+        &app("            column\n              text \"On time\"\n"),
+    );
+    assert_eq!(boxed, Vec::<String>::new(), "the window's subtitle");
+    let spun = said(
+        "spun",
+        "\"ios\": {}, \"macos\": {}",
+        &app("            progress role=\"status\" aria-label=\"Updating\"\n"),
+    );
+    assert_eq!(spun.len(), 1, "{spun:?}");
+    assert!(
+        spun[0].contains("a readout holding more than words"),
+        "{}",
+        spun[0]
+    );
+    // Arms of a choice never show together: a search field in each is no
+    // second one, and a heading in each with a spinner after them is one
+    // heading, the spinner still named.
+    let arms = |name: &str, header: &str| -> Vec<(String, String)> {
+        let dir =
+            crate::scratch::Scratch::new(format!("exact2-arms-{name}-{}", std::process::id()));
+        std::fs::write(dir.join("app.json"), "{\"app\": {\"id\": \"dev.test.bar\", \"name\": \"Bar\"}, \"host\": {\"ios\": {}, \"android\": {}}}").unwrap();
+        std::fs::write(dir.join("app.contract"), format!("routes nav\n  home \"/\"\ncomponent App\n  state q = \"\"\n  state on = true\n  action typed(v: string)\n    q = v\n  view\n    main navigationKey=`${{top(nav).id}}` width=\"100%\" height=\"100%\"\n      for e in stack(nav) key=e.id\n        column navigationKey=`${{e.id}}` position=\"absolute\" inset=0\n          header display=\"flex\"\n{header}          text \"body\"\n")).unwrap();
+        let (plan, warnings) = contract::compile_path_all_warned(&dir.at("app.contract"), false);
+        plan.unwrap_or_else(|e| panic!("{e:?}"));
+        warnings
+            .iter()
+            .filter(|w| w.id.starts_with("lower-header") || w.id == "header-item-left-out")
+            .map(|w| (w.id.to_string(), w.message.clone()))
+            .collect()
+    };
+    let searches = arms("search", "            text \"Car\" role=\"heading\" aria-level=1\n            if on\n              input type=\"search\" value=q input=typed\n            else\n              input type=\"search\" value=q input=typed\n");
+    assert_eq!(
+        searches,
+        Vec::<(String, String)>::new(),
+        "one search field whichever arm shows"
+    );
+    let headed = arms("headed", "            if on\n              text \"Car\" role=\"heading\" aria-level=1\n            else\n              text \"Van\" role=\"heading\" aria-level=1\n            progress\n");
+    assert_eq!(headed.len(), 1, "{headed:?}");
+    assert!(
+        headed[0].0 == "header-item-left-out" && headed[0].1.starts_with("this `progress`"),
+        "{headed:?}"
     );
     assert!(contract_lower::warning_rank::information(
         "header-item-left-out"

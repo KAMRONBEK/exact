@@ -219,9 +219,11 @@ struct Bar<'a> {
     /// an item of its own (LLP 1141.004 D1): with no heading, it keeps the
     /// header in the page.
     hosted: Vec<(Span, String)>,
-    /// The readouts (`role="status"`), bar items on iOS, and whether the
-    /// Mac's toolbar draws each (`mac_draws`).
-    readouts: Vec<(Span, String, bool)>,
+    /// The readouts (`role="status"`), bar items on iOS.
+    readouts: Vec<(Span, String)>,
+    /// The headings of each arm of each `if` or `match` in the header, each
+    /// arm read alone (`walk_region`).
+    arm_headings: Vec<usize>,
 }
 
 /// A route's `header` that is not the bar, in `lower-header-no-bar`'s words (LLP 1115.000 D5.2).
@@ -286,6 +288,14 @@ fn check_header(header: Visit<'_>, content: &[Visit<'_>], out: &mut Vec<LowerErr
         && bar.unplaced.is_empty()
         && bar.hosted.is_empty();
     if bar.headings != 1 && !untitled {
+        // A heading in each arm of a choice, and none outside it: one heading
+        // whichever arm shows, so what the bar leaves out is still named.
+        if bar.headings == 0
+            && !bar.arm_headings.is_empty()
+            && bar.arm_headings.iter().all(|h| *h == 1)
+        {
+            left_out(&bar, header, out);
+        }
         if !bar.doubt {
             out.push(LowerError {
                 id: "lower-header-no-bar",
@@ -308,7 +318,7 @@ fn check_header(header: Visit<'_>, content: &[Visit<'_>], out: &mut Vec<LowerErr
     if let Some(title) = bar.title {
         title::title_twice(title, content, out);
     }
-    left_out(&bar, out);
+    left_out(&bar, header, out);
     for (span, what) in bar.unplaced {
         out.push(LowerError {
             id: "lower-header-unplaced",
@@ -323,30 +333,56 @@ fn check_header(header: Visit<'_>, content: &[Visit<'_>], out: &mut Vec<LowerErr
 /// The children of `parent`, a header or a box in it, into `bar`. A box that
 /// holds the heading is the title's: nothing in it is an item of its own.
 fn walk<'a>(parent: Visit<'a>, bar: &mut Bar<'a>) {
-    let start = (title_row(parent), false);
-    for _ in parent.regions()[0].walk_regions_with(start, |node, &(glyphs, title)| {
-        let descend = bar.visit(node, glyphs, title);
-        // An `if` or a `match`: each arm is read where the choice stands, as
-        // what it shows when taken.
+    walk_region(parent.regions()[0], (title_row(parent), false, false), bar);
+}
+
+/// Whether its author keeps `node` in the page (`appearance="none"`), with
+/// what it holds.
+fn opted_out(node: Visit<'_>) -> bool {
+    node.element()
+        .is_some_and(|(_, _, a)| literal(a, "appearance") == Some("none"))
+}
+
+/// `region` into `bar`, from `start` (a glyph row, inside the heading's box,
+/// kept in the page). An `if` or a `match` is read arm by arm, each alone,
+/// as what it shows when taken: an arm's hosted elements and readouts are
+/// the bar's to name, and nothing in one arm counts against another.
+fn walk_region<'a>(region: Structure<'a>, start: (bool, bool, bool), bar: &mut Bar<'a>) {
+    let mut arms = Vec::new();
+    for _ in region.walk_regions_with(start, |node, &(glyphs, title, kept)| {
         if node.is_choice() {
-            return [Some((glyphs, title)), Some((glyphs, title))];
+            bar.doubt = true;
+            arms.extend(node.regions().map(|arm| (arm, (glyphs, title, kept))));
+            return [None, None];
         }
+        let kept = kept || opted_out(node);
+        let descend = bar.visit(node, glyphs, title, kept);
         [
-            descend.then(|| (title_row(node), title || holds_heading(node))),
+            descend.then(|| (title_row(node), title || holds_heading(node), kept)),
             None,
         ]
     }) {}
+    for (arm, state) in arms {
+        let mut one = Bar {
+            passed: bar.passed,
+            subtitle: bar.subtitle,
+            ..Bar::default()
+        };
+        walk_region(arm, state, &mut one);
+        bar.hosted.extend(one.hosted);
+        bar.readouts.extend(one.readouts);
+        bar.arm_headings.push(one.headings);
+        bar.arm_headings.extend(one.arm_headings);
+    }
 }
 
 impl<'a> Bar<'a> {
-    /// `title`: `node` is inside the heading's own box.
-    fn visit(&mut self, node: Visit<'a>, glyphs: bool, title: bool) -> bool {
+    /// `title`: `node` is inside the heading's own box; `kept`: its author
+    /// keeps it in the page (`appearance="none"`, on it or around it), so it
+    /// is no item and takes no place of the bar's.
+    fn visit(&mut self, node: Visit<'a>, glyphs: bool, title: bool, kept: bool) -> bool {
         let bar = self;
         let span = node.span();
-        // What its author keeps in the page (`appearance="none"`) is no item.
-        let kept = node
-            .element()
-            .is_some_and(|(_, _, a)| literal(a, "appearance") == Some("none"));
         // Outside the heading's box the bar shows it as an item; inside, the
         // title shows only its own parts.
         let mut hide = |what: String| match title {
@@ -387,9 +423,10 @@ impl<'a> Bar<'a> {
                 bar.placed = true;
                 if !kept {
                     let what = "this readout (`role=\"status\"`)".to_string();
-                    bar.readouts.push((span, what, mac_draws(node)));
+                    bar.readouts.push((span, what));
                 }
             }
+            Part::Text if kept => {}
             Part::Text if bar.passed && !bar.subtitle => bar.subtitle = true,
             Part::Text if bar.passed => hide("this text, after the subtitle,".into()),
             Part::Text => hide("this text, before the heading,".into()),
@@ -445,7 +482,9 @@ fn opens(attrs: &[Attr]) -> bool {
                     .any(|w| c.eq_ignore_ascii_case(w))
             });
     }
+    // An empty `popovertarget` names nothing either, and opens nothing.
     has(attrs, "popovertarget")
+        && literal(attrs, "popovertarget") != Some("")
         && !literal(attrs, "popovertargetaction").is_some_and(|a| a.eq_ignore_ascii_case("hide"))
 }
 
@@ -454,63 +493,124 @@ fn has_press(node: Visit<'_>) -> bool {
         .is_some_and(|(_, _, attrs)| has(attrs, "press"))
 }
 
-/// Whether the Mac's toolbar draws a readout (`MacBarFace`): its words, its
-/// symbols and its dots, in boxes; anything else (a spinner, a picture, a
-/// control) sends the whole header to the page. A part the compiler cannot
-/// see is given the benefit.
+/// Whether the Mac's toolbar draws a readout (`MacBarFace`): a text, or a
+/// box of words, symbols and dots; anything else (a spinner, a picture, a
+/// control) it has no face for. A part the compiler cannot see is given the
+/// benefit.
 fn mac_draws(readout: Visit<'_>) -> bool {
-    readout.children().all(|k| match part(k) {
-        Part::Text | Part::Hidden | Part::Doubt => true,
-        Part::Box => mac_draws(k),
-        Part::Other => symbol(k),
-        _ => false,
-    })
+    match readout.element() {
+        Some(("text", _, _)) => true,
+        Some((tag, _, _)) if BOXES.contains(&tag) => readout.children().all(|k| match part(k) {
+            Part::Text | Part::Hidden | Part::Doubt => true,
+            Part::Box => mac_draws(k),
+            Part::Other => symbol(k),
+            _ => false,
+        }),
+        Some(_) => false,
+        None => true,
+    }
 }
 
-/// `header-item-left-out` (LLP 1141.004 D5), information: for the targets
-/// the app ships whose bar has no place for an element iOS hosts, each such
-/// element. Android's top app bar and tvOS's bar leave it out, a readout
-/// too; the Mac's toolbar draws a readout of words, symbols and dots, and has
-/// no place for any other such element, so there the whole header is drawn
-/// in the page. A button whose face iOS hosts is an action on every target,
-/// and none of this.
-fn left_out(bar: &Bar<'_>, out: &mut Vec<LowerError>) {
+/// Whether a toolbar item shows all of a button's face (`HeaderMac.showable`):
+/// words, symbols, dots in boxes, and at most one picture.
+fn mac_button(button: Visit<'_>) -> bool {
+    fn all(node: Visit<'_>, pictures: &mut usize) -> bool {
+        node.children().all(|k| match part(k) {
+            Part::Text | Part::Hidden | Part::Doubt => true,
+            Part::Box => all(k, pictures),
+            Part::Other if symbol(k) => true,
+            Part::Other if matches!(k.element(), Some(("image", _, _))) => {
+                *pictures += 1;
+                true
+            }
+            _ => false,
+        })
+    }
+    let mut pictures = 0;
+    all(button, &mut pictures) && pictures <= 1
+}
+
+/// The first part of `header` the Mac's toolbar has no place for, and why, as
+/// `HeaderMac.read` decides (LLP 1115.002 D2): it walks boxes, takes the
+/// heading, the first text after it as the window's subtitle, the buttons
+/// whose face an item shows, the readouts it draws, one search field and a
+/// tablist; anything else keeps the whole header in the page. An arm of a
+/// choice is read as if taken.
+fn mac_refusal(header: Visit<'_>) -> Option<(Span, &'static str)> {
+    fn walk(
+        node: Visit<'_>,
+        passed: &mut bool,
+        subtitle: &mut bool,
+    ) -> Option<(Span, &'static str)> {
+        for k in node.children() {
+            let what = match part(k) {
+                _ if k.is_choice() => match walk(k, passed, subtitle) {
+                    Some(found) => return Some(found),
+                    None => continue,
+                },
+                Part::Hidden | Part::Doubt | Part::Search | Part::Tablist => continue,
+                Part::Heading => {
+                    *passed = true;
+                    continue;
+                }
+                Part::Text if *passed && !*subtitle => {
+                    *subtitle = true;
+                    continue;
+                }
+                Part::Text => "a text that is neither its heading nor the one after it",
+                Part::Status if mac_draws(k) => continue,
+                Part::Status => "a readout holding more than words, symbols and dots",
+                Part::Pressable if has_press(k) && holds_heading(k) => "a pressable title",
+                Part::Pressable if opted_out(k) => "a button that writes `appearance=\"none\"`",
+                Part::Pressable if mac_button(k) => continue,
+                Part::Pressable => {
+                    "a button whose face holds more than words, symbols, dots and one picture"
+                }
+                Part::Box => match walk(k, passed, subtitle) {
+                    Some(found) => return Some(found),
+                    None => continue,
+                },
+                Part::Other => "an element other than its heading, its subtitle, buttons, readouts, a search field and a tablist",
+            };
+            return Some((k.span(), what));
+        }
+        None
+    }
+    walk(header, &mut false, &mut false)
+}
+
+/// `header-item-left-out` (LLP 1141.004 D5), information, for the targets
+/// the app ships: each element iOS hosts that Android's top app bar and
+/// tvOS's bar leave out, a readout too (a button whose face iOS hosts is an
+/// action there, and none of this); and, once, the part of the header the
+/// Mac's toolbar has no place for, which sends the whole header to the page.
+fn left_out(bar: &Bar<'_>, header: Visit<'_>, out: &mut Vec<LowerError>) {
     let targets = crate::icons::shipped();
     let drops: Vec<String> = (targets.iter())
         .filter(|t| matches!(t.name.as_str(), "android" | "tvos"))
         .map(|t| t.described())
         .collect();
-    let mac = targets
-        .iter()
-        .find(|t| t.name == "macos")
-        .map(|t| t.described());
-    let mut items: Vec<(&Span, &String, bool)> = (bar.hosted.iter().map(|(s, w)| (s, w, false)))
-        .chain(bar.readouts.iter().map(|(s, w, mac)| (s, w, *mac)))
-        .collect();
-    items.sort_by_key(|(span, _, _)| (span.line, span.col));
-    // `drawn`: the Mac's toolbar draws it, a readout of words, symbols and dots.
-    for (span, what, drawn) in items {
-        let mut says = Vec::new();
-        if !drops.is_empty() {
-            says.push(format!(
-                "on {} the bar has no place for it, and it is left out",
-                drops.join(" and ")
-            ));
+    let mut found: Vec<(Span, String)> = Vec::new();
+    if !drops.is_empty() {
+        for (span, what) in bar.hosted.iter().chain(bar.readouts.iter()) {
+            let what = what
+                .trim_end_matches(',')
+                .trim_end_matches(", before the heading")
+                .trim_end_matches(", after the subtitle");
+            found.push((*span, format!("{what} in this route's `header` is a bar item on iOS, drawn as written; but on {} the bar has no place for it, and it is left out", drops.join(" and "))));
         }
-        if let Some(mac) = mac.as_ref().filter(|_| !drawn) {
-            says.push(format!("on {mac} the toolbar has no place for it, so the whole header is drawn in the page as written"));
+    }
+    if let Some(mac) = targets.iter().find(|t| t.name == "macos") {
+        if let Some((span, what)) = mac_refusal(header) {
+            found.push((span, format!("on {}, this route's `header` holds {what}, which the window's toolbar has no place for, so the whole header is drawn in the page as written", mac.described())));
         }
-        if says.is_empty() {
-            continue;
-        }
+    }
+    found.sort_by_key(|(span, _)| (span.line, span.col));
+    for (span, says) in found {
         out.push(LowerError {
             id: "header-item-left-out",
-            message: format!(
-                "{} in this route's `header` is a bar item on iOS, drawn as written; but {}. The web and desktop Linux draw the header as written. To show it on every target, move it below the `header`, into the route's content (LLP 1141.004 D5; docs/contract-for-agents.md, \"Tabs and stacks\")",
-                what.trim_end_matches(',').trim_end_matches(", before the heading").trim_end_matches(", after the subtitle"),
-                says.join("; and ")
-            ),
-            span: *span,
+            message: format!("{says}. The web and desktop Linux draw the header as written. To show it on every target, move it below the `header`, into the route's content (LLP 1141.004 D5; docs/contract-for-agents.md, \"Tabs and stacks\")"),
+            span,
         });
     }
 }

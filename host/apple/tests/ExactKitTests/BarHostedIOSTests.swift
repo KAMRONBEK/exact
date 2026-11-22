@@ -349,6 +349,43 @@ final class BarHostedIOSTests: XCTestCase {
         XCTAssertEqual(edged.trailing.last?.badge?.text, "AB", "the hidden sibling is no part")
     }
 
+    /// A plain face writes nothing UIKit's title would drop, and a badge's box
+    /// is one fill: words in Markdown, an opacity on the words or the button,
+    /// and a badge box with a material, a press, a border or a faded part are
+    /// each hosted and drawn as written. A colour on the words is still plain.
+    /// A readout whose one action is a Markdown link presses, so it has glass.
+    func testAPlainFaceWritesOnlyColourAndABadgeIsOneFill() throws {
+        let press: (Int, [String: Any]) -> [String: Any] = { ["op": "create", "id": $0, "kind": "button", "handlers": ["press"], "style": $1] }
+        let words = route([press(4, [:]), text(5, "Live", style: ["text_color": [255, 0, 0, 255], "written": ["text_color"]]),
+                           press(6, [:]), text(7, "Live", style: ["opacity": 0, "written": ["opacity"]]),
+                           press(8, [:]), text(9, "[History](/history)", ["markup": "markdown"]),
+                           press(10, ["opacity": 0.5, "written": ["opacity"]]), text(11, "Live"),
+                           status(12), text(13, "See [History](/history)", ["markup": "markdown"])],
+                          kids: [4, 6, 8, 10, 12], more: [["op": "children", "id": 4, "ids": [5]], ["op": "children", "id": 6, "ids": [7]],
+                                                          ["op": "children", "id": 8, "ids": [9]], ["op": "children", "id": 10, "ids": [11]],
+                                                          ["op": "children", "id": 12, "ids": [13]]])
+        let plain = try bar(words)
+        XCTAssertEqual(plain.trailing.map(\.hosted), [false, true, true, true, true])
+        XCTAssertEqual(plain.trailing.first?.title, "Live")
+        XCTAssertEqual(plain.trailing.last?.hostedGlass, true, "a Markdown link presses")
+        let fill: [String: Any] = ["background_color": [40, 100, 200, 255], "border_radius": 16]
+        let me: (Int) -> [String: Any] = { ["op": "create", "id": $0, "kind": "button", "handlers": ["press"], "props": ["accessibilityLabel": "Me"]] }
+        let box: (Int, [String: Any], [String: Any]) -> [String: Any] = { ["op": "create", "id": $0, "kind": "view", "style": fill.merging($1) { $1 }, "props": $2] }
+        let badges = route([me(4), box(5, [:], [:]), text(6, "AB"),
+                            me(7), box(8, [:], ["backgroundMaterial": "regular"]), text(9, "AB"),
+                            me(10), ["op": "create", "id": 11, "kind": "view", "style": fill, "handlers": ["press"]], text(12, "AB"),
+                            me(13), box(14, ["border_width": 1, "border_color": [0, 0, 0, 255]], [:]), text(15, "AB"),
+                            me(16), box(17, [:], [:]), text(18, "AB", style: ["opacity": 0.5, "written": ["opacity"]])],
+                           kids: [4, 7, 10, 13, 16], more: [["op": "children", "id": 4, "ids": [5]], ["op": "children", "id": 5, "ids": [6]],
+                                                            ["op": "children", "id": 7, "ids": [8]], ["op": "children", "id": 8, "ids": [9]],
+                                                            ["op": "children", "id": 10, "ids": [11]], ["op": "children", "id": 11, "ids": [12]],
+                                                            ["op": "children", "id": 13, "ids": [14]], ["op": "children", "id": 14, "ids": [15]],
+                                                            ["op": "children", "id": 16, "ids": [17]], ["op": "children", "id": 17, "ids": [18]]])
+        let drawn = try bar(badges)
+        XCTAssertEqual(drawn.trailing.map(\.hosted), [false, true, true, true, true])
+        XCTAssertEqual(drawn.trailing.first?.badge?.text, "AB")
+    }
+
     /// A title wrapper that opts out after the bar lifted its readout keeps
     /// the readout in the page with it: the opt-out is read in the authored
     /// tree.

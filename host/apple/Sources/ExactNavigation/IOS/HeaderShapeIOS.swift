@@ -164,7 +164,10 @@ struct HeaderShape: Equatable {
             // What `visibility` hides presses nothing a person sees; a child it
             // shows (`visibility: visible`) still may.
             (!node.cssVisibilityHidden && (node.isButton || node.actsAsButton || node.handlers.contains("press") || node.kind == "input"
-                || (node.kind == "control" && node.props["type"] != "progress") || node.props["href"] != nil))
+                || (node.kind == "control" && node.props["type"] != "progress") || node.props["href"] != nil
+                // A link or a press inline, which its paragraph owns, a Markdown link among them.
+                || node.inlineText.contains { $0.handlers.contains("press") || !($0.props["href"] ?? "").isEmpty }
+                || (node.props["markup"] == "markdown" && (node.props["text"] ?? "").contains("]("))))
                 || shown(node).contains(where: presses)
         }
         /// `node`'s children that show (none `display: none`).
@@ -191,22 +194,39 @@ struct HeaderShape: Equatable {
         /// handler of its own, no font of the author's. The button's own box is
         /// the bar's glass; a box between it and its parts is no plain face.
         static func plain(_ button: NodeView) -> Bool {
-            guard !layered(button) else { return false }
+            // The button's own box is the glass, but a font, an opacity or a
+            // filter on it reaches its words, which UIKit's title would drop.
+            guard !layered(button), !["font_family", "font_size", "font_weight", "font_style", "opacity", "filter"].contains(where: button.wrote) else { return false }
             let parts = shown(button)
             guard (1...2).contains(parts.count) else { return false }
             var texts = 0, symbols = 0
             for part in parts {
                 guard !part.cssVisibilityHidden, part.handlers.isEmpty else { return false }
                 if plainText(part) { texts += 1 }
-                else if part.kind == "image", part.faceSymbol != nil { symbols += 1 }
+                else if part.kind == "image", part.faceSymbol != nil, written(part).allSatisfy(symbolRows.contains) { symbols += 1 }
                 else { return false }
             }
             return texts <= 1 && symbols <= 1
         }
-        /// One run of words in the bar's type, which acts as nothing of its own.
+        /// One run of words in the bar's type, which acts as nothing of its own
+        /// and writes nothing UIKit's title would drop: its colour and where
+        /// it sits only, no Markdown, no span, `href` or handler.
         static func plainText(_ node: NodeView) -> Bool {
             node.isParagraph && node.inlineText.isEmpty && node.handlers.isEmpty && (node.props["href"] ?? "").isEmpty
-                && !["font_family", "font_size", "font_weight", "font_style"].contains(where: node.wrote)
+                && node.props["markup"] == nil && written(node).allSatisfy(plainRows.contains)
+        }
+        /// What a plain text may write: its colour, and where it sits.
+        static let plainRows: Set<String> = ["text_color", "flex_grow", "flex_shrink", "flex_basis", "align_self", "text_align", "direction",
+                                             "width", "height", "min_width", "min_height", "max_width", "max_height",
+                                             "margin_top", "margin_right", "margin_bottom", "margin_left",
+                                             "padding_top", "padding_right", "padding_bottom", "padding_left"]
+        /// What a plain symbol may write besides: its size and weight, which
+        /// the bar's image size replaces, and its tint.
+        static let symbolRows: Set<String> = plainRows.union(["font_size", "font_weight", "tint_color", "object_fit"])
+        /// The style rows `node`'s author wrote.
+        static func written(_ node: NodeView) -> [String] {
+            guard case .array(let rows)? = node.style["written"] else { return [] }
+            return rows.compactMap { if case .string(let key) = $0 { return key } else { return nil } }
         }
         /// The badge of §9.6, and only it: one filled box, no border, shadow
         /// or picture fill, holding one text (no picture or link inline), one
@@ -215,13 +235,14 @@ struct HeaderShape: Equatable {
             guard button.kind == "button", BadgeFace(button) != nil, !layered(button) else { return false }
             let kids = shown(button)
             guard kids.count == 1, let box = kids.first, box.kind == "view", !layered(box), !box.cssVisibilityHidden,
+                  box.handlers.isEmpty, box.props["backgroundMaterial"] == nil, !box.wrote("opacity"), !box.wrote("filter"),
                   box.style["box_shadow"] == nil, box.style["background_image"] == nil, box.number("border_width") == 0,
                   !["top", "right", "bottom", "left"].contains(where: { box.number("border_width_" + $0) > 0 }) else { return false }
             let parts = shown(box)
             guard parts.count == 1, let part = parts.first, !part.cssVisibilityHidden else { return false }
-            guard part.handlers.isEmpty else { return false }
+            guard part.handlers.isEmpty, !part.wrote("opacity"), !part.wrote("filter") else { return false }
             // A badge draws its text at its own size (§9.6), a font of the author's or not.
-            if part.isParagraph { return part.inlineText.isEmpty && (part.props["href"] ?? "").isEmpty }
+            if part.isParagraph { return part.inlineText.isEmpty && (part.props["href"] ?? "").isEmpty && part.props["markup"] == nil }
             return part.kind == "image" && (part.faceSymbol != nil || part.imageSource != nil)
         }
         /// Whether `node` draws a child as a layer with no view (`FlatLeavesIOS`).

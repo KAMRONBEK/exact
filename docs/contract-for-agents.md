@@ -4213,8 +4213,9 @@ main navigationKey=`${top(nav).id}` navigationBack="close" navigate=follow displ
   `buttonStyle="glass"` on a header button gives that item a capsule of its own
   (`sharesBackground = false`).
 - A header `button` (or `link`) whose own children are one symbol, one plain text, or a
-  symbol beside a plain text (no box around them; a text with no span, link, `press` or
-  font of your own) is UIKit's own bar item: a symbol is its image and a text its title, in the bar's
+  symbol beside a plain text (no box around them; a text with no span, link, Markdown or
+  `press`, that writes nothing but its `color`, with no font, opacity or filter on it or
+  the button) is UIKit's own bar item: a symbol is its image and a text its title, in the bar's
   type, the platform's; with both, the symbol is the image and the text its spoken name,
   as a hand-built bar's item has them. The button's own fill, border and padding give way
   to the bar's glass. On a native button a `font-size` or `font-weight` sets that title's
@@ -4254,11 +4255,15 @@ main navigationKey=`${top(nav).id}` navigationBack="close" navigate=follow displ
 - What a hosted item does not do, so plan for it:
   - **Android and tvOS leave out an element the bar has no object for** (a spinner, a
     picture, a text, a readout). A button whose face iOS hosts (a dot beside its label) is
-    still an action there, shown by its words or symbol. The Mac's toolbar draws a
-    readout of words, symbols and dots, and a button's face; for any other such element,
-    a readout holding a spinner included, it draws the whole header in the page. The
-    compiler names each element left out for the targets your app ships
-    (`header-item-left-out`, information). To show something on every target, put it
+    still an action there, shown by its words or symbol. The Mac's toolbar takes a header
+    only when it has a place for every part: the heading, the first text after it (in a
+    box or not) as the window's subtitle, buttons whose face is words, symbols, dots and
+    at most one picture, readouts of words, symbols and dots, one search field and a
+    tablist of titles. Anything else (a spinner, a picture, a second text, a pressable
+    title, a button holding a spinner) sends the whole header to the page. The compiler
+    names each element Android or tvOS leaves out, and the first part the Mac has no
+    place for, once a header, for the targets your app ships (`header-item-left-out`,
+    information). To show something on every target, put it
     below the `header`, in the route's content.
   - **An automatic size is held to a third of the bar's width and 44 points of height**,
     and UIKit shrinks or hides the title before the items; a `width`, `height` or minimum
@@ -4353,7 +4358,7 @@ main navigationKey=`${top(nav).id}` navigationBack="close" navigate=follow displ
   `id="back"` control the bar's own Back, which is the back/forward pair where the
   navigation root offers Forward (its `navigationHistory`, both when it says nothing).
   A header holding anything else (a picture, a text before the heading or a second one
-  after the subtitle, a pressable title, a button drawn as a box) stays in the page as
+  after the subtitle, a pressable title, a button holding a spinner or a second picture) stays in the page as
   written, whole, and `logs` says what it was. Under the agent
   the authored header paints; `--chrome platform` on `macos` shows the bar, `tap` and
   `type` naming a header's button, tab or search input go through it
