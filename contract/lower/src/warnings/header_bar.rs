@@ -57,16 +57,7 @@ fn part(node: Visit<'_>) -> Part {
     }
     // A link navigates, given the benefit as a pressed thing; a disabled button is a dimmed item.
     let disabled = |a: &Attr| a.name == "disabled" && !matches!(a.value, Expr::Bool(false, _));
-    // A command that opens what it names (`Invocation::opens`); a computed one is given the benefit.
-    let opens = |c: &str| {
-        ["show-modal", "show-popover", "toggle-popover"]
-            .iter()
-            .any(|w| c.eq_ignore_ascii_case(w))
-    };
-    let item = attrs.iter().any(disabled)
-        || (has(attrs, "popovertarget") && literal(attrs, "popovertargetaction") != Some("hide"))
-        || (has(attrs, "commandfor")
-            && (computed(attrs, "command") || literal(attrs, "command").is_some_and(opens)));
+    let item = attrs.iter().any(disabled) || opens(attrs);
     // A link follows its `href`, unless it has none or an empty one (`fact::HREF`).
     let follows = has(attrs, "href") && literal(attrs, "href") != Some("");
     if has(attrs, "press")
@@ -228,6 +219,8 @@ struct Bar<'a> {
     /// an item of its own (LLP 1141.004 D1): with no heading, it keeps the
     /// header in the page.
     hosted: Vec<(Span, String)>,
+    /// The readouts (`role="status"`), bar items on iOS and the Mac.
+    readouts: Vec<(Span, String)>,
 }
 
 /// A route's `header` that is not the bar, in `lower-header-no-bar`'s words (LLP 1115.000 D5.2).
@@ -314,6 +307,7 @@ fn check_header(header: Visit<'_>, content: &[Visit<'_>], out: &mut Vec<LowerErr
     if let Some(title) = bar.title {
         title::title_twice(title, content, out);
     }
+    left_out(&bar, out);
     for (span, what) in bar.unplaced {
         out.push(LowerError {
             id: "lower-header-unplaced",
@@ -378,7 +372,11 @@ impl<'a> Bar<'a> {
             Part::Pressable => bar.placed = true,
             // A status around the heading is no readout: walked for it.
             Part::Status if holds_heading(node) => return true,
-            Part::Status => bar.placed = true,
+            Part::Status => {
+                bar.placed = true;
+                bar.readouts
+                    .push((span, "this readout (`role=\"status\"`)".into()));
+            }
             Part::Text if bar.passed && !bar.subtitle => bar.subtitle = true,
             Part::Text if bar.passed => hide("this text, after the subtitle,".into()),
             Part::Text => hide("this text, before the heading,".into()),
@@ -415,21 +413,74 @@ impl<'a> Bar<'a> {
 }
 
 /// Whether the node opens what it names, a popover or a dialog
-/// (`Invocation::opens`); a computed command is given the benefit.
+/// (`Invocation::opens`).
 fn opens_named(node: Visit<'_>) -> bool {
-    node.element().is_some_and(|(_, _, attrs)| {
-        let opens = |c: &str| {
-            ["show-modal", "show-popover", "toggle-popover"]
-                .iter()
-                .any(|w| c.eq_ignore_ascii_case(w))
-        };
-        (has(attrs, "popovertarget") && literal(attrs, "popovertargetaction") != Some("hide"))
-            || (has(attrs, "commandfor")
-                && (computed(attrs, "command") || literal(attrs, "command").is_some_and(opens)))
-    })
+    node.element().is_some_and(|(_, _, attrs)| opens(attrs))
+}
+
+/// Whether these attributes open what they name, as the kernel resolves an
+/// invocation (`Invocation::opens`): a `commandfor` governs a `popovertarget`
+/// beside it, and a popover action `hide` closes, in any case. A computed
+/// command is given the benefit.
+fn opens(attrs: &[Attr]) -> bool {
+    if has(attrs, "commandfor") {
+        return computed(attrs, "command")
+            || literal(attrs, "command").is_some_and(|c| {
+                ["show-modal", "show-popover", "toggle-popover"]
+                    .iter()
+                    .any(|w| c.eq_ignore_ascii_case(w))
+            });
+    }
+    has(attrs, "popovertarget")
+        && !literal(attrs, "popovertargetaction").is_some_and(|a| a.eq_ignore_ascii_case("hide"))
 }
 
 fn has_press(node: Visit<'_>) -> bool {
     node.element()
         .is_some_and(|(_, _, attrs)| has(attrs, "press"))
+}
+
+/// `header-item-left-out` (LLP 1141.004 D5), information: for the targets
+/// the app ships whose bar has no place for an element iOS hosts, each such
+/// element. Android's top app bar and tvOS's bar leave it out, a readout
+/// too; the Mac's toolbar has no place for one other than a readout, so
+/// there the whole header is drawn in the page.
+fn left_out(bar: &Bar<'_>, out: &mut Vec<LowerError>) {
+    let targets = crate::icons::shipped();
+    let drops: Vec<String> = (targets.iter())
+        .filter(|t| matches!(t.name.as_str(), "android" | "tvos"))
+        .map(|t| t.described())
+        .collect();
+    let mac = targets
+        .iter()
+        .find(|t| t.name == "macos")
+        .map(|t| t.described());
+    let mut items: Vec<_> = (bar.hosted.iter().map(|h| (h, false)))
+        .chain(bar.readouts.iter().map(|r| (r, true)))
+        .collect();
+    items.sort_by_key(|((span, _), _)| (span.line, span.col));
+    for ((span, what), readout) in items {
+        let mut says = Vec::new();
+        if !drops.is_empty() {
+            says.push(format!(
+                "on {} the bar has no place for it, and it is left out",
+                drops.join(" and ")
+            ));
+        }
+        if let Some(mac) = mac.as_ref().filter(|_| !readout) {
+            says.push(format!("on {mac} the toolbar has no place for it, so the whole header is drawn in the page as written"));
+        }
+        if says.is_empty() {
+            continue;
+        }
+        out.push(LowerError {
+            id: "header-item-left-out",
+            message: format!(
+                "{} in this route's `header` is a bar item on iOS, drawn as written; but {}. The web and desktop Linux draw the header as written. To show it on every target, move it below the `header`, into the route's content (LLP 1141.004 D5; docs/contract-for-agents.md, \"Tabs and stacks\")",
+                what.trim_end_matches(',').trim_end_matches(", before the heading").trim_end_matches(", after the subtitle"),
+                says.join("; and ")
+            ),
+            span: *span,
+        });
+    }
 }

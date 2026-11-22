@@ -211,3 +211,48 @@ fn a_header_of_buttons_alone_is_the_bar_and_one_with_a_text_is_named() {
         warnings[0].message
     );
 }
+
+/// LLP 1141.004 D5, `header-item-left-out`: for each target the app ships
+/// whose bar has no place for an element iOS hosts, that element, named with
+/// the targets, in source order; information, not a problem.
+#[test]
+fn a_header_element_a_targets_bar_has_no_place_for_is_named() {
+    let view = "routes nav\n  home \"/\"\ncomponent App\n  view\n    main navigationKey=`${top(nav).id}` width=\"100%\" height=\"100%\"\n      for e in stack(nav) key=e.id\n        column navigationKey=`${e.id}` position=\"absolute\" inset=0\n          header display=\"flex\"\n            text \"Car\" role=\"heading\" aria-level=1\n            row role=\"status\" aria-label=\"Updating\"\n              progress\n            progress\n          text \"body\"\n";
+    let said = |name: &str, targets: &str| -> Vec<String> {
+        let dir =
+            crate::scratch::Scratch::new(format!("exact2-left-out-{name}-{}", std::process::id()));
+        std::fs::write(dir.join("app.json"), format!("{{\"app\": {{\"id\": \"dev.test.bar\", \"name\": \"Bar\"}}, \"host\": {{{targets}}}}}")).unwrap();
+        std::fs::write(dir.join("app.contract"), view).unwrap();
+        let (plan, warnings) = contract::compile_path_all_warned(&dir.at("app.contract"), false);
+        plan.unwrap_or_else(|e| panic!("{e:?}"));
+        warnings
+            .iter()
+            .filter(|w| w.id == "header-item-left-out")
+            .map(|w| w.message.clone())
+            .collect()
+    };
+    assert_eq!(
+        said("apple", "\"ios\": {}, \"web\": {}"),
+        Vec::<String>::new(),
+        "iOS hosts both; the web draws them"
+    );
+    let all = said("all", "\"ios\": {}, \"android\": {}, \"macos\": {}");
+    assert_eq!(all.len(), 2, "{all:?}");
+    assert!(
+        all[0].starts_with("this readout")
+            && all[0].contains("android")
+            && !all[0].contains("macos"),
+        "{}",
+        all[0]
+    );
+    assert!(
+        all[1].starts_with("this `progress`")
+            && all[1].contains("android")
+            && all[1].contains("whole header is drawn in the page"),
+        "{}",
+        all[1]
+    );
+    assert!(contract_lower::warning_rank::information(
+        "header-item-left-out"
+    ));
+}

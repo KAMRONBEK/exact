@@ -1,6 +1,7 @@
-// A route whose header's title is a pressable in an authored size with a
-// light and a dark ink (NavigationBarIOSTests): its bar item is a drawn face,
-// and nothing in the app reads the scheme, so changing it sends no batch.
+// A route whose header holds a pressable box of a text in an authored size
+// with a light and a dark ink (NavigationBarIOSTests): its bar item is hosted,
+// its own views, and nothing in the app reads the scheme, so changing it sends
+// no batch.
 component BarFaceScheme
   state taps = 0
   action tap

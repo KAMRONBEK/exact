@@ -22,9 +22,6 @@ struct HeaderShape: Equatable {
         /// badge: a shape holding a text or a symbol), when the button has
         /// one: the item's image, in the box's own colours and corners.
         let badge: BadgeFace?
-        /// A face that says more than a title or symbol (a dot beside its
-        /// label, a font of the author's), drawn as painted (`ChipFace`).
-        let chip: ChipFace?
         /// Whether the button opens a menu-shaped popover or a confirmation
         /// (`MenuHost.pullsDown`): the item's menu, its rows read when it
         /// opens, as LLP 1021 D3's pull-down. Any other popover opens as
@@ -56,7 +53,7 @@ struct HeaderShape: Equatable {
         let font: UIFont?
         let active: NativeButtonState
         let activeTitleColor: BatchValue?
-        var supportsActiveColor: Bool { symbol == nil && badge == nil && chip == nil && !hosted }
+        var supportsActiveColor: Bool { symbol == nil && badge == nil && !hosted }
         /// A hosted element (LLP 1141.004 D1): an item nothing presses as a
         /// whole, whose custom view holds the element's own views
         /// (BarHostedIOS.swift).
@@ -122,7 +119,6 @@ struct HeaderShape: Equatable {
             if #available(iOS 26.0, tvOS 26.0, *) { glassed = hostedGlass }
             hostedInset = glassed && Self.shows(words: button) && !button.wrote("padding_left") && !button.wrote("padding_right") ? Self.titleInset : 0
             badge = button.isNativeButton || hosted ? nil : BadgeFace(button)
-            chip = badge == nil && !hosted ? ChipFace(button) : nil
             let invocation = button.presenter?.invocation(of: button)
             menu = invocation.map { $0.opensPopover && button.presenter?.menus.pullsDown($0.target) == true } == true
             menuTitle = menu ? invocation?.target.props["accessibilityLabel"] ?? "" : ""
@@ -130,7 +126,8 @@ struct HeaderShape: Equatable {
             self.symbol = symbol
             title = text
             label = hosted ? nil : button.props["accessibilityLabel"] ?? face?.label
-            disabled = button.disabled
+            // An inert button is no enabled item, as in the page.
+            disabled = button.disabled || button.inert
             accessibilityDisabled = button.ariaUnavailable
             prominent = ["filled", "bordered-prominent", "prominent-glass", "prominent-clear-glass"].contains(face?.style ?? "")
             // A badge (an avatar) on a button that asks for glass sits in its own capsule, as a glass button does.
@@ -151,7 +148,7 @@ struct HeaderShape: Equatable {
             // Read from the node it is written on, the tint in it as a value (`carriedTint`)
             active = NativeButtonState(button)
             let ownsTitle = face.map { NativeButtonState.colorOwnership($0.rows).title } ?? (ink?.0.wrote("text_color") == true)
-            activeTitleColor = symbol == nil && badge == nil && chip == nil && !hosted && !ownsTitle
+            activeTitleColor = symbol == nil && badge == nil && !hosted && !ownsTitle
                 && active.style.keys.allSatisfy { $0 == "press_color" } ? active.style["press_color"] : nil
             let source = ink.flatMap { $0.0.kind == "image" && $0.0.ownColor("text_color") != nil ? $0.0 : nil } ?? (button.ownColor("text_color") != nil ? button : nil)
             followsTint = source?.style["text_color"]?.tintAlpha == 1
@@ -164,60 +161,74 @@ struct HeaderShape: Equatable {
         /// Whether `node` or a node in it presses: a button, a control (a
         /// `progress` only shows), a field, a link or a `press`.
         static func presses(_ node: NodeView) -> Bool {
-            node.isButton || node.actsAsButton || node.handlers.contains("press") || node.kind == "input"
+            // What `visibility` hides presses nothing a person sees.
+            !node.cssVisibilityHidden && (node.isButton || node.actsAsButton || node.handlers.contains("press") || node.kind == "input"
                 || (node.kind == "control" && node.props["type"] != "progress")
-                || node.props["href"] != nil || shown(node).contains(where: presses)
+                || node.props["href"] != nil || shown(node).contains(where: presses))
         }
         /// `node`'s children that show (none `display: none`).
         static func shown(_ node: NodeView) -> [NodeView] {
             NodeView.committed(node.container.subviews).filter { $0.style["display"]?.string != "none" }
         }
-        /// Whether the bar can draw `button`'s face whole as UIKit's item. Only
-        /// the plain faces are UIKit's: a native button's, but for a second line
-        /// or a picture; a badge, one filled box holding one text, one symbol or
-        /// one picture and nothing else; a painted face (`ChipFace`, a dot or an
-        /// authored font), which draws its texts, symbols and dots; and UIKit's
-        /// own item, one image, one title, or a symbol beside words, which it
-        /// speaks as its name. Any other face is hosted with its press (D1): one
-        /// holding a spinner, a control, a picture outside a badge, a second
-        /// text, a part `visibility` hides, or a dot or layer UIKit's item would
-        /// drop; one that shows nothing UIKit's item would; and an element that
-        /// is itself a control, a text or a picture (a switch that hears `press`).
+        /// Whether the bar draws `button` as UIKit's own item (D1): a native
+        /// button, but for a second line or a picture; a button whose face is
+        /// one symbol, one text, or a symbol beside a text (`plain`); or the
+        /// badge of LLP 1075.003 §9.6. Every other element that presses (a
+        /// pressed row, a button with a dot, a second text, a font of the
+        /// author's, a picture or a link inline) is hosted with its press and
+        /// drawn as written, and so is one `visibility` hides.
         static func drawsFace(_ button: NodeView) -> Bool {
-            // An element `visibility` hides is drawn as written: hidden.
             guard !button.cssVisibilityHidden else { return false }
             if button.isNativeButton { return button.face.map { !$0.hasSubtitleOrPicture } ?? true }
-            guard button.kind == "view" || button.kind == "button" else { return false }
-            var texts = 0, symbols = 0, pictures = 0, boxes = 0, dots = 0, layers = false
+            guard button.kind == "button" else { return false }
+            return badge(button) || plain(button)
+        }
+        /// What UIKit's own item shows whole: one symbol (its image), one text
+        /// in the bar's type (its title), or a symbol beside a text (the image,
+        /// named by the text), in boxes that paint nothing. The button's own
+        /// box is the bar's glass.
+        static func plain(_ button: NodeView) -> Bool {
+            var texts = 0, symbols = 0
             func count(_ node: NodeView) -> Bool {
-                if let flats = node.presenter?.flats, (flats.children(of: node.id) ?? []).contains(where: { id in
-                    flats.leaves[id].map { $0.style["display"]?.string != "none" } ?? false
-                }) { layers = true }
+                guard !layered(node) else { return false }
                 for child in shown(node) {
                     guard !child.cssVisibilityHidden else { return false }
-                    // A paragraph with a picture inline is more than a title.
-                    if child.isParagraph, child.inlineText.contains(where: { $0.props["inlineBox"] != nil }) { return false }
-                    if child.isParagraph { texts += 1 }
-                    else if child.kind == "image", child.faceSymbol != nil { symbols += 1 }
-                    else if child.kind == "image", child.imageSource != nil { pictures += 1 }
-                    else if child.kind == "view" {
-                        boxes += 1
-                        if shown(child).isEmpty {
-                            // A dot is a fill; a box that paints only a border or a shadow no face draws.
-                            if child.channels("background_color") != nil { dots += 1 }
-                            else if child.style["box_shadow"] != nil || child.number("border_width") > 0
-                                        || ["top", "right", "bottom", "left"].contains(where: { child.number("border_width_" + $0) > 0 }) { return false }
-                        }
+                    if child.isParagraph {
+                        guard !child.inlineText.contains(where: { $0.props["inlineBox"] != nil || $0.props["href"] != nil }),
+                              !["font_family", "font_size", "font_weight", "font_style"].contains(where: child.wrote) else { return false }
+                        texts += 1
+                    } else if child.kind == "image", child.faceSymbol != nil {
+                        symbols += 1
+                    } else if child.kind == "view", child.channels("background_color") == nil, child.style["box_shadow"] == nil,
+                              child.style["background_image"] == nil, child.number("border_width") == 0,
+                              !["top", "right", "bottom", "left"].contains(where: { child.number("border_width_" + $0) > 0 }) {
                         if !count(child) { return false }
+                    } else {
+                        return false
                     }
-                    else { return false }
                 }
                 return true
             }
-            guard count(button) else { return false }
-            if BadgeFace(button) != nil { return !layers && boxes == 1 && texts + symbols + pictures == 1 }
-            if ChipFace(button) != nil { return pictures == 0 }
-            return !layers && dots == 0 && pictures == 0 && texts <= 1 && symbols <= 1 && texts + symbols >= 1
+            return count(button) && texts <= 1 && symbols <= 1 && texts + symbols >= 1
+        }
+        /// The badge of §9.6, and only it: one filled box, no border, shadow
+        /// or picture fill, holding one text (no picture or link inline), one
+        /// symbol or one picture, and no layer beside it.
+        static func badge(_ button: NodeView) -> Bool {
+            guard button.kind == "button", BadgeFace(button) != nil, !layered(button) else { return false }
+            let kids = shown(button)
+            guard kids.count == 1, let box = kids.first, box.kind == "view", !layered(box), !box.cssVisibilityHidden,
+                  box.style["box_shadow"] == nil, box.style["background_image"] == nil, box.number("border_width") == 0,
+                  !["top", "right", "bottom", "left"].contains(where: { box.number("border_width_" + $0) > 0 }) else { return false }
+            let parts = shown(box)
+            guard parts.count == 1, let part = parts.first, !part.cssVisibilityHidden else { return false }
+            if part.isParagraph { return !part.inlineText.contains { $0.props["inlineBox"] != nil || $0.props["href"] != nil } }
+            return part.kind == "image" && (part.faceSymbol != nil || part.imageSource != nil)
+        }
+        /// Whether `node` draws a child as a layer with no view (`FlatLeavesIOS`).
+        static func layered(_ node: NodeView) -> Bool {
+            guard let flats = node.presenter?.flats else { return false }
+            return (flats.children(of: node.id) ?? []).contains { id in flats.leaves[id].map { $0.style["display"]?.string != "none" } ?? false }
         }
         /// Whether `node` shows words: a paragraph in it, shown, says something.
         static func shows(words node: NodeView) -> Bool {
@@ -234,7 +245,7 @@ struct HeaderShape: Equatable {
         /// `source` but for whether the item is enabled.
         var face: String {
             if hosted { return source }
-            return "\(toolbarGroup.map(String.init) ?? ""):\(id):\(title):\(symbol ?? ""):\(label ?? ""):\(prominent):\(ownGlass):\(badge?.source ?? ""):\(chip?.source ?? ""):\(menu):\(menuTitle):\(menuOrder):\(tint ?? []):\(followsTint):\(font.map { "\($0.fontName) \($0.pointSize) \(TextEngine.controlWeight($0))" } ?? ""):\(testId ?? ""):\(activeSignature)"
+            return "\(toolbarGroup.map(String.init) ?? ""):\(id):\(title):\(symbol ?? ""):\(label ?? ""):\(prominent):\(ownGlass):\(badge?.source ?? ""):\(menu):\(menuTitle):\(menuOrder):\(tint ?? []):\(followsTint):\(font.map { "\($0.fontName) \($0.pointSize) \(TextEngine.controlWeight($0))" } ?? ""):\(testId ?? ""):\(activeSignature)"
         }
         private var activeSignature: String {
             let values = active.style.mapValues(\.any)

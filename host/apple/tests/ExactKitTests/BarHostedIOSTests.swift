@@ -122,6 +122,9 @@ final class BarHostedIOSTests: XCTestCase {
         XCTAssertTrue(shape.trailing.first?.disabled ?? false)
         XCTAssertTrue(shape.placed.contains { $0.id == 4 })
         XCTAssertFalse(shape.placed.contains { $0.id == 5 || $0.id == 6 })
+        // An inert button that presses is an item, dimmed, as in the page.
+        let inert = route([["op": "create", "id": 4, "kind": "control", "handlers": ["press"], "props": ["type": "button", "accessibilityRole": "button", "accessibilityLabel": "Send", "inert": "true"]]], kids: [4])
+        XCTAssertEqual(try bar(inert).trailing.first?.disabled, true)
     }
 
     /// Glass is for what presses (D4): an item nothing in which presses has
@@ -155,13 +158,12 @@ final class BarHostedIOSTests: XCTestCase {
         XCTAssertEqual(try bar(p).trailing.map(\.id), [6, 7], "after the subtitle, the text hosted and the button an item")
     }
 
-    /// Native where UIKit can keep the action and the face (LLP 1141.004 D1):
-    /// a link with nothing pressing it is UIKit's item, which follows its
-    /// `href`, as is a pressed row of words; a pressed row holding a spinner,
-    /// whose face UIKit's item cannot draw, is hosted with its press, in the
-    /// glass. What the bar replaces is covered by a bar, so a readout lifted
-    /// out of it is laid out.
-    func testABarItemIsNativeWhereUIKitKeepsItsActionAndItsFace() throws {
+    /// UIKit's own item is a button whose face is one symbol or one text (a
+    /// link among them, which follows its `href`), a native button or a badge
+    /// (LLP 1141.004 D1); a pressed row, of words or holding a spinner, is
+    /// hosted with its press, in the glass. What the bar replaces is covered by
+    /// a bar, so a readout lifted out of it is laid out.
+    func testAButtonOfOneTextIsUIKitsItemAndAPressedRowIsHosted() throws {
         let link: [String: Any] = ["op": "create", "id": 4, "kind": "button", "props": ["href": "/history", "accessibilityLabel": "History"]]
         let words: [String: Any] = ["op": "create", "id": 5, "kind": "view", "handlers": ["press"]]
         let spinner: [String: Any] = ["op": "create", "id": 7, "kind": "view", "handlers": ["press"]]
@@ -169,10 +171,10 @@ final class BarHostedIOSTests: XCTestCase {
                       more: [["op": "children", "id": 4, "ids": [9]], ["op": "children", "id": 5, "ids": [6]], ["op": "children", "id": 7, "ids": [8]]])
         let shape = try bar(p)
         XCTAssertEqual(shape.trailing.map(\.id), [4, 5, 7])
-        XCTAssertEqual(shape.trailing.map(\.hosted), [false, false, true])
-        XCTAssertEqual(shape.trailing.last?.hostedGlass, true, "it presses")
-        XCTAssertEqual(shape.hosted.map(\.id), [7])
-        XCTAssertFalse(shape.placed.contains { $0.id == 7 }, "hosted, not hidden with what the bar places")
+        XCTAssertEqual(shape.trailing.map(\.hosted), [false, true, true], "the link's one text is UIKit's; a pressed row is no button")
+        XCTAssertEqual(shape.trailing.map(\.hostedGlass), [false, true, true], "each hosted row presses")
+        XCTAssertEqual(shape.hosted.map(\.id), [5, 7])
+        XCTAssertFalse(shape.placed.contains { [5, 7].contains($0.id) }, "hosted, not hidden with what the bar places")
         let route = RouteController(try XCTUnwrap(p.views[1]))
         XCTAssertEqual(NavigationHost.cover(of: try XCTUnwrap(p.views[5]), in: route), .bar)
     }
@@ -308,10 +310,23 @@ final class BarHostedIOSTests: XCTestCase {
                                                        ["op": "children", "id": 14, "ids": [15]], ["op": "children", "id": 15, "ids": [16]], ["op": "children", "id": 16, "ids": [17]],
                                                        ["op": "children", "id": 11, "ids": [12, 13]]])
         let painted = try bar(faces)
-        // A badge whose part sits in a box of its own is no plain badge: drawn as written.
-        XCTAssertEqual(painted.trailing.map(\.hosted), [true, true, true, false])
-        XCTAssertEqual(painted.trailing.last?.symbol, "arrow.clockwise")
-        XCTAssertEqual(painted.trailing.last?.title, "Retry", "spoken by the item")
+        // A badge whose part sits in a box of its own is no plain badge, and a
+        // pressed row is no button: each is drawn as written.
+        XCTAssertEqual(painted.trailing.map(\.hosted), [true, true, true, true])
+        // A button of a symbol beside words is UIKit's image item, named by the
+        // words; one of two texts, of a text in the author's font, or of a dot
+        // beside words is drawn as written.
+        let press: (Int) -> [String: Any] = { ["op": "create", "id": $0, "kind": "button", "handlers": ["press"]] }
+        let plain = route([press(4), ["op": "create", "id": 5, "kind": "image", "props": ["imageSource": "symbol:sf/arrow.clockwise", "symbolName": "arrow.clockwise"]], text(6, "Retry"),
+                           press(7), text(8, "Retry"), text(9, "later"),
+                           press(10), text(11, "Mono", style: ["font_family": 3, "written": ["font_family"]]),
+                           press(12), ["op": "create", "id": 13, "kind": "view", "style": dot], text(14, "Live")],
+                          kids: [4, 7, 10, 12], more: [["op": "children", "id": 4, "ids": [5, 6]], ["op": "children", "id": 7, "ids": [8, 9]],
+                                                       ["op": "children", "id": 10, "ids": [11]], ["op": "children", "id": 12, "ids": [13, 14]]])
+        let plainShape = try bar(plain)
+        XCTAssertEqual(plainShape.trailing.map(\.hosted), [false, true, true, true])
+        XCTAssertEqual(plainShape.trailing.first?.symbol, "arrow.clockwise")
+        XCTAssertEqual(plainShape.trailing.first?.title, "Retry", "spoken by the item")
         // A pressed row `visibility` hides is drawn as written, hidden; a box
         // that paints only a shadow beside words is drawn as written; a badge
         // beside a sibling hidden as authored is still the badge.
@@ -325,6 +340,7 @@ final class BarHostedIOSTests: XCTestCase {
                                                   ["op": "children", "id": 9, "ids": [10, 12]], ["op": "children", "id": 10, "ids": [11]]])
         let edged = try bar(edges)
         XCTAssertEqual(edged.trailing.map(\.hosted), [true, true, false])
+        XCTAssertEqual(edged.trailing.first?.hostedGlass, false, "what `visibility` hides presses nothing a person sees")
         XCTAssertEqual(edged.trailing.last?.badge?.text, "AB", "the hidden sibling is no part")
     }
 

@@ -141,9 +141,10 @@ final class BarHosted: LiftedNodes {
 
     /// What the overflow menu does for the element: its own action, where it
     /// is a switch or presses (a `press` or a link's `href`); else nothing,
-    /// and its entry is its name, dimmed. A command alone opens from the item
-    /// in the bar, where the item has a window, so its entry is dimmed too.
-    /// What is inside an element is reached in the bar, where it shows.
+    /// and its entry is its name, dimmed. A command (`commandfor`,
+    /// `popovertarget`) opens from the item in the bar, where the item has a
+    /// window, so an element that invokes one is dimmed too, its `press`
+    /// with it. What is inside an element is reached in the bar.
     private func entries(_ node: NodeView) -> [Entry] {
         let disabled = node.disabled || node.inert || node.cssVisibilityHidden, invocation = presenter.invocation(of: node)
         // Everything a press may do: a link `presenter.press` follows first, and a command.
@@ -152,7 +153,7 @@ final class BarHosted: LiftedNodes {
             return [Entry(node: node, name: node.accessibleName, on: s.isOn, disabled: disabled || !s.isEnabled, invokes: invokes)]
         }
         guard node.handlers.contains("press") || node.defaultLink != nil else { return [] }
-        return [Entry(node: node, name: node.accessibleName, on: nil, disabled: disabled, invokes: invokes)]
+        return [Entry(node: node, name: node.accessibleName, on: nil, disabled: disabled || invocation != nil, invokes: invokes)]
     }
 
     /// In UIKit's overflow menu a custom view shows nothing: the item is

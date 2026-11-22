@@ -463,12 +463,15 @@ snapshot. The backend’s clock stays its own.
    the platform's bordered one; a document's own text (a note's title and body, as Notes
    draws them) says `border="none"`, and a chat's composer is `chat-thread`'s.
 2. **A `header` holds a heading (`h1 "Title"`), one text after it (the subtitle) and
-   buttons** (or a search field, a `tablist`). Anything else in it (a spinner and its
-   words, a picture) is an item of its own on its side of the heading, drawn as
-   written, with no glass unless something in it presses; inside a box around the
-   heading, only the title shows. Android's top app bar and tvOS's bar leave such an item
-   out, the Mac keeps a header holding one in the page, and desktop Linux and the web draw
-   the header as written. A control fixed under the bar goes with an
+   buttons** (or a search field, a `tablist`). A button of one symbol, one text or both
+   is UIKit's own bar item. Anything else in it (a spinner and its words, a picture, a
+   pressed row, a button with a dot beside its label) is a hosted item on its side of the heading, drawn as written, with no glass unless
+   something in it presses; inside a box around the heading, only the title shows. A
+   hosted item is left out by Android's top app bar and tvOS's bar, and makes the Mac
+   draw the header in the page (the compiler's `header-item-left-out` names each for the
+   targets you ship): what must show everywhere goes below the `header`. It gets at most
+   a third of the bar's width, and in UIKit's "⋯" menu only its own action. Desktop Linux
+   and the web draw the header as written. A control fixed under the bar goes with an
    inline title (`h2`); one that may scroll away, in the list's first section.
 3. **`width="100%"` with padding overflows**, as in CSS: drop the width; a `flex=1` field
    takes `min-width=0`.

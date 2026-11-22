@@ -19,7 +19,7 @@
   },
   "counts": {
     "nodeViewCasts": {
-      "ceiling": 606,
+      "ceiling": 604,
       "sites": [
         "host/apple/Sources/ExactAnimations/CssAnimationPlay.swift: (layer.delegate as? NodeView",
         "host/apple/Sources/ExactCollections/Collection.swift: current as? NodeView",
@@ -570,8 +570,6 @@
         "host/apple/Sources/ExactNativeViews/NativeModule.swift: if (view as? NodeView",
         "host/apple/Sources/ExactNativeViews/NativeModule.swift: next as? NodeView",
         "host/apple/Sources/ExactNativeViews/ScopeHatches.swift: $0 as? NodeView",
-        "host/apple/Sources/ExactNavigation/IOS/BarFaceIOS.swift: ($0 as? NodeView",
-        "host/apple/Sources/ExactNavigation/IOS/BarFaceIOS.swift: ($0 as? NodeView",
         "host/apple/Sources/ExactNavigation/IOS/HeaderShapeIOS.swift: $0 as? NodeView",
         "host/apple/Sources/ExactNavigation/IOS/ModalIOS.swift: $0 as? NodeView",
         "host/apple/Sources/ExactNavigation/IOS/ModalIOS.swift: context.sourceView as? NodeView",
@@ -630,7 +628,7 @@
       ]
     },
     "treeWalks": {
-      "ceiling": 606,
+      "ceiling": 605,
       "sites": [
         "host/apple/Sources/ExactCollections/Collection.swift: guard let parent = (node as? PlatformView)?.superview else { return nil }",
         "host/apple/Sources/ExactCollections/Collection.swift: parent = current.superview",
@@ -1194,7 +1192,6 @@
         "host/apple/Sources/ExactNativeViews/HatchRegions.swift: if depth < 8 { for sub in view.subviews where !(sub is NodeView) { stack.append((sub, depth + 1)) } }",
         "host/apple/Sources/ExactNativeViews/NativeModule.swift: entry.handle != nil, let root = entry.view, root.superview === owner,",
         "host/apple/Sources/ExactNativeViews/NativeModule.swift: next = view.superview",
-        "host/apple/Sources/ExactNavigation/IOS/BarFaceIOS.swift: } else if (child.presenter?.flats.children(of: child.id) ?? child.container.subviews.compactMap { ($0 as? NodeView)?.id }).isEmpty,",
         "host/apple/Sources/ExactNavigation/IOS/HeaderShapeIOS.swift: list.container.subviews.compactMap { $0 as? NodeView }.filter {",
         "host/apple/Sources/ExactNavigation/IOS/ModalIOS.swift: for child in node.container.subviews.compactMap({ $0 as? NodeView }) {",
         "host/apple/Sources/ExactNavigation/IOS/NavigationCoversIOS.swift: return node.container.subviews.compactMap { $0 as? NodeView }",

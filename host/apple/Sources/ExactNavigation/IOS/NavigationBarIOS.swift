@@ -405,7 +405,7 @@ final class BarPress: NSObject {
         }
         // A link with no press of its own follows its `href`, as a tap does.
         if node.defaultLink != nil {
-            if !node.disabled { host.presenter.press(id) }
+            if !node.disabled, !node.inert { host.presenter.press(id) }
             return
         }
         _ = host.presenter.hatchAct(id, 0)
@@ -508,7 +508,7 @@ extension NavigationHost {
         // A button with no press of its own that shows a dialog modally, or
         // a link that follows its `href`: as `BarPress` runs it.
         let showsModal = presenter.invocation(of: node)?.action == .showModal
-        guard node.handlers.contains("press") || showsModal || node.defaultLink != nil, !node.disabled else { return ["error": "bar item #\(id) is disabled or presses nothing"] }
+        guard node.handlers.contains("press") || showsModal || node.defaultLink != nil, !node.disabled, !node.inert else { return ["error": "bar item #\(id) is disabled, inert or presses nothing"] }
         presenter.press(node.id)
         return ["tapped": id, "pressed": id, "delivery": "host-activation", "native": "bar-button-item"]
     }
@@ -1162,7 +1162,7 @@ extension NavigationHost {
         return appearance
     }()
 
-    /// A drawn bar item (`ChipFace`, `BadgeFace`) is an image for one
+    /// A drawn bar item (`BadgeFace`) is an image for one
     /// appearance: a new colour scheme or contrast projects each live
     /// stack's bars again, and only an item whose face changed is drawn
     /// again. The change is heard in the Exact view's own trait change,
@@ -1346,24 +1346,19 @@ extension NavigationHost {
         if i.hosted { c.barItemsMade[i.id] = nil; return barHosted.item(i, in: c) }
         #endif
         // A menu reads its rows through the button's view: a new view, a new menu.
-        // Before iOS 26 a chip's picture follows the bar's tint, which the item
-        // does not hold; from iOS 26 it is drawn in the label colour.
         let button = i.menu ? presenter.views[i.id] : nil
-        var tinted = i.chip != nil
-        if #available(iOS 26.0, tvOS 26.0, *) { tinted = false }
-        if let made = c.barItemsMade[i.id], made.item == i, !tinted, button?.incarnation == made.menuFrom {
+        if let made = c.barItemsMade[i.id], made.item == i, button?.incarnation == made.menuFrom {
             c.barPresses.append(made.press)
             return made.bar
         }
         let dimmed = c.navigationController?.navigationBar.tintAdjustmentMode == .dimmed
-        let image = i.badge?.image(dimmed: dimmed) ?? i.chip?.image(tint: presenter.views[i.id]?.carriedTint ?? presenter.viewport.tintColor,
-            dimmed: dimmed) ?? i.symbol.flatMap { FaceSymbol.image($0, points: FaceSymbol.barItemPoints) }
+        let image = i.badge?.image(dimmed: dimmed) ?? i.symbol.flatMap { FaceSymbol.image($0, points: FaceSymbol.barItemPoints) }
         // The same control as last time, still a menu or not and still a
         // picture or words: its item is kept and changed, as a hand-built
         // bar's is, so the glass animates what changed (a heart filling).
         if let made = c.barItemsMade[i.id], made.item.menu == i.menu, (made.bar.image != nil) == (image != nil) {
             c.barPresses.append(made.press)
-            if let image, tinted || made.item.chip != i.chip || made.item.symbol != i.symbol || made.item.badge != i.badge {
+            if let image, made.item.symbol != i.symbol || made.item.badge != i.badge {
                 if #available(iOS 17.0, tvOS 17.0, *), image.isSymbolImage {
                     made.bar.setSymbolImage(image, contentTransition: .replace)
                 } else { made.bar.image = image }
@@ -1406,7 +1401,7 @@ extension NavigationHost {
         else { item.accessibilityTraits.remove(.notEnabled) }
         // The authored `color` of a plain item's face; a prominent item's
         // tint is its fill, which `color` is not.
-        let plain = !i.prominent && i.badge == nil && i.chip == nil
+        let plain = !i.prominent && i.badge == nil
         item.tintColor = !plain ? nil : i.followsTint ? presenter.views[i.id]?.ownAccent ?? SystemColor.tint(1) : i.tint.map { tint in UIColor { TextEngine.color(tint[$0.userInterfaceStyle == .dark ? 1 : 0]) } }
         // UIKit's font where none is written, also once a kept item's author removes theirs.
         let font = image == nil ? i.font : nil
