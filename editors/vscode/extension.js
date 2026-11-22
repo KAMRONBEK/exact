@@ -123,19 +123,34 @@ function problems(vscode, state) {
   vscode.workspace.textDocuments.forEach(check);
 }
 
+let lspExt = null;
+
 /** Registers now, and again when either setting changes. */
 function activate(context, vscode = require('vscode')) {
   const state = {};
+  const useLsp = typeof vscode.window?.createOutputChannel === 'function'
+    && typeof vscode.languages?.registerHoverProvider === 'function';
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration(e => {
       if (e.affectsConfiguration(SETTING)) register(vscode, context, state);
-      if (e.affectsConfiguration(COMPILER)) { format(vscode, state); problems(vscode, state); }
+      if (!useLsp && e.affectsConfiguration(COMPILER)) { format(vscode, state); problems(vscode, state); }
     }),
     { dispose: () => { state.formatter?.dispose(); state.problems?.dispose(); } },
   );
-  format(vscode, state);
-  problems(vscode, state);
+  if (useLsp) {
+    lspExt = require('./src/extension');
+    lspExt.activate(context, vscode);
+  } else {
+    format(vscode, state);
+    problems(vscode, state);
+  }
   return register(vscode, context, state);
 }
 
-module.exports = { register, activate };
+function deactivate() {
+  const active = lspExt;
+  lspExt = null;
+  return Promise.resolve(active?.deactivate());
+}
+
+module.exports = { register, activate, deactivate };

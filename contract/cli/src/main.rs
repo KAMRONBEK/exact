@@ -63,7 +63,7 @@ mod migrate;
 #[path = "../tests/it/scratch.rs"]
 mod scratch;
 mod verify;
-mod vocab;
+use contract::vocab;
 
 fn usage() -> String {
     let build = build::USAGE.trim_start_matches("usage: ");
@@ -86,6 +86,8 @@ fn usage() -> String {
   contract lean <file.contract> [--components] [--name <ident>] [-o <file.lean>]
   {verify}
   contract vocab [--json] [--all] [<name> …]
+  contract lsp [--stdio]
+  contract mcp [--stdio]
   contract gallery <app> -o <dir>  (<app>: a directory or app.contract; <dir>: a build cache, never the app's tree)
   contract forma check <app> | eval <app> [--mode <axis>=<value>] | ir <app> [-o <forma.json>] | fmt <app> [--check]  (<app>: a directory, app.contract or file.forma; a flag before or after it)")
 }
@@ -128,6 +130,8 @@ fn run() -> ExitCode {
         Some("lean") => lean(&args[1..]),
         Some("verify") => verify::run(&args[1..]),
         Some("vocab") => vocab::run(&args[1..]),
+        Some("lsp") => contract::lsp::run(&args[1..]),
+        Some("mcp") => contract::lsp::mcp::run(&args[1..]),
         Some("gallery") => gallery(&args[1..]),
         Some("forma") => forma::run(&args[1..]),
         Some("tamber") => {

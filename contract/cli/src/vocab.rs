@@ -16,13 +16,14 @@
 mod card;
 mod concepts;
 mod frames;
+/// LSP and agent vocabulary queries.
+pub mod lsp;
 mod recipes;
 mod records;
 mod scroll;
 mod window;
-
+use crate::functions::{self, Function};
 use concepts::Concept;
-use contract::functions::{self, Function};
 use contract_lower::tags::{self, AttrTarget, Tag};
 use contract_lower::vocab;
 use contract_syntax::HOST_COMMANDS;
@@ -32,6 +33,7 @@ use std::process::ExitCode;
 
 const USAGE: &str = "usage: contract vocab [--json] [--all] [<name> …]\n  no name: the card, what an app writes, in one read; --all: every tag, attribute and function\n  names: each one's entry in turn, a recipe (docs/recipes) whole, a pattern's summary (exit 1 if one is unknown); --json: everything, as JSON";
 
+/// Execute `contract vocab [--json] [--all] [<name> …]`.
 pub fn run(args: &[String]) -> ExitCode {
     let mut json = false;
     let mut all = false;

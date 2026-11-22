@@ -1,7 +1,7 @@
 {
   "name": "exact-contract",
   "displayName": "Exact Contract",
-  "description": "Syntax highlighting for Exact Contract files, a problem matcher for the Contract compiler's diagnostics, `.contract` registered with TypeScript 7 for the content mapper, and formatting by the Contract compiler.",
+  "description": "Syntax highlighting (Contract + Forma), snippets, problem matcher, TypeScript 7 content-mapper registration, and Language Server (LSP 3.17) for Exact Contract files.",
   "version": "0.5.0",
   "private": true,
   "publisher": "exact",
@@ -13,7 +13,10 @@
     "onLanguage:exact-contract"
   ],
   "categories": [
-    "Programming Languages"
+    "Programming Languages",
+    "Formatters",
+    "Linters",
+    "Snippets"
   ],
   "contributes": {
     "languages": [
@@ -27,6 +30,17 @@
           ".contract"
         ],
         "configuration": "./language-configuration.json"
+      },
+      {
+        "id": "exact-forma",
+        "aliases": [
+          "Exact Forma",
+          "Forma"
+        ],
+        "extensions": [
+          ".forma"
+        ],
+        "configuration": "./forma-language-configuration.json"
       }
     ],
     "grammars": [
@@ -34,6 +48,47 @@
         "language": "exact-contract",
         "scopeName": "source.exact-contract",
         "path": "./syntaxes/exact-contract.tmLanguage.json"
+      },
+      {
+        "language": "exact-forma",
+        "scopeName": "source.exact-forma",
+        "path": "./syntaxes/exact-forma.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "exact-contract",
+        "path": "./snippets/exact-contract.code-snippets"
+      }
+    ],
+    "commands": [
+      {
+        "command": "exactContract.restartServer",
+        "title": "Exact Contract: Restart Language Server"
+      },
+      {
+        "command": "exactContract.fixUses",
+        "title": "Exact Contract: Add Missing `use` Imports"
+      },
+      {
+        "command": "exactContract.applyQuickFixes",
+        "title": "Exact Contract: Apply All Deterministic Quick Fixes"
+      },
+      {
+        "command": "exactContract.lookupVocab",
+        "title": "Exact Contract: Look Up or Search Vocabulary"
+      },
+      {
+        "command": "exactContract.showOutline",
+        "title": "Exact Contract: Show Structural Outline (JSON)"
+      },
+      {
+        "command": "exactContract.checkSeam",
+        "title": "Exact Contract: Audit App Seam (Data, Strings, Tokens, Manifest)"
+      },
+      {
+        "command": "exactContract.showImpact",
+        "title": "Exact Contract: Analyze Symbol Blast Radius"
       }
     ],
     "configuration": {
@@ -43,6 +98,39 @@
           "type": "string",
           "scope": "machine-overridable",
           "markdownDescription": "The Contract compiler, `contract`, by its path. When set, **Format Document** on a `.contract` file runs `contract fmt --stdin` on the editor's text, and each open contract's warnings show as problems, compiled again as it changes. Unset, no formatter is registered and nothing is run."
+        },
+        "exactContract.server.path": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the `contract` compiler executable for `contract lsp --stdio`. When empty, falls back to `exactContract.compiler`, workspace `target/{host-dev,release,debug}/contract`, `exact.mjs`, or `contract` on PATH."
+        },
+        "exactContract.server.args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Additional arguments passed to `contract lsp --stdio`."
+        },
+        "exactContract.inlayHints.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show inferred type and action-write inlay hints."
+        },
+        "exactContract.codeLens.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show reference counts and inferred action writes as CodeLens annotations."
+        },
+        "exactContract.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Trace communication with the Exact Contract language server in the Output panel."
         }
       }
     },
@@ -73,6 +161,9 @@
     "README.md",
     "extension.js",
     "language-configuration.json",
-    "syntaxes/*.json"
+    "forma-language-configuration.json",
+    "syntaxes/*.json",
+    "snippets/*.code-snippets",
+    "src/*.js"
   ]
 }

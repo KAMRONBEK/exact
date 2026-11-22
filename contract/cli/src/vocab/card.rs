@@ -9,7 +9,7 @@
 //! symbols from the schema. What no table says is `card.md`, which the tests
 //! check against them.
 
-use contract::functions::{self, Function};
+use crate::functions::{self, Function};
 use std::collections::BTreeMap;
 
 const SOURCE: &str = include_str!("card.md");
@@ -422,12 +422,15 @@ mod tests {
         };
         let blocks = rules.contract();
         assert!(!blocks.is_empty(), "the rules hold an example");
-        let dir = crate::scratch::Scratch::new(format!("exact-card-{}", std::process::id()));
+        let dir = crate::build_advice::scratch::Scratch::new(format!(
+            "exact-card-{}",
+            std::process::id()
+        ));
         let path = dir.join("app.contract");
         let mut failures = Vec::new();
         for body in &blocks {
             std::fs::write(&path, body).unwrap();
-            let (compiled, warnings) = contract::compile_path_all_warned(&path, false);
+            let (compiled, warnings) = crate::compile_path_all_warned(&path, false);
             if let Err(all) = compiled {
                 failures.extend(all.iter().map(|e| format!("[{}] {}", e.id, e.message)));
             }
@@ -480,10 +483,11 @@ mod tests {
 
     /// Whether `app` compiles with no error and no warning.
     fn problems(app: &str) -> Vec<String> {
-        let dir = crate::scratch::Scratch::new(format!("exact-how-{}", std::process::id()));
+        let dir =
+            crate::build_advice::scratch::Scratch::new(format!("exact-how-{}", std::process::id()));
         let path = dir.join("app.contract");
         std::fs::write(&path, app).unwrap();
-        let (compiled, warnings) = contract::compile_path_all_warned(&path, false);
+        let (compiled, warnings) = crate::compile_path_all_warned(&path, false);
         let mut out: Vec<String> = Vec::new();
         if let Err(all) = compiled {
             out.extend(
@@ -515,7 +519,7 @@ mod tests {
                     );
                 }
                 "contract-test" => {
-                    if let Err(e) = contract::tests(&h.code) {
+                    if let Err(e) = crate::tests(&h.code) {
                         failures.push(format!("`{}`: [{}] {}", h.title, e.id, e.message));
                     }
                 }

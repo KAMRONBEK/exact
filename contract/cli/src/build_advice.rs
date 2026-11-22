@@ -170,7 +170,7 @@ fn clock_advice(file: &File, sources: &sources::Sources) -> Vec<CompileError> {
 #[cfg(test)]
 #[allow(dead_code)]
 #[path = "../tests/it/scratch.rs"]
-mod scratch;
+pub(crate) mod scratch;
 
 #[cfg(test)]
 mod tests {

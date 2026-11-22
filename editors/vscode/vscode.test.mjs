@@ -1,12 +1,13 @@
 // The extension's problem matcher reads what the Contract compiler prints, and
 // the repository's .vscode/tasks.json names scripts that exist. VS Code runs
 // the matcher's regexp as a JavaScript RegExp, as this does.
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { test } from 'bun:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
+import { discoverServer, LspConnection } from './src/lsp-client.js';
 
 const ROOT = resolve(import.meta.dir, '../..');
 const matcher = JSON.parse(readFileSync(resolve(import.meta.dir, 'package.json'), 'utf8')).contributes.problemMatchers
@@ -231,4 +232,197 @@ test('Enter indents after every opener whose body is a block, and not after a li
     assert.ok(indents.test(opener), opener);
   for (const whole of ['theme.accent', 'params x', 'members "./more.contract"', 'test "boots" on', 'expect perf layout <= 3', 'text "parts"'])
     assert.ok(!indents.test(whole), whole);
+});
+
+test('forma grammar, snippets, and stale-binary guard in discoverServer are valid', () => {
+  const formaGrammar = JSON.parse(readFileSync(resolve(import.meta.dir, 'syntaxes/exact-forma.tmLanguage.json'), 'utf8'));
+  const formaCfg = JSON.parse(readFileSync(resolve(import.meta.dir, 'forma-language-configuration.json'), 'utf8'));
+  const snippets = JSON.parse(readFileSync(resolve(import.meta.dir, 'snippets/exact-contract.code-snippets'), 'utf8'));
+  assert.equal(formaGrammar.scopeName, 'source.exact-forma');
+  assert.equal(formaCfg.comments.lineComment, '//');
+  assert.ok(snippets.Component && snippets['For Loop'] && snippets.Resource);
+  const dir = mkdtempSync(resolve(tmpdir(), 'exact-stale-bin-'));
+  try {
+    const staleBin = resolve(dir, 'target', 'debug', 'contract');
+    mkdirSync(resolve(dir, 'target', 'debug'), { recursive: true });
+    writeFileSync(staleBin, '#!/bin/sh\nexit 2\n');
+    chmodSync(staleBin, 0o755);
+    const found = discoverServer([dir]);
+    assert.notEqual(found.command, staleBin);
+    assert.ok(found.args.includes('lsp'));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('LspConnection drives `contract lsp --stdio` and `contract mcp --stdio` end-to-end', async () => {
+  const dir = mkdtempSync(resolve(tmpdir(), 'exact-lsp-stdio-'));
+  const appPath = resolve(dir, 'app.contract');
+  const src = [
+    'shape Task',
+    '  id: string',
+    '  title: string',
+    '',
+    'component App',
+    '  state count = 0',
+    '  action inc',
+    '    count = count + 1',
+    '  view',
+    '    column',
+    '      text `${count}`',
+    '      button "Add" press=inc',
+    '',
+  ].join('\n');
+  writeFileSync(appPath, src);
+
+  const { command, args } = discoverServer([ROOT]);
+  const lsp = new LspConnection(command, args, { cwd: ROOT });
+  try {
+    const init = await lsp.initialize({ rootUri: `file://${dir}` });
+    assert.equal(init.serverInfo.name, 'exact-contract-lsp');
+    const uri = `file://${appPath}`;
+    lsp.notify('textDocument/didOpen', {
+      textDocument: { uri, languageId: 'exact-contract', version: 1, text: src },
+    });
+    const hover = await lsp.request('textDocument/hover', {
+      textDocument: { uri },
+      position: { line: 5, character: 9 },
+    });
+    assert.match(hover.contents.value, /state count: number/);
+    const outline = await lsp.request('exact/outline', { uri });
+    assert.equal(outline.parsed, true);
+    assert.deepEqual(outline.components[0].actions[0].writes, ['count']);
+
+    const baseArgs = args.slice(0, args.indexOf('lsp'));
+    const mcpProc = spawn(command, [...baseArgs, 'mcp', '--stdio'], { cwd: ROOT, stdio: ['pipe', 'pipe', 'pipe'] });
+    const mcpReplies = [];
+    let buf = '';
+    const mcpDone = new Promise((done) => {
+      mcpProc.stdout.on('data', (chunk) => {
+        buf += chunk.toString('utf8');
+        while (buf.includes('\n')) {
+          const idx = buf.indexOf('\n');
+          const line = buf.slice(0, idx).trim();
+          buf = buf.slice(idx + 1);
+          if (line) mcpReplies.push(JSON.parse(line));
+          if (mcpReplies.length >= 2) done();
+        }
+      });
+    });
+    mcpProc.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }) + '\n');
+    mcpProc.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'contract_vocab', arguments: { query: 'button', limit: 3 } } }) + '\n');
+    mcpProc.stdin.end();
+    await mcpDone;
+    assert.equal(mcpReplies[0].result.serverInfo.name, 'exact-contract-mcp');
+    assert.equal(mcpReplies[1].result.isError, false);
+    mcpProc.kill();
+  } finally {
+    await lsp.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+}, 600_000);
+
+test('full VS Code host activation avoids duplicate formatters/diagnostics when exactContract.compiler is set', async () => {
+  const { command } = discoverServer([ROOT]);
+  if (!existsSync(command)) { console.log('skipped: no contract binary'); return; }
+  const { activate, deactivate } = await import('./extension.js');
+  const formatters = [];
+  const diagCollections = [];
+  const commands = new Map();
+  let hoverProvider = null;
+  class Position { constructor(line, character) { this.line = line; this.character = character; } }
+  class Range {
+    constructor(a, b, c, d) {
+      if (typeof a === 'number') { this.start = new Position(a, b); this.end = new Position(c, d); }
+      else { this.start = a; this.end = b; }
+    }
+  }
+  class Location { constructor(uri, range) { this.uri = uri; this.range = range; } }
+  class Uri {
+    constructor(fsPath) { this.fsPath = fsPath; this.scheme = 'file'; this._href = `file://${fsPath}`; }
+    toString() { return this._href; }
+    static parse(s) { return new Uri(s.replace(/^file:\/\//, '')); }
+  }
+  class Diagnostic { constructor(range, message, severity) { this.range = range; this.message = message; this.severity = severity; } }
+  class MarkdownString { constructor(value) { this.value = value; } }
+  class Hover { constructor(contents, range) { this.contents = contents; this.range = range; } }
+  class SemanticTokensLegend { constructor(t, m) { this.tokenTypes = t; this.tokenModifiers = m; } }
+  const dir = mkdtempSync(resolve(tmpdir(), 'exact-vscode-host-'));
+  const appPath = resolve(dir, 'app.contract');
+  const src = 'component App\n  state count = 0\n  view\n    text `${count}`\n';
+  writeFileSync(appPath, src);
+  const doc = { uri: new Uri(appPath), fileName: appPath, languageId: 'exact-contract', version: 1, getText: () => src };
+  const noopDisp = () => ({ dispose() {} });
+  const vscode = {
+    Position, Range, Location, Uri, Diagnostic, MarkdownString, Hover, SemanticTokensLegend,
+    DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 },
+    StatusBarAlignment: { Left: 1, Right: 2 },
+    CodeActionKind: { QuickFix: 'quickfix', SourceOrganizeImports: 'source.organizeImports', SourceFixAll: 'source.fixAll' },
+    extensions: { getExtension: () => undefined },
+    window: {
+      createOutputChannel: () => ({ append() {}, appendLine() {}, show() {}, dispose() {} }),
+      createStatusBarItem: () => ({ text: '', tooltip: '', command: '', show() {}, dispose() {} }),
+      showWarningMessage: () => Promise.resolve(),
+      showErrorMessage: () => Promise.resolve(),
+    },
+    workspace: {
+      workspaceFolders: [{ uri: new Uri(ROOT), name: 'exact' }],
+      textDocuments: [doc],
+      getConfiguration: (section) => ({
+        get: (key, def) => {
+          const full = section ? `${section}.${key}` : key;
+          if (full === 'exactContract.compiler' || key === 'compiler') return command;
+          return def;
+        },
+      }),
+      onDidOpenTextDocument: noopDisp,
+      onDidChangeTextDocument: noopDisp,
+      onDidSaveTextDocument: noopDisp,
+      onDidCloseTextDocument: noopDisp,
+      onWillRenameFiles: noopDisp,
+      onDidChangeConfiguration: noopDisp,
+      createFileSystemWatcher: () => ({ onDidCreate: noopDisp, onDidChange: noopDisp, onDidDelete: noopDisp, dispose() {} }),
+    },
+    languages: {
+      createDiagnosticCollection: (name) => {
+        const col = { name, set() {}, delete() {}, dispose() {} };
+        diagCollections.push(col);
+        return col;
+      },
+      registerHoverProvider: (_sel, p) => { hoverProvider = p; return noopDisp(); },
+      registerDocumentFormattingEditProvider: (_sel, p) => { formatters.push(p); return noopDisp(); },
+      registerDefinitionProvider: noopDisp,
+      registerTypeDefinitionProvider: noopDisp,
+      registerReferenceProvider: noopDisp,
+      registerDocumentHighlightProvider: noopDisp,
+      registerRenameProvider: noopDisp,
+      registerDocumentSymbolProvider: noopDisp,
+      registerWorkspaceSymbolProvider: noopDisp,
+      registerDocumentLinkProvider: noopDisp,
+      registerColorProvider: noopDisp,
+      registerSelectionRangeProvider: noopDisp,
+      registerCallHierarchyProvider: noopDisp,
+      registerCompletionItemProvider: noopDisp,
+      registerSignatureHelpProvider: noopDisp,
+      registerDocumentSemanticTokensProvider: noopDisp,
+      registerInlayHintsProvider: noopDisp,
+      registerCodeActionsProvider: noopDisp,
+      registerFoldingRangeProvider: noopDisp,
+      registerCodeLensProvider: noopDisp,
+    },
+    commands: { registerCommand: (id, fn) => { commands.set(id, fn); return noopDisp(); } },
+  };
+  const context = { subscriptions: [] };
+  try {
+    await activate(context, vscode);
+    assert.equal(formatters.length, 1, 'must register exactly one formatter');
+    assert.equal(diagCollections.length, 1, 'must register exactly one diagnostic collection');
+    assert.equal(commands.size, 7);
+    const hover = await hoverProvider.provideHover(doc, new Position(1, 9));
+    assert.match(hover.contents.value, /state count: number/);
+  } finally {
+    await deactivate();
+    for (const s of context.subscriptions) s?.dispose?.();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

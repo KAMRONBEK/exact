@@ -1,0 +1,15 @@
+# Merge into ~/.config/helix/languages.toml to enable Exact Contract LSP in Helix.
+
+[language-server.exact-contract-lsp]
+command = "contract"
+args = ["lsp", "--stdio"]
+
+[[language]]
+name = "exact-contract"
+scope = "source.exact-contract"
+file-types = ["contract"]
+roots = ["app.json", "app.contract", "Cargo.toml"]
+comment-token = "//"
+indent = { tab-width = 2, unit = "  " }
+language-servers = ["exact-contract-lsp"]
+auto-format = true

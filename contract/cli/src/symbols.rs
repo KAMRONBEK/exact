@@ -15,10 +15,12 @@ use std::{
 };
 
 mod elements;
+mod lsp;
 mod partial;
 mod types;
 use elements::Element;
 pub use elements::ElementFilters;
+pub(crate) use lsp::{symbol_table_source, SymbolDef, SymbolTable};
 
 /// A component's members, in the namespace its expressions read.
 const MEMBERS: [&str; 7] = [

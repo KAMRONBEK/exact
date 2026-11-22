@@ -20,7 +20,6 @@ mod activities;
 mod excerpt;
 mod fence;
 pub use excerpt::excerpt;
-
 /// Whether an attribute writes paint rows alone (LLP 1122 D14): `set-row`
 /// edits one; a layout row, a prop or a handler is the author's. The source
 /// map marks a written row that is not (`layout`).
@@ -39,6 +38,7 @@ mod grants;
 /// `semantics/README.md`).
 pub mod lean;
 mod logic;
+pub mod lsp;
 mod manifest;
 mod map;
 mod midi;
@@ -78,6 +78,8 @@ pub mod forma_uses;
 pub mod snapshot;
 pub mod terminal;
 mod typescript;
+/// Compiler vocabulary lookups (`contract vocab`) and LSP metadata.
+pub mod vocab;
 pub mod watch;
 pub mod watch_sync;
 pub use contract_lower::vocab::collection_edge_refusal;
