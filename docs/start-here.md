@@ -469,8 +469,9 @@ snapshot. The backend’s clock stays its own.
    Markdown, span or link, writing nothing but its `color`) or both, or a one-part badge,
    is UIKit's own bar item. Anything else in it (a spinner and its words, a picture, a
    pressed row, a button with a dot beside its label) is a hosted item on its side of the heading, drawn as written, with no glass unless
-   something in it presses; inside a box around the heading, only the title shows. An
-   element the bar has no object for (a spinner, a picture, a text, a readout) is left out
+   something in it presses. The heading's own box shows the title. A filled box before
+   the heading is its avatar if it holds shown text, a symbol or a picture and no bar
+   controls or readouts. An element the bar has no object for is left out
    by Android's top app bar and tvOS's bar, and makes the Mac draw the header in the page
    unless it is a readout of words, symbols and dots; Android also leaves out the
    subtitle, the avatar and the tap on the title. The compiler's `header-item-left-out` names each hosted element and readout
