@@ -1,4 +1,4 @@
-import { AGENT_ADMITTED, views, retiredViews, presence, host, followedScrolls, motion, loadAfterPaint, root, agentMode, log, t0, readOut, writeIn, loadLiveTime, lists, arrange, pieces, loadGpuIfNeeded, afterNativePaint, deferFulfill, holds, agentKeepsStore, pendingStore, moduleReady, safelyFulfill, encoder, track, byTicket, forgettable, surfaceGranted, HOST_WORK_BASE64, loadPageNative, localAssetURL, controllers, pageFile, heldAsks, httpHelpers, now, postSurface, ask, loadStage, stageLoaded, picker, inflight, documentsGlue, frameNav, followScroll, messageFrames, messageViews, dropSurface, register, seek, settleFollow, pendingScrolls, rememberScroll, ownFollowed, releaseFollowed, collections, focusAutofocus, markScrollDocument, letGo, holdWake, holdOrientation, clocks } from "../glue.js";
+import { AGENT_ADMITTED, views, retiredViews, presence, host, followedScrolls, motion, loadAfterPaint, root, agentMode, log, t0, readOut, writeIn, loadLiveTime, lists, arrange, pieces, loadGpuIfNeeded, afterNativePaint, deferFulfill, holds, agentKeepsStore, pendingStore, moduleReady, safelyFulfill, encoder, track, byTicket, forgettable, surfaceGranted, HOST_WORK_BASE64, loadPageNative, localAssetURL, controllers, pageFile, heldAsks, httpHelpers, now, postSurface, ask, picker, inflight, documentsGlue, frameNav, followScroll, messageFrames, messageViews, dropSurface, register, seek, settleFollow, pendingScrolls, rememberScroll, ownFollowed, releaseFollowed, collections, focusAutofocus, markScrollDocument, letGo, holdWake, holdOrientation, clocks } from "../glue.js";
 import { prepareContexts, positionContexts } from "./context.js";
 import { pageTitle, navigation, noteFit, syncListItemRoles, listItem, settleValue, afterPaint, createGrantSet, rawGrantText, grantError, grantWords, scopedGrantSet, refusal, appRootFontSize, liveById, navigableURL, sheetLeaves, popoverCommand, runFocusCommands, inertAncestor, refitTexts } from "../navigation.js";
 import { applyProps, nativeCreate, listView, appSource, syncMedia, forgetList, syncViewportFit, refreshSymbols, syncLists } from "./views.js";
@@ -616,19 +616,14 @@ function apply(batch) {
             // LLP 1069.002 D2, D9: the element's own picker, inside the press's activation; under the agent, a hold
             const el = [...views.values()].find((el) => el.id === op.args?.[0] && el.type === "file");
             if (agentMode) {
-              const request = { op: "showPicker", id: String(op.args?.[0] ?? "") };
-              const hold = () => {
-                const r = ask(request);
-                if (r.error) console.warn("exact:", r.error);
-                return !r.error;
-              };
-              if (stageLoaded("inspection")) {
-                if (hold()) globalThis.exact.pickerOpened?.();
+              const r = ask({
+                op: "showPicker",
+                id: String(op.args?.[0] ?? "")
+              });
+              if (r.error) {
+                console.warn("exact:", r.error);
               } else {
-                // The press's activation is this command's while the stage loads, as a hold made at once takes it.
                 globalThis.exact.pickerOpened?.();
-                const at = host.incarnation;
-                loadStage("inspection").then(() => { if (host.incarnation === at) hold(); }).catch(console.error);
               }
             } else if (!el) {
               log(`picker: refused: no file input with id "${op.args?.[0]}"`);

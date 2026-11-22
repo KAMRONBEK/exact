@@ -211,17 +211,26 @@ test.skipIf(unsplitReason() !== null || !Bun.which('wasm-as'))('a seam that may 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-// A planner that reads one stage at a time: a later stage's direct call fails the build though an earlier one would ship
-// the module whole, and a call to a seam two crates match is no evidence that the core calls the stage.
+// Every stage's direct calls are checked before any stage ships the module whole: a later stage's direct call fails the
+// build though an earlier stage's seam is exported, and so does one from a start function that is another stage's
+// seam. Where a seam's pattern matches two crates' functions, a direct call to one ships the module whole, and a call
+// to one of each fails the build.
 test.skipIf(unsplitReason() !== null || !Bun.which('wasm-as'))('every stage is checked for a direct call first', () => {
   const dir = mkdtempSync(resolve(tmpdir(), 'exact-stage-order-'));
   const cases = [
     ['directly from boot', false, [{ name: 'one', seam: /^one(.*)$/ }, { name: 'two', seam: /^two(.*)$/ }],
       `(table 1 funcref) (elem (i32.const 0) $two) (func $one (export "one") (result i32) i32.const 0)
       (func $two (type $read) (result i32) i32.const 0) (func $boot (export "boot") (result i32) call $two)`],
+    ['directly from one', false, [{ name: 'one', seam: /^one(.*)$/ }, { name: 'two', seam: /^two(.*)$/ }],
+      `(table 1 funcref) (elem (i32.const 0) $two) (global $g (mut i32) (i32.const 0))
+      (func $two (type $read) (result i32) i32.const 0) (func $one (global.set $g (call $two))) (start $one)`],
     ['2 crates', true, [{ name: 'two', seam: /^two(_a|_b)$/ }],
       `(table 2 funcref) (elem (i32.const 0) $two_a $two_b) (func $two_a (type $read) (result i32) i32.const 0)
       (func $two_b (type $read) (result i32) i32.const 1) (func $boot (export "boot") (result i32) call $two_a)`],
+    ['directly from boot', false, [{ name: 'two', seam: /^two(_a|_b)$/ }],
+      `(table 2 funcref) (elem (i32.const 0) $two_a $two_b) (func $two_a (type $read) (result i32) i32.const 0)
+      (func $two_b (type $read) (result i32) i32.const 1)
+      (func $boot (export "boot") (result i32) (i32.add (call $two_a) (call $two_b)))`],
   ];
   try {
     for (const [refusal, unsplittable, stages, body] of cases) {
@@ -250,16 +259,17 @@ test.skipIf(unsplitReason() !== null || !Bun.which('wasm-as'))('a line break in 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-// A line break before a line that reads as the call graph's header, in a helper's name whose first line is another
-// function's: the map ends there, and the helper's call is dropped with its edge line.
-test.skipIf(unsplitReason() !== null || !Bun.which('wasm-as'))('a name that writes the graph header is seen', () => {
-  const dir = mkdtempSync(resolve(tmpdir(), 'exact-header-name-'));
+// A name whose lines after its first forge the call graph's header and a node for each function the map names before
+// it: the map ends cleanly, its names are the forged nodes, and the forged graph has no calls; the real one follows.
+test.skipIf(unsplitReason() !== null || !Bun.which('wasm-as'))('a name that forges the call graph is seen', () => {
+  const dir = mkdtempSync(resolve(tmpdir(), 'exact-forged-graph-'));
+  const id = (name) => `$"${name.replaceAll('\\', '\\\\').replaceAll('"', '\\"').replaceAll('\n', '\\n')}"`;
+  const forged = id(`y\ndigraph call {\n  "${HANDLE}" [style="rounded"];\n  "boot" [fillcolor="gray"];\n  "y" [];`);
   try {
     const input = resolve(dir, 'app.wasm'), wat = resolve(dir, 'app.wat');
-    writeFileSync(wat, `(module (type $read (func (result i32))) (import "env" "imp" (func $imp (result i32)))
-      (table 1 funcref) (elem (i32.const 0) $${HANDLE}) (func $${HANDLE} (type $read) (result i32) i32.const 0)
-      (func $x (export "x") (result i32) i32.const 0) (func $boot (export "boot") (result i32) call $"x\\ndigraph call {")
-      (func $"x\\ndigraph call {" (result i32) call $${HANDLE}) (func $last (export "last") (result i32) i32.const 0))`);
+    writeFileSync(wat, `(module (type $read (func (result i32))) (table 1 funcref) (elem (i32.const 0) $${HANDLE})
+      (func $${HANDLE} (type $read) (result i32) i32.const 0) (func $boot (export "boot") (result i32) call ${forged})
+      (func ${forged} (result i32) call $${HANDLE}))`);
     expect(spawnSync('wasm-as', [wat, '-g', '--enable-reference-types', '--enable-bulk-memory', '-o', input]).status).toBe(0);
     expect(() => planStages(input)).toThrow('holds a quote or a line break');
   } finally { rmSync(dir, { recursive: true, force: true }); }
