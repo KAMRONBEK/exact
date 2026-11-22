@@ -95,8 +95,9 @@ export class Unsplittable extends Error {}
 /** Each stage's functions (raw names) in `named`, a wasm that keeps its name
  * section: what its seam reaches and the core does not. Throws an `Error`,
  * which fails the build, when no function matches a seam or the call graph
- * shows the core, a start function included, calling one directly, one of
- * each crate's where the seam's pattern matches two (LLP 1047.000 §9). Throws `Unsplittable` when the call graph cannot be read, or
+ * shows the core, a start function included, calling one directly; where the
+ * pattern matches two crates' functions, calling each crate's, the other's
+ * counted as the core's (LLP 1047.000 §9). Throws `Unsplittable` when the call graph cannot be read, or
  * cannot show that the seam is the one way into the stage that the glue gates:
  * the seam is exported or not in exactly one table slot, its pattern matches
  * functions of two crates, or the module has a start function, which runs at
@@ -125,16 +126,21 @@ export function planStages(named, stages = STAGES) {
     const seam = seams.get(stage.name);
     if (!seam.length) throw new Error(`stage ${stage.name}: no function matches its seam ${stage.seam}`);
     // A seam the core calls directly may be in no slot, once nothing takes its address, which would otherwise ship the
-    // module whole. Where the pattern matches two crates' functions either may be the seam, so the core calls it when
-    // it calls one of each.
-    const direct = new Map();
-    for (const entry of seam) {
-      const from = [...callers.get(entry) ?? []].filter(caller => core.has(caller)), crate = stage.seam.exec(entry)[1];
-      if (from.length && !direct.has(crate)) direct.set(crate, { entry, from });
+    // module whole. Where the pattern matches two crates' functions either may be the seam, the other's then the
+    // core's own, so the core calls the seam when it calls each crate's as if that crate's were the seam.
+    const direct = [];
+    for (const crate of crates.get(stage.name)) {
+      const entries = seam.filter(entry => stage.seam.exec(entry)[1] === crate);
+      const blocked = new Set([...all].filter(name => name !== start && (!seam.includes(name) || entries.includes(name))));
+      const reached = crates.get(stage.name).size > 1 ? reach(raw.filter(name => nodes.get(name).root && !blocked.has(name)), blocked) : core;
+      const hit = entries.map(entry => ({ entry, from: [...callers.get(entry) ?? []].filter(caller => reached.has(caller)) }))
+        .find(({ from }) => from.length);
+      if (!hit) break;
+      direct.push(hit);
     }
-    if (direct.size === crates.get(stage.name).size) {
-      const { entry, from } = direct.values().next().value;
-      throw new Error(`stage ${stage.name}: the core calls its seam ${demangled.get(entry)} directly from ${from.slice(0, 3).map(c => demangled.get(c)).join(', ')}`);
+    if (direct.length === crates.get(stage.name).size) {
+      const said = direct.map(({ entry, from }) => `${demangled.get(entry)} directly from ${from.slice(0, 3).map(c => demangled.get(c)).join(', ')}`);
+      throw new Error(`stage ${stage.name}: the core calls its seam ${said.length > 1 ? `whichever crate's it is: ${said.join('; ')}` : said[0]}`);
     }
   }
   if (start !== null) throw new Unsplittable(`${named} has a start function, which runs at instantiation and may call through the table into a stage before it loads`);

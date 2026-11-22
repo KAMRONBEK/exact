@@ -213,8 +213,8 @@ test.skipIf(unsplitReason() !== null || !Bun.which('wasm-as'))('a seam that may 
 
 // Every stage's direct calls are checked before any stage ships the module whole: a later stage's direct call fails the
 // build though an earlier stage's seam is exported, and so does one from a start function that is another stage's
-// seam. Where a seam's pattern matches two crates' functions, a direct call to one ships the module whole, and a call
-// to one of each fails the build.
+// seam. Where a seam's pattern matches two crates' functions, a direct call to one ships the module whole, and the build
+// fails when the core calls each crate's, the other's counted as the core's: from a root, or one through the other.
 test.skipIf(unsplitReason() !== null || !Bun.which('wasm-as'))('every stage is checked for a direct call first', () => {
   const dir = mkdtempSync(resolve(tmpdir(), 'exact-stage-order-'));
   const cases = [
@@ -227,10 +227,13 @@ test.skipIf(unsplitReason() !== null || !Bun.which('wasm-as'))('every stage is c
     ['2 crates', true, [{ name: 'two', seam: /^two(_a|_b)$/ }],
       `(table 2 funcref) (elem (i32.const 0) $two_a $two_b) (func $two_a (type $read) (result i32) i32.const 0)
       (func $two_b (type $read) (result i32) i32.const 1) (func $boot (export "boot") (result i32) call $two_a)`],
-    ['directly from boot', false, [{ name: 'two', seam: /^two(_a|_b)$/ }],
+    ['two_a directly from boot; two_b directly from boot', false, [{ name: 'two', seam: /^two(_a|_b)$/ }],
       `(table 2 funcref) (elem (i32.const 0) $two_a $two_b) (func $two_a (type $read) (result i32) i32.const 0)
       (func $two_b (type $read) (result i32) i32.const 1)
       (func $boot (export "boot") (result i32) (i32.add (call $two_a) (call $two_b)))`],
+    ['two_a directly from boot; two_b directly from two_a', false, [{ name: 'two', seam: /^two(_a|_b)$/ }],
+      `(table 2 funcref) (elem (i32.const 0) $two_a $two_b) (func $two_a (type $read) (result i32) call $two_b)
+      (func $two_b (type $read) (result i32) i32.const 1) (func $boot (export "boot") (result i32) call $two_a)`],
   ];
   try {
     for (const [refusal, unsplittable, stages, body] of cases) {
