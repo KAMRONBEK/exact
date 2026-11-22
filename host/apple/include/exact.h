@@ -857,10 +857,10 @@ uint32_t exact_set_launch_time(ExactRuntime rt, double epoch_at_zero, double utc
  * seed, then optionally NUL formatLocale), for the next boot or candidate; the running runner is not told.
  * Returns zero when accepted, otherwise an error batch length; keeps the last valid fact. */
 uint32_t exact_set_launch_place(ExactRuntime rt, size_t len);
-/* LLP 1030.004 D2: the window's name (UTF-8 in exact_in), which the page's
- * `name` reads, and whether its router launches rooted (`rooted` nonzero),
- * for every boot from here. Not a batch. */
-uint32_t exact_set_launch_window(ExactRuntime rt, size_t len, uint32_t rooted);
+/* Window name (UTF-8) and rooted launch (LLP 1030.004 D2). An optional JSON object
+ * of window state follows the name for a restoration before boot. No archive leaves
+ * any previously supplied state in place. */
+uint32_t exact_set_launch_window(ExactRuntime rt, size_t name, uint32_t rooted, size_t archive);
 /* The platform's layout direction for every boot from here, where it governs
  * a direction the author left unsaid (AppKit's process direction): 0 left to
  * right, 1 right to left, anything else the strings table's. Not a batch. */

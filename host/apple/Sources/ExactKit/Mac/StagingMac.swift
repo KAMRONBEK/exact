@@ -44,8 +44,7 @@ extension Presenter {
             if op.op == .children { touched(id, children: true) } else if op.op != .create { touched(id, textChanged: op.op == .props || op.op == .style) }
             switch op.op {
             case .create:
-                let v = newView(op)
-                v.stage = .preparing
+                let v = newView(op, stage: .preparing(plan.publication))
                 views[id] = v
                 plan.made[id] = v
                 plan.madeOrder.append(id)
@@ -112,18 +111,17 @@ extension Presenter {
             guard let node = plan.made[id] else { continue }
             if !prepareAccessibility(node) { plan.revealAccessibility.insert(id) }
             inputGates.prepared(node)
+            if node.props["title"] != nil || node.isButton { plan.tips.append(node) }
+            if node.hasCursorRects { plan.cursorRects.append(node) }
         }
     }
 
     /// The reveal: what preparation made joins the committed tree, with the
     /// tooltips, cursor rectangles and after-batch work it held back.
     func publish(_ plan: StagePlan) {
-        for id in plan.madeOrder {
-            guard let v = plan.made[id] else { continue }
-            v.stage = .committed
-            settleTip(v)
-            v.window?.invalidateCursorRects(for: v)
-        }
+        plan.publication.committed = true
+        for view in plan.tips { settleTip(view) }
+        for view in plan.cursorRects { view.window?.invalidateCursorRects(for: view) }
         afterBatchWork.append(contentsOf: plan.afterReveal)
         plan.afterReveal = []
         // What a box lays out from its committed children (a form row's bezel) counts the new ones.
@@ -234,7 +232,7 @@ final class Teardown {
         let last = path.count - 1
         if let child = path[last].children.popLast() {
             // A child may have joined the new tree since this branch was opened.
-            if child.stage == .retired, child.nodeSuperview === path[last].node {
+            if case .retired = child.stage, child.nodeSuperview === path[last].node {
                 path.append(Branch(child))
             }
             return
@@ -248,9 +246,15 @@ final class Teardown {
 }
 
 extension NodeView {
-    enum Stage { case committed, preparing, retired }
+    enum Stage { case committed, preparing(StagePlan.Publication), retired }
     /// Outside the committed tree during preparation or after retirement.
-    var held: Bool { stage != .committed }
+    var held: Bool {
+        switch stage {
+        case .committed: return false
+        case .preparing(let publication): return !publication.committed
+        case .retired: return true
+        }
+    }
 
     /// Drawn but unseen, unhit and off the accessibility tree, until
     /// `releaseOffstage`; what is written to `alphaValue` meanwhile is kept.

@@ -97,6 +97,8 @@ mod tabs;
 #[cfg(windows)]
 mod windows_field;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
+pub use display_frame::PanelImage;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub use display_frame::SubmittedFrame;
 #[path = "content_region/presenter.rs"]
 mod content_region;
@@ -182,7 +184,9 @@ pub use device::{touch_only, Device, Pointing};
 pub use exact_runner::ScreenReader;
 pub use hosted::action as field_action;
 use painter::cpu_info;
-pub(crate) use painter::PainterBoot;
+#[cfg(windows)]
+pub(crate) use painter::d3d11_backend;
+pub use painter::PainterBoot;
 #[cfg(target_os = "macos")]
 pub use painter::SubmittedAppleFrame;
 pub use painter::{set_custom_painter, PainterChoice, PainterFactory, PainterInfo};
@@ -458,6 +462,13 @@ pub struct Presenter<D: DataSource> {
 fn r2(x: f32) -> f64 {
     (x as f64 * 100.0).round() / 100.0
 }
+fn log_alert(line: &str) {
+    #[cfg(target_os = "android")]
+    crate::android::console(exact_runner::Console::Warn, line);
+    #[cfg(not(target_os = "android"))]
+    eprintln!("exact: {line}");
+}
+
 /// The app's `console` lines (LLP 1027.009 D1), the sink of each runner the
 /// presenter shows: on standard error in every build, and on Android, where
 /// standard error is logcat's `exact` tag, under the app's own tag instead
@@ -605,6 +616,8 @@ impl<D: DataSource> Presenter<D> {
         if let Some(note) = executor.note() {
             host.log(note.to_string());
         }
+        let mut brush = Painter::new(text.clone(), scale, backend);
+        brush.canvases.drawings = host.canvas_snapshots().clone();
         let mut p = Presenter {
             last_wheel: None,
             wheel_free: BTreeMap::new(),
@@ -619,7 +632,7 @@ impl<D: DataSource> Presenter<D> {
             transform_geometry: Default::default(),
             arrange: None,
             group: None,
-            brush: Painter::new(text.clone(), scale, backend),
+            brush,
             text,
             make_text,
             ahead: None,
@@ -917,7 +930,7 @@ impl<D: DataSource> Presenter<D> {
         // stderr as well as in the journal. The runner queues none unless it
         // measures, so a production binary prints none.
         for line in self.host.runner().take_alerts() {
-            eprintln!("exact: {line}");
+            log_alert(&line);
         }
         self.restore_scroll_anchors();
         self.alert_sync();

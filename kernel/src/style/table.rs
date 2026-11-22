@@ -19,7 +19,7 @@
 //! to 0.5 px (fixture `table`).
 
 use crate::arena::NodeArena;
-use crate::generated::{Direction, Display, NodeType, PropId, StyleId, VerticalAlign};
+use crate::generated::{Display, NodeType, PropId, StyleId, VerticalAlign};
 use crate::style::{cells, Dimension};
 use taffy::prelude::{auto, length, zero, Rect};
 
@@ -56,9 +56,6 @@ pub(crate) fn column_header(arena: &NodeArena, slot: u32) -> bool {
 /// HTML's UA padding of a `th` and a `td`, on each side where none is said.
 const CELL_PADDING: f32 = 1.0;
 
-/// HTML's UA `margin-inline-start` of a `dd`.
-const DD_INDENT: f32 = 40.0;
-
 /// What a node is to its table.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Part {
@@ -85,17 +82,6 @@ impl Part {
             _ => return None,
         })
     }
-}
-
-/// Whether [`apply`] gives `slot` anything: it is a table's part or a
-/// description list or its description.
-pub(crate) fn styled(arena: &NodeArena, slot: u32) -> bool {
-    Part::of(arena, slot).is_some()
-        || (arena.node_type(slot) == NodeType::View
-            && matches!(
-                arena.props(slot).str(PropId::SemanticTag),
-                Some("dl" | "dd")
-            ))
 }
 
 /// Whether `table` lays out as a table: CSS's `display: table`, which a
@@ -188,32 +174,6 @@ pub(crate) fn table_of(arena: &NodeArena, slot: u32) -> Option<u32> {
 /// grid placement is `layout/table.rs`'s, which only the table's tree knows.
 pub(crate) fn apply(arena: &NodeArena, slot: u32, s: &mut taffy::style::Style) {
     let style = arena.style(slot);
-    match arena.props(slot).str(PropId::SemanticTag) {
-        // `margin-block: 1em`.
-        Some("dl") if arena.node_type(slot) == NodeType::View => {
-            let em = arena.computed_source(slot, StyleId::FontSize).font_size;
-            if !style.mask.has(StyleId::MarginTop) {
-                s.margin.top = length(em);
-            }
-            if !style.mask.has(StyleId::MarginBottom) {
-                s.margin.bottom = length(em);
-            }
-            return;
-        }
-        // `margin-inline-start`, where its author said none: the right
-        // right to left. This runs after `sides::mirror_unsaid`, so the side
-        // written is the side the box has.
-        Some("dd") if arena.node_type(slot) == NodeType::View => {
-            let rtl = arena.computed_source(slot, StyleId::Direction).direction == Direction::Rtl;
-            if rtl && !style.mask.has(StyleId::MarginRight) {
-                s.margin.right = length(DD_INDENT);
-            } else if !rtl && !style.mask.has(StyleId::MarginLeft) {
-                s.margin.left = length(DD_INDENT);
-            }
-            return;
-        }
-        _ => {}
-    }
     let Some(part) = Part::of(arena, slot) else {
         return;
     };

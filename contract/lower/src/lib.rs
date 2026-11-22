@@ -67,6 +67,7 @@ mod nodes;
 mod overflow;
 pub mod params;
 mod popover_surface;
+mod prose;
 mod provenance;
 mod resource_args;
 mod roles;
@@ -395,6 +396,7 @@ pub fn lower_all(
             bundled::check(&checking.expanded(), root)
         })
         .unwrap_or_default();
+    asset_errors.extend(routes::tab_accessory::check(checked));
     let mut text_styles = warnings::TextStyles::new();
     let result = lower_with_sites(
         checked,
@@ -652,7 +654,14 @@ fn lower_body(
     for (i, s) in root.states.iter().enumerate() {
         let ty = l.ty_id(&root_types.slots[i])?;
         let id = l.b.slot(&s.name, ty, placeholder);
-        l.b.set_slot_persist(id, root.persists(&s.name));
+        if let Some(persist) = root.persistence(&s.name) {
+            let scope = if persist.window {
+                exact_plan::PersistScope::Window
+            } else {
+                exact_plan::PersistScope::App
+            };
+            l.b.set_slot_persist(id, scope);
+        }
         l.slots.push(id);
     }
     l.declare_routes(file);

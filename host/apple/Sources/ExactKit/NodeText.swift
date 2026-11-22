@@ -140,6 +140,7 @@ extension NodeView {
     func invalidateText() {
         #if os(macOS)
         readerParagraph?.invalidatePaint()
+        inlineAccessibility = nil
         #else
         if let presenter, presenter.applying { presenter.changedText.insert(id) }
         #endif

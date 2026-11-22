@@ -147,20 +147,14 @@ impl<D: DataSource> Presenter<D> {
         self.brush.placements = self.surfaces.placements(&self.host, true);
         self.brush.composites.canvases = self.surfaces.composites();
         if target != FrameTarget::Geometry {
-            // Release 2D snapshots held only by the last paint before replaying
-            // so unique bitmaps can be reused in place; keep GPU readback buffers.
-            self.brush
-                .canvases
-                .retain(|view, _| self.surfaces.has_canvas(*view));
             self.draw_and_capture_canvases(canvas_frame);
-            let previous =
-                std::mem::replace(&mut self.brush.canvases, self.host.canvas_snapshots());
-            self.brush.canvases.extend(self.surfaces.pixels(
+            let previous = std::mem::take(&mut self.brush.canvases.readbacks);
+            self.brush.canvases.readbacks = self.surfaces.pixels(
                 &mut self.host,
                 self.brush.scale,
                 previous,
                 self.brush.window_canvas,
-            ));
+            );
         }
         // The hatches' overlays as published (LLP 1075.003.000.001 §2.2.1):
         // read here, at the start of the paint; the walk calls no hatch.
@@ -177,6 +171,7 @@ impl<D: DataSource> Presenter<D> {
             self.host.log(error);
         }
         self.refresh_looks(None); // the focus's ring (LLP 1121 D8)
+        self.brush.focus_presses = self.focus.is_some_and(|id| self.presses_itself(id));
         self.restore_scroll_anchors();
         self.arm_scroll_anchors();
         self.scroll_timelines();

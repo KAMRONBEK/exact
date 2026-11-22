@@ -133,7 +133,7 @@ impl<D: DataSource + Default> CanvasHost<D> {
             led: false,
             settling: false,
             force: false,
-            scrolled: false,
+            scroll_hold: super::scroll::ScrollHold::default(),
             prefetching: false,
             quiet: None,
             travel: crate::travel::Travel::default(),

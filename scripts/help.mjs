@@ -36,7 +36,7 @@ const DRIVE = [
   ['--scale <n>', 'screenshots at n pixels per point (exact.mjs agent on ios, macos: 1; an iPhone\'s own: 3)'],
   ['--chrome platform|agent', 'UIKit\'s bars (exact.mjs on iOS); agent paints the header'],
   ['--live · --timing platform · --bind <extension>', 'wall clock on macOS, iOS and Android reader · Apple native transitions · use a module implementation'],
-  ['--touch platform', 'iOS simulator: every tap a real touch, through the XCTest runner'],
+  ['--touch platform', 'iOS simulator or paired iPhone: send taps and drags through XCTest'],
   ['--epoch <ISO|ms|now> · --login [hidden]', 'the date at the clock\'s zero (default 2026-01-01) · a launch the login item made, hidden: with no window'],
   ['--locale <tag> · --format-locale <tag> · --time-zone <zone> · --seed <n>', 'default en-US, the locale (the Region\'s format, exactTime().formatLocale), UTC, 1'],
   ['--fail-fetch <prefix> · --permission <name>=<state> · --notification <entry> · --wake <entry> · --call \'<tool> <json>\'', 'each fetch whose URL starts with it fails, from the first data load · a module\'s permission at the start (geolocation=granted) · a relaunch handed a listed entry, as state.notifications printed it · a cold wake for a registration, as state.backgroundSync printed it · a cold call of a tool, as a system\'s call that started the app'],
@@ -110,7 +110,10 @@ export const HELP = {
          the app needs no dev server.`,
     bodyAll: `Ports    one HTTP port on 127.0.0.1 (--lan: every interface), printed with the URL. A native
          client opening <url>__dev/open starts the producers on a second, loopback-only port.
-         The server stops with its process however it ends.`,
+         The server stops with its process however it ends.
+Frames   To embed the app in a local canvas at http://127.0.0.1:7420, start the loop with
+         EXACT_TOOL_PORT=7420 bun exact.mjs web. This selects the canvas as the loop's
+         framing origin alongside the app's own origin. The default canvas port is 7740.`,
     example: 'bun exact.mjs web --port 9000      # then open http://127.0.0.1:9000/',
   },
   'web-build': {
@@ -172,7 +175,7 @@ Backend  start snapback4 dev on app.ts’s selected origin’s port first; check
 Lines    tap, type, expect text|tree|state|disabled|refusal, clock data|settle|+<ms>|until state …, reload, back, fail|pass
          fetch, answer fetch "<prefix>" with <status> [json], request: docs/recipes/tests.md;
          all: docs/contract-grammar.md "Authored tests".`,
-    bodyAll: `A phone's build is ios --device's.
+    bodyAll: `A phone's build is ios --device's; on macOS with multiple Apple teams, set EXACT_IDENTITY=- or DEVELOPMENT_TEAM=<team-id>.
 Ports    --port <n> or EXACT_PORT chooses the page’s port; otherwise web: headless Chrome over a pipe; the page on 127.0.0.1, each test at a
          port fixed by its own store's name (20000-47999).
          ${NATIVE_PORTS}`,
@@ -257,7 +260,7 @@ Ports    none to choose: test's and agent's (headless Chrome over a pipe; a simu
       ['--archive <out.ipa>', 'with --device: an .ipa to distribute (EXACT_IDENTITY, EXACT_PROFILE), no phone; production trust, so with an update store EXACT_UPDATE_RECEIPT or EXACT_UPDATE_GENESIS=1'],
       ['--unsigned', 'with --device: ad-hoc signed .app, no phone, profile, identity or install; no --run; --archive writes an .ipa for re-signing'],
       ['--development', 'with --archive --unsigned: the development build --run installs, as an .ipa (development trust, host-dev; no update store receipt)'],
-      ['--extensions <kinds>', 'which app extensions to package: all (the default), none, or a list of widgets,activities,intents,alarms,notifications,watch (the watch app a device build embeds); the bake still compiles every entry, and app code that reaches a missing one is refused, not crashed'],
+      ['--extensions <kinds>', 'which app extensions to package: all (the default), none, or a list of widgets,activities,intents,alarms,notifications,watch,share; the bake still compiles every entry, and app code that reaches a missing one is refused, not crashed'],
       ['--tvos', 'an Apple TV simulator instead (with --device, an Apple TV)'],
       ['--url <url>', 'connect the client to that dev server (web\'s URL) for live reload'],
       OPTIMIZE,

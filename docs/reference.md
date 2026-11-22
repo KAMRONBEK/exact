@@ -66,12 +66,13 @@ the warning reports the affected version even with a JIT workaround enabled.
 
 An app with no `host.windows.painter` uses ink on a DirectX 11 composition
 swap chain, except an app declaring `game`, which keeps the CPU painter so
-its module presents directly. Explicit `"ink"` or `"cpu"` selects that painter;
-CPU keeps the `softbuffer` window. `EXACT_PAINTER` overrides either choice.
-`EXACT_INK_DEVICE=wgpu` selects ink's wgpu device (DirectX 12 with
-`WGPU_BACKEND=dx12`, as the measurements set); `warp` selects software
-DirectX 11. An Ink build requires the Windows SDK's `fxc`; without it,
-the build refuses and names the SDK and `"cpu"` remedies.
+its module presents directly. Explicit `"ink"` or `"cpu"` selects that painter.
+CPU keeps the `softbuffer` window. With development trust, `EXACT_PAINTER`
+overrides the choice and `EXACT_INK_DEVICE=wgpu` selects Ink's wgpu device
+(DirectX 12 with `WGPU_BACKEND=dx12`). A production bake uses the manifest
+choice. With either trust, `EXACT_INK_DEVICE=warp` selects software DirectX 11
+for Ink. An Ink build requires the Windows SDK's `fxc`. If it is missing,
+the build names the SDK and the CPU option.
 `agent windows`, `test windows` and `verify windows` explicitly select CPU
 for their headless drives unless `EXACT_PAINTER` is set. Those screenshots
 do not qualify the window's composition path.
@@ -79,9 +80,13 @@ A direct `EXACT_SMOKE=1` development launch uses the app's painter choice.
 `bun exact.mjs windows --release` packages a production binary and omits the
 headless driver. To measure an optimized build under the driver, set
 `EXACT_UPDATE_TRUST=development` when running the same command.
-A hand-written TypeScript app shell can pass the bake's `ADMIT_AGENT` constant
-to `exact_windows::run_baked::<AppData, ADMIT_AGENT>` with its window, plan,
-receipt and composed packages.
+A hand-written Windows shell selects the driver and development painters at link time with
+`exact_windows::run_baked::<AppData, ADMIT_AGENT>`. The TypeScript bake supplies
+`ADMIT_AGENT`. A Rust app that bakes its own `compat.json` writes
+`compat.admits_agent()` to a Rust constant in `OUT_DIR` in the same build step.
+`run_composed` always links the driver and development painters. The heavy-list app shows the
+[build step](../bench/heavy-list/exact-heavylist/windows/build.rs) and the
+[entry point](../bench/heavy-list/exact-heavylist/windows/src/main.rs).
 A Windows login item started with `--login hidden` paints its offscreen launch
 frame on the CPU and opens the selected painter when its window first draws.
 Linux and Android still opt into ink per platform; Android refuses it until
@@ -141,6 +146,13 @@ The canonical [Messages](../apps/messages/README.md) app is the Exact port of Ex
 chat demo, with model conversations through a local OpenRouter service. It belongs
 to the root workspace and does not use Snapback. Run `bun apps/messages/service.ts`
 and `bun host/web/dev.mjs --app messages --port 8767`.
+
+### Linux Wayland windows
+
+From a Wayland session, run the binary printed by `bun exact.mjs linux` to open a
+window. The compositor owns the display and sends the window its input.
+`EXACT_SIZE` supplies the initial logical window size. Setting `EXACT_DRM` or
+requesting VNC selects the DRM/KMS console path. Agent runs are headless.
 
 ### Linux KMS rotation and VNC
 
@@ -805,7 +817,7 @@ each defaults to the humanised `kind` when omitted.
 
 On Android 12 and later a row with a `system*` family is a home-screen widget
 (LLP 1126.003): `systemSmall` is two cells square, `systemMedium` four by two,
-`systemLarge` and `systemExtraLarge` four square, and it resizes from there. The
+`systemLarge`, `systemExtraLarge` and `systemExtraLargePortrait` four square, and it resizes from there. The
 same component is laid out at the launcher's size in the system's colours, and
 the same `refresh` keeps its timeline. Accessory families have no Android
 counterpart. What the launcher's views cannot draw yet (a gradient, a rounded or
@@ -984,8 +996,8 @@ profile to the named one's method, and an Ad Hoc pair must cover the same
 devices.
 
 On macOS, `bun host/apple/build.mjs --run` packages the app's widgets in
-`Contents/PlugIns`. The Mac keeps `systemSmall`, `systemMedium`, `systemLarge`
-and `systemExtraLarge`; if no families remain it builds no extension. Live
+`Contents/PlugIns`. The Mac keeps `systemSmall`, `systemMedium`, `systemLarge`,
+`systemExtraLarge` and `systemExtraLargePortrait`; if no families remain it builds no extension. Live
 Activities do not create a Mac extension. The extension uses the same runtime
 framework and snapshot driver, in its own sandbox with outbound network access.
 The app keeps its existing sandbox policy and loads the reload arm on demand.
@@ -1735,9 +1747,9 @@ profile claims neither.
 
 ### Web CI preparation
 
-For a website's `web-build` and `test web` on Linux, install Bun at the version in
-Exact's `package.json` and rustup, then check out the desired Exact commit at the path
-the app's `exact.mjs` uses. From the app directory, run:
+For a website's `web-build` and `test web` on Linux, check out Exact at the path the
+app's `exact.mjs` uses and install Bun at the version in Exact's `package.json`.
+Install rustup if the app or SDK tools will build from source. Run these commands from the app directory.
 
 ```sh
 bun <exact2>/scripts/exact.mjs setup --platform web
@@ -1745,7 +1757,13 @@ bun install --frozen-lockfile
 bun exact.mjs test web
 ```
 
-The scoped setup installs the pinned stable and nightly Rust, the nightly's `rust-src`,
+A Contract and TypeScript site can use matching prebuilt tools for its web build and browser tests.
+Web setup checks the tools and their recorded Cargo metadata against this checkout, then installs
+the JavaScript dependencies and browser. `--check` uses the local cache. Setup can also fetch
+from a tools origin when the checkout pins its producer key. Native builds, games, Rust data or
+GPU crates, custom web build scripts and Rust page renderers require Rust.
+
+For a source build, the scoped setup installs the pinned stable and nightly Rust, the nightly's `rust-src`,
 `llvm-tools`, clippy and `wasm32-unknown-unknown` target, its standard-library dependencies,
 wasm-bindgen, Binaryen, Exact's `node_modules`, Playwright's Chromium and headless shell,
 and Exact's locked crates. The wasm tools serve Markdown, motion, the markup editor,
@@ -2389,6 +2407,30 @@ zone's `utcOffset` at that instant, answered again when the virtual date crosses
 or `open({host, seed: 42, locale: "fr-CA", timeZone: "America/Toronto", epoch: "2026-09-21T14:13:20Z"})`;
 a test file writes them as launch lines (`epoch "2026-09-21T14:13:20Z"`, `time-zone "America/Toronto"`,
 [authored tests](contract-grammar.md#authored-tests)), which override the flags.
+
+On macOS, `scale` enlarges the pixels of an `iframe` after WebKit lays out its guest.
+Line breaks stay fixed, but enlarged text can look soft. Size the containing box to
+reserve space for the transformed frame.
+
+```text
+box width=(320 * z) height=(200 * z) overflow="hidden"
+  iframe "https://example.com/" width=320 height=200 scale=z transform-origin="0% 0%" border="none"
+```
+
+For sharp text, `iframe "https://example.com/" width=320 height=200 zoom=z` enlarges
+the frame's own lengths and tells WebKit to render the page at that zoom. Line breaks
+can change even when the guest still reports a 320 × 200 CSS pixel viewport. On macOS,
+the time of the first displayed frame at the new size or zoom remains unknown to
+Exact. A WebKit snapshot completes when its image is ready, even in a hidden window.
+[Apple’s snapshot API](https://developer.apple.com/documentation/webkit/wksnapshotconfiguration/afterscreenupdates)
+
+On the web (same-origin frames), macOS and iOS, `tap live at 40 80` presses
+40 points right and 80 down from the top left of the iframe named `live`.
+The driver converts that point to the guest viewport at its current scale.
+Use `tap live {"x":20,"y":40}` for guest viewport CSS pixels, or
+`tap live {"selector":"#save"}` to press an element. These taps report
+`delivery: "synthetic"`. Guest listeners see `event.isTrusted === false`.
+
 A drive can fail fetches by URL prefix (LLP 1103): `--fail-fetch <prefix>` (repeatable) arms one before the
 first data load, `fail fetch <prefix> [times <n>]` and `pass fetch <prefix>` arm and clear one mid-drive (a form of `prefer`:
 `{"op":"prefer","faults":{"fail":…,"times":…}}` or `{…{"pass":…}}`), and `state.faults` lists each prefix's `times`, `left`, `hits` and
@@ -2467,11 +2509,13 @@ and dropped records. An ordinary launch on the wall clock is available on macOS 
 `bun scripts/agent.mjs macos --live --storage latency "tap change-station" "type station-search Palo" state`
 (use `ios --live` on a simulator or `ios --device --live` on a phone). The driver launches and closes this process and keeps input
 available. `--live` uses normal scheduling and the wall clock: `performanceNow()` and
-timers advance in real time between operations, and `perf frames` records real frames
-(with `--touch platform` on the simulator, a drag is a real touch and the `scroll`
-source observes it). The driver never holds the clock, so `clock` is refused; let time
-pass with `perf frames live <ms>`. On a physical iPhone, taps and drags still use the agent input path. A real
-UIKit drag requires an on-device XCTest runner. `--storage` chooses its
+timers advance in real time between operations, and `perf frames` records real frames.
+On iOS, `--touch platform` sends the gesture through XCTest so UIKit delivers the scroll callbacks.
+For example, `bun exact.mjs agent ios --device --live --touch platform "tap s drag 0 -300 over 100" "perf frames health scroll"`
+drags the scroll view named `s` on a phone. Unlock the paired phone, enable Developer Mode and UI Automation,
+and allow local network access if prompted. The Mac needs an Apple Development identity and a provisioning profile
+covering the phone and `com.exact.touches.xctrunner`. On the wall clock use `perf frames live <ms>` to observe an interval.
+`--storage` chooses the drive's
 scratch store. Set
 `EXACT_STORE=real` in the launch environment to use the app's real secret and preference
 stores and secret presence. App files still follow the drive's scratch-store setting
@@ -2714,7 +2758,7 @@ storage write already submitted may finish, so an OOM does not establish
 whether it committed. Its completion is discarded, and queued JavaScript
 writes never start.
 
-On Hermes each turn of an answer has 100 ms of its own time: its call, or its
+On Hermes each turn of an answer has 100 ms of its own time by default: its call, or its
 resumption after a `fetch`, storage step or yield it awaited, until it awaits
 the next. Its own time is the calling thread's CPU clock where the platform keeps
 one, so a turn that waits on a blocked host call spends little of it; a turn may
@@ -2723,9 +2767,20 @@ as an overrun (`Overrun`: `` `work` took 904.5 ms of its own (CPU) time (2283.7 
 of wall), over the 100 ms budget for one turn; … ``), and the message names the
 repair: `await scheduler.yield()` every few thousand items of a long loop
 ([the guide](contract-for-agents.md#data-requests-and-side-effects) shows one).
+For synchronous work that cannot yield, `app.ts` can export a constant map
+such as `export const turnBudgets = { signOrder: 400 }`. A budget is 100 to
+1000 ms inclusive and names a source owned by TypeScript in this app. It
+applies to the source's initial call, continuations and stream messages. Its
+wall-clock limit is ten times its budget. A snapshot keeps its own deadline.
 A resource so refused keeps its last value and reads as pending, and is asked
 again at 250 ms, then at 1 s; a third overrun in a row fails it as any refusal
-does. A mutation's or a stream message's overrun is not asked again.
+does. A mutation fails on its first overrun. `failure(x).code` is `error`
+and `failure(x).reason` is `overrun` for either failure. The app can show a
+retry button for a failed mutation. A development build also reports the
+overrun in the host console (the app’s logcat tag on Android). The Apple
+development window shows it until the next input or plan replacement.
+The runner never retries a stream message
+that overruns.
 The host asks a yielded answer again at once, in its place among the source's
 requests, with no work and no clock, so an agent's `clock settle` runs it to its
 end without moving the clock. The browser keeps no such budget and
@@ -4344,6 +4399,16 @@ or both, each with its own strings key (LLP 1069.008.000):
   frame never shows last launch's data from the store, and any kept answer
   on disk is forgotten at boot.
 
+### Recording other apps' sound (macOS)
+
+Exact has no API for it: the app's own Swift module (LLP 1067) makes a Core
+Audio process tap ([Capturing system audio with Core Audio
+taps](https://developer.apple.com/documentation/coreaudio/capturing-system-audio-with-core-audio-taps)).
+The grant `device.system-audio-recording purpose.<key>` writes
+`NSAudioCaptureUsageDescription` into a Mac build's Info.plist with the
+strings key's text, which macOS shows when the module first asks. It adds
+no entitlement, and no other platform gets anything.
+
 ### Sounds
 
 A declared WAV (`sound "assets/…wav"`) is played by `playSound(src, at=,
@@ -5628,6 +5693,13 @@ attached, without any userinfo: `https://name:password@x.test/trip` arrives as
 from the member and an Android build its intent filters; the web's member takes the
 text members only. `apps/fieldnotes` receives text and files this way.
 
+On iOS and macOS the extension saves the share in an inbox. The app claims each share
+once and removes its inbox record when it delivers the action route. If the action needs
+sign-in or a network connection, save the pending text or URL in persistent app state
+when the route receives it. Restore it after a relaunch and clear it when the action
+succeeds or the person discards it. The extension’s checkmark means the share reached
+the inbox. The app’s submission may still be pending.
+
 `share_target.apple` holds Apple's words:
 
 - **`presentation`** is what the extension shows. `"compose"`, the default, is the
@@ -5684,8 +5756,18 @@ An app's own predicate is used as written. On the iOS 27 simulator, Safari offer
 page to a predicate that accepts only `public.url` and still hands over the details;
 this has not been run on a phone or a Mac.
 
-A device build leaves the share extension out until the team registers the App Group
-and the extension's App ID, and says so; a Mac build signed ad hoc leaves it out too
+On iPhone, register the App IDs `<app id>` and `<app id>.share` on the same Apple
+Developer team and enable the App Group `group.<app id>` for both. Make and install a
+profile for each ID. For `bun exact.mjs ios --device`, both profiles must cover the
+phone and its development signing certificate. For a distribution archive, use profiles
+of the same distribution method. `EXACT_PROFILE` can select the containing app's profile.
+Exact finds the extension's by its ID and reports a missing grant before compiling.
+[Register an App Group](https://developer.apple.com/help/account/identifiers/register-an-app-group/).
+
+An unsigned device build includes `PlugIns/ExactShare.appex`. To install it, the signer
+must provision and sign both bundles for the same App Group. To build without the share
+extension, list the kinds to keep with `--extensions`, or use `--extensions none`.
+A Mac build signed ad hoc leaves out the share extension
 ([Mac development signing](#mac-development-signing)).
 
 ### Clipboard images
@@ -6267,6 +6349,9 @@ An authored GPU module passes a static `&[exact_gpu::grants::Requirements]` as t
 second argument to `exact_gpu::module!`. See [the GPU module recipe](recipes/gpu-module.md)
 for a declaration and [package GPU surfaces](contract-for-agents.md#a-packages-gpu-surfaces)
 for packaging. Packages declare `exactGpu: "0.4"` and depend on `exact-gpu = "0.4"`.
+
+A surface opts into raw input with `Surface::wants_input`. On macOS the canvas
+also dispatches Contract pointer, wheel and context menu events. [GPU module recipe](recipes/gpu-module.md)
 
 ### GPU storage
 

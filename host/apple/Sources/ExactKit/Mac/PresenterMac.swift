@@ -282,7 +282,9 @@ package final class Presenter {
         var next: [UInt32: NSRect] = [:]
         var waiting: [(CGFloat, NodeView)] = []
         var rasters: [NodeView] = []
-        let candidates = textViewportIndex!.candidates(reach: Self.textRasterReach)
+        // The backing-store band lies inside the raster reach, so both use the same distance order.
+        let ranked = textViewportIndex!.candidates(reach: Self.textRasterReach)
+        let candidates = ranked.map(\.node)
         var readersDeferred = false
         for node in candidates {
             node.readerParagraph?.update(node, afterFrame: afterFrame)
@@ -311,7 +313,7 @@ package final class Presenter {
         }
         // Region readers own their pixel bands and publish positioned layers.
         // The ordinary backing-store band must not invalidate them a second time.
-        for node in textViewportIndex!.candidates(reach: Self.textBandSlack)
+        for (_, node) in ranked.prefix(while: { $0.distance < Self.textBandSlack })
             where node.needsTextRaster && (drawn.contains(ObjectIdentifier(node)) || !node.rastersText) && node.readerParagraph == nil && !node.textIsSmall {
             let want = textBand(node, reach: Self.textBandSlack)
             guard !want.isEmpty else { continue }
@@ -1349,8 +1351,9 @@ package final class Presenter {
     }
 
     /// A node's view, as its `create` op makes it; `register` puts it in the table.
-    func newView(_ op: BatchOp) -> NodeView {
+    func newView(_ op: BatchOp, stage: NodeView.Stage = .committed) -> NodeView {
         let v = NodeView(id: op.id, kind: op.kind, presenter: self)
+        v.stage = stage
         v.handlers = op.handlers
         v.applyStyle(v.presented(op.style))
         v.applyProps(set: op.props, clear: [])

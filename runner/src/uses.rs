@@ -545,7 +545,7 @@ pub fn uses(plan: &Plan) -> Uses {
     // declared source its network (LLP 1162.001 D3).
     if plan.resources.iter().any(|r| r.reader || r.keep)
         || !plan.fetches.is_empty()
-        || plan.slots.iter().any(|s| s.persist)
+        || plan.slots.iter().any(|s| s.is_persisted())
     {
         uses = uses.with(Capability::Io);
     }
@@ -877,19 +877,16 @@ pub fn uses_picture_in_picture(plan: &Plan) -> bool {
     runs_command(plan, &["requestPictureInPicture"])
 }
 
-/// Whether an image's, a media element's or a frame's source can be remote:
-/// an `http:` or `https:` literal, or one computed at run time, which this
-/// cannot read. The Mac App Store sandbox loads such a source only with
-/// `network.client` (LLP 1030.005 D2).
+/// A remote or computed image, media source, video poster or iframe URL
+/// requires the Mac App Store sandbox's `network.client` (LLP 1030.005 D2).
 pub fn sources_can_be_remote(plan: &Plan) -> bool {
     plan.bindings.iter().any(|binding| {
         binding.kind == BindingKind::Prop
             && matches!(
                 PropId::from_wire(binding.id),
-                Some(PropId::Src | PropId::ImageSource)
+                Some(PropId::Src | PropId::ImageSource | PropId::Poster)
             )
-            && constant_str(plan, plan.code(binding.expr))
-                .is_none_or(|src| src.starts_with("http:") || src.starts_with("https:"))
+            && constant_str(plan, plan.code(binding.expr)).is_none_or(exact_plan::has_http_scheme)
     })
 }
 
@@ -1014,8 +1011,9 @@ mod grant_tests {
 
     #[test]
     fn persisted_slots_link_storage_without_resources() {
+        use exact_plan::PersistScope;
         use exact_plan::{asm::Asm, builder::PlanBuilder, TypeKind};
-        for persist in [false, true] {
+        for persist in [PersistScope::None, PersistScope::App, PersistScope::Window] {
             let mut b = PlanBuilder::new(exact_kernel::SCHEMA_DIGEST, 1);
             let boolean = b.primitive(TypeKind::Bool);
             let mut initial = Asm::new();
@@ -1034,7 +1032,7 @@ mod grant_tests {
             );
             assert_eq!(
                 super::uses(&b.finish().unwrap()).has(Capability::Io),
-                persist
+                persist != PersistScope::None
             );
         }
     }

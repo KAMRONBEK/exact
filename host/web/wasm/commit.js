@@ -408,7 +408,7 @@ function apply(batch) {
           // A safe read the runner lets go of is aborted after the commit that
           // forgot it (`letGo`), as the native executor does: a write that
           // was sent was sent, and runs on, uncounted (LLP 1016 D5).
-          const requestIncarnation = host.incarnation, controller = new AbortController(), started = performance.now();
+          const requestIncarnation = host.incarnation, controller = new AbortController(), started = performance.now(), askedAt = now();
           let p, first, messages = 0, batch = [];
           const opened = new Promise((r) => {
             first = r;
@@ -468,7 +468,7 @@ function apply(batch) {
           if (op.url !== "exact-native:") {
             byTicket.set(op.ticket, controller);
           }
-          p = httpHelpers().then(({ request }) => request(op, requestHost)).then((r) => safelyFulfill(requestIncarnation, op.ticket, r.kind, r.status, r.headers, r.body, performance.now() - started)).catch((error) => safelyFulfill(requestIncarnation, op.ticket, 1, 0, "", encoder.encode(String(error)), performance.now() - started));
+          p = httpHelpers().then(({ request }) => request(op, requestHost)).then((r) => safelyFulfill(requestIncarnation, op.ticket, r.kind, r.status, r.headers, r.body, performance.now() - started, askedAt, r.afterMs, op.timeoutMs)).catch((error) => safelyFulfill(requestIncarnation, op.ticket, 1, 0, "", encoder.encode(String(error)), performance.now() - started));
           if (op.held) {
             const entry = {
               target: op.target,

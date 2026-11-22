@@ -5,6 +5,16 @@ import { parseSync } from 'rolldown/utils';
 import { rolldown } from 'rolldown';
 import { runInNewContext } from 'node:vm';
 import { configure, dataBundle, staticFacts } from '../src/typescript.mjs';
+import { sourceTurnBudgets } from '../src/__exact_facts.mjs';
+
+test('a source budget is a finite duration for a source owned by TypeScript', () => {
+  const names = new Set(['low', 'high']);
+  const read = code => sourceTurnBudgets(code, parseSync, {}, names);
+  expect(read('const first = {low: 100}; export const turnBudgets = {...first, high: 1000} as const;')).toEqual({low: 100, high: 1000});
+  for (const value of ['99', '1001', 'NaN', 'Infinity', '"400"', 'null'])
+    expect(() => read(`export const turnBudgets = {low: ${value}};`)).toThrow(/turnBudgets/);
+  expect(() => read('export const turnBudgets = {other: 400};')).toThrow('unknown TypeScript source other');
+});
 
 function fixture(files, manifest = {}) {
   const root = resolve(import.meta.dir, '../../../target');

@@ -64,7 +64,7 @@ function constantBindings(code, parse, { load, source = code } = {}) {
   const root = moduleFacts('app.ts', code, parse, source), modules = new Map([['app.ts', root]]);
   const refuse = (m, node, name, why = syntax) => { throw new Error(`${m.file}:${m.at((m.original.get(node) ?? node)?.start ?? 0)}: ${name} ${why}`); };
   const imported = (m, source, node, name) => {
-    if (!load || name !== 'grants') refuse(m, node, name);
+    if (!load || !['grants', 'turnBudgets'].includes(name)) refuse(m, node, name);
     const next = load(source, m.file, message => refuse(m, node, name, message));
     if (!modules.has(next.file)) modules.set(next.file, moduleFacts(next.file, next.code, parse, next.source ?? next.code));
     const result = modules.get(next.file);
@@ -132,6 +132,68 @@ function constantBindings(code, parse, { load, source = code } = {}) {
     return target.local ? binding(target.m, target.local, target.node, name, evaluate) : evaluate(target.m, target.node, name);
   };
   return { root, refuse, imported, binding, exported, resolveBinding };
+}
+
+/** Freeze the optional source budgets into the bytecode. The checker's source
+ * roster covers every Contract entry and excludes sources owned by Rust. */
+export function moduleMetadata(code, parse, options, declaration) {
+  return async (checker, type, _api, program) => {
+    const names = (await checker.getPropertiesOfType(type)).map(symbol => symbol.name);
+    if (!names.includes('turnBudgets')) return { names };
+    const file = await program.getSourceFile(declaration);
+    const exports = await checker.getExportsOfModule(await checker.getSymbolAtLocation(file));
+    const sources = exports.find(symbol => symbol.name === 'TypeScriptSources');
+    const rows = await checker.getPropertiesOfType(await checker.getDeclaredTypeOfSymbol(sources));
+    return { names, budgets: sourceTurnBudgets(code, parse, options, new Set(rows.map(row => row.name))) };
+  };
+}
+
+export function sourceTurnBudgets(code, parse, options, sources) {
+  const { root, binding, exported, refuse } = constantBindings(code, parse, options);
+  const read = (module, expression, name) => {
+    const node = bare(expression);
+    if (node?.type === 'Identifier') {
+      if (node.name === 'NaN' || node.name === 'Infinity') refuse(module, node, name, 'requires finite milliseconds from 100 to 1000');
+      return binding(module, node.name, node, name, read);
+    }
+    if (node?.type === 'Literal' && typeof node.value === 'number') return node.value;
+    if (node?.type !== 'ObjectExpression') refuse(module, node, name, 'must be a constant map of source names to milliseconds');
+    const budgets = Object.create(null);
+    for (const property of node.properties) {
+      if (property.type === 'SpreadElement') {
+        const part = read(module, property.argument, name);
+        if (typeof part !== 'object') refuse(module, property, name, 'can only spread a source budget map');
+        Object.assign(budgets, part);
+        continue;
+      }
+      const source = propertyName(property);
+      if (!sources.has(source)) refuse(module, property, name, `names unknown TypeScript source ${source ?? '(computed name)'}`);
+      const value = read(module, property.value, name);
+      if (!Number.isFinite(value) || value < 100 || value > 1000)
+        refuse(module, property, name, `requires a finite budget from 100 to 1000 ms for ${source}`);
+      budgets[source] = value;
+    }
+    return budgets;
+  };
+  const result = exported(root, 'turnBudgets', 'turnBudgets', read);
+  if (typeof result !== 'object') throw new Error('app.ts: turnBudgets must map source names to milliseconds');
+  return result;
+}
+
+/** Native exports retained by the bundle after its module metadata is checked. */
+export function nativeModuleEntry({ names: exported, budgets }) {
+  const draws = exported.includes('draw');
+  if (draws !== exported.includes('surfaces'))
+    throw new Error('app.ts exports `draw` and `surfaces` together, or neither (LLP 1056 D1)');
+  const entry = draws ? `import { canvasSeam } from './__exact_canvas.js';
+export const abi = 2;
+export const surfacesJson = JSON.stringify(app.surfaces);
+const seam = canvasSeam(app.draw);
+export const drawCanvas = (request: string, host?: unknown): string => seam.draw(JSON.parse(request), host);
+export const retireCanvases = (retired: string): void => seam.retire(JSON.parse(retired));
+` : 'export const abi = 1;\n';
+  const policy = budgets && Object.keys(budgets).length ? 'export const turnBudgetsJson = '+JSON.stringify(JSON.stringify(budgets))+';\n' : '';
+  return entry + policy;
 }
 
 /** The initializer actually exported as grants, with its authored node for receipt locations. */

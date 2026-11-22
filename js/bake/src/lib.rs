@@ -1225,6 +1225,7 @@ fn bake_in(
     // bake at 104.8 ms, then passed on retry. A build fails on the source,
     // never on how busy the machine was (LLP 1027 §6).
     module.set_budget_ms(f64::INFINITY);
+    let budgets = module.source_budgets().clone();
     let abi = module.abi()?;
     let app_id = module.app_id().to_owned();
     let grants = module.grants().to_owned();
@@ -1287,6 +1288,7 @@ fn bake_in(
         "typescriptRuntime": exact_bake::compat::typescript_runtime_of(&script, &grants),
         "typescriptHostWork": exact_bake::compat::typescript_host_work(&script),
         "surfaces": surfaces,
+        "turnBudgets": budgets,
         "rustSources": rust_sources,
         "bytecodeVersion": exact_js::BYTECODE_VERSION, "androidPermissions": android_permissions,
         "plan": {"file": "app.plan", "sha256": digest(&plan), "bytes": plan.len()},
@@ -1396,14 +1398,14 @@ fn replace_changed(path: &Path, bytes: &[u8]) -> Result<(), String> {
 /// The one-shot producer's configuration and check: `tsc` and the repository
 /// root are its arguments; a refused check exits 3.
 const ONE_SHOT_CHECK: &str = r#"
-import { configure, check, prepareCanvas } from './__exact_config.mjs';
+import { configure, check, prepareNativeEntry } from './__exact_config.mjs';
 import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 const [tsc, root] = process.argv.slice(1);
 const {parseSync}=await import(createRequire(resolve(root, 'package.json')).resolve('rolldown/utils'));
 const {rolldown}=await import(createRequire(resolve(root, 'package.json')).resolve('rolldown'));
 const libraries = resolve(dirname(createRequire(resolve(root, 'package.json')).resolve(`@typescript/typescript-${process.platform}-${process.arch}/package.json`)), 'lib');
-try { await configure(process.cwd(),false,parseSync,false,rolldown); await prepareCanvas(process.cwd(), libraries); await check(process.cwd(), tsc, libraries); }
+try { const metadata = await configure(process.cwd(),false,parseSync,false,rolldown); await prepareNativeEntry(process.cwd(), libraries, metadata); await check(process.cwd(), tsc, libraries); }
 catch (error) { process.stderr.write(String(error?.message ?? error)); process.exit(3); }
 "#;
 

@@ -19,9 +19,6 @@ impl<D: DataSource> Presenter<D> {
 }
 
 impl Surfaces {
-    pub(crate) fn has_canvas(&self, view: u32) -> bool {
-        self.canvases.contains_key(&view)
-    }
     pub(crate) fn has_rendered_canvas(&self) -> bool {
         self.canvases
             .values()
@@ -99,6 +96,7 @@ impl Surfaces {
                         view,
                         crate::canvas2d::CanvasPaint {
                             pixels: Arc::new(pixels),
+                            update: None,
                         },
                     );
                 }

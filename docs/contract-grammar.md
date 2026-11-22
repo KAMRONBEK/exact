@@ -999,6 +999,14 @@ Numbers use binary64 arithmetic and IEEE comparisons; other values compare by
 their whole printed text. These checks cover observed steps, not every commit
 inside a step, and are not proofs.
 
+`after` and `never refuses` accept a root action name or a qualified name such
+as `"Palette.typed"`. A qualified name covers every instance of that component.
+Both `contract test` and `contract verify` check the name before running scripts.
+If only a child declares a bare name, the diagnostic gives its qualified form.
+If a component has no action with the given name, the diagnostic lists its
+actions. An unknown bare name stays unexercised. Verification receipts use the
+spelling in the test file. Suggested properties use the same component names.
+
 `contract test <file>` emits an object with `tests` and `properties` arrays. Each
 property carries `kind`, `name`, its declaration `line` and parsed `lines`; each
 line has its source `line` and an `op` (`expect-state`, `only-writes`, `command`).
@@ -1097,11 +1105,19 @@ dropping it. Long polls use `fail fetch` on their individual HTTP attempts
 because their transport repeats buffered requests. Upload progress streams
 and local listeners are outside this step's scope. The web's wasm host
 opens event streams and WebSockets. It reads byte streams as buffered replies.
-`answer fetch "<prefix>" with <status> [header "<name>" "<value>"]… [<body>]`
-supplies an immediate HTTP response, with no request to the service. It may lead
+`answer fetch "<prefix>" [method GET] with <status> [header "<name>" "<value>"]… [<body>] [after <ms>]`
+supplies an HTTP response, with no request to the service. It may lead
 a test or the file, like `fail fetch`, so the first resource load receives it.
-A later line replaces the current answer or failure at that prefix. A test's
-leading answer or failure overrides the file's entry for the same prefix.
+An HTTP method limits the answer to those requests. A test can return the old
+value for `method GET` and the saved value for `method PUT` at the same URL.
+A later rule replaces the rule for the same prefix and method. A test's
+leading rule overrides the matching rule in the file.
+
+By default the response arrives immediately. With `after 200`, the request
+selects its response when it starts and delivers it 200 milliseconds later on
+the test clock. Replacing the rule leaves that response in flight. `clock data`
+can finish a save while its earlier read waits. `clock +200` delivers the read.
+
 JSON bodies are sent as `application/json`; a quoted string is sent as
 `text/plain; charset=utf-8`, and an omitted body is empty. An explicit
 `content-type` header overrides that default. The status is 200 through 599,
@@ -1113,9 +1129,9 @@ refused because browsers hide them. Request validation, grants, file-body
 preparation, aborts, deadlines and response-size limits still apply. A refused fixture records no hit
 or answered journal line.
 
-Answers use the same longest-live-prefix rule as failures. `fail fetch` replaces
-an answer, and `pass fetch` clears either at that prefix; a shorter live prefix
-may then match. Long polls ignore answer entries when choosing a failure, so
+The longest matching prefix wins. At the same prefix, an explicit method wins
+over a rule that matches any method. `fail fetch` replaces the rule for any
+method. `pass fetch` clears all rules at that prefix. Long polls ignore answer entries when choosing a failure, so
 a longer answer prefix does not hide a shorter failure. Otherwise the request
 goes to the network. Each test starts with its own table; `reload` keeps the
 current answers and cleared entries. On the web, only the top-level document on
@@ -1125,8 +1141,8 @@ A web launch revalidates only matching checkpoint answers through the real sourc
 unrelated rendered answers stay settled.
 The real source parses the response, so an HTTP error status is a response,
 where `fail fetch` is a rejected connection. These fixtures cover buffered HTTP
-requests, including a worker's; streams, long polls, redirects, `exactBodyTo`,
-delays and response files are not supported.
+requests, including a worker's; streams, long polls, redirects, `exactBodyTo`
+and response files are not supported.
 
 `answer source pairing with {"phase": "code", "code": "123456"}` supplies a typed
 answer in `contract verify`. It applies to every argument list for that source.
@@ -1500,7 +1516,9 @@ server answered, and the host will not take more than the app said it would;
 asking again gets the same answer, which `offline` would not imply. A
 new code is a breaking change; branch with a default case.
 
-`failure(x).reason` retains the domain string as well, empty when none was supplied.
+`failure(x).reason` retains the domain string as well. A module turn that
+fails its resource or mutation by exceeding the time budget has code `error`
+and reason `overrun`. Other failures without a reason carry the empty string.
 For a mutation, failure belongs to its latest send: a new send, a successful answer,
 or an explicit assignment clears it. A `parallel` mutation's belongs to its latest
 send to conclude: a send's failure shows unless a later send has already answered
@@ -1600,6 +1618,10 @@ write it on `exact-camera` for that. A renamed spelling (`fontSize`) is refused
 whatever is declared. A capitalized name is a component use, not a
 built-in tag. Platform support can further restrict an admitted tag, notably
 native `foreignObject`.
+
+On an `iframe`, `zoom` multiplies the frame's own lengths and the guest's page zoom.
+A frame sized by its container keeps that size. On macOS, `zoom` can change where text
+wraps. `scale` preserves the guest's layout and can soften text when enlarged.
 
 `contract vocab` lists every tag and attribute the compiler admits, including
 `h1`–`h6` and the compile-time attributes `class`, `part` and `-exact-row-look`,
@@ -2587,7 +2609,7 @@ once per change. The web and macOS select text; iOS selects text its author
 made selectable (`user-select="text"`), by a long press, a double tap and the
 selection's handles. On Android a long press selects a word in an opted-in
 paragraph. Dragging its handles changes the selected range and Select all
-takes the paragraph's selectable text. On Linux, dragging the mouse selects
+takes the paragraph's selectable text. On Linux and Windows, dragging the mouse selects
 text in opted-in paragraphs. Double-click selects a word and triple-click selects
 a paragraph, including text that wraps onto another line. For Markdown, the offsets count UTF-16 units
 in the rendered text. Ctrl+C copies the visible text, with a newline between
@@ -3351,6 +3373,8 @@ Syntax is only the first layer. In particular:
   a record, a list of records or a state holding an action is
   `type-persist-type` (keep app data in a source), a child's state
   `type-persist-child`, a derive `syntax-persist-derive`.
+  `persist window` uses the same types and limit and restores the value in the
+  window that saved it. A fresh window uses the initializer.
 - An action sends one mutation at most once on any path: a second send forgets
   the first's reply (LLP 1016 D5), so it is `analyze-send-twice` — unless the
   mutation is `queue`, whose sends each wait their turn (LLP 1092 D6), or

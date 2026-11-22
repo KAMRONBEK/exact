@@ -103,6 +103,13 @@ final class StagePlan {
     /// The style it gives each live node: a style op carries a node's whole
     /// style, a sampled paint value with the rest.
     let styles: [UInt32: NodeStyle]
+    #if os(macOS)
+    /// The views share this flag so they join the committed tree together.
+    /// It can outlive the plan without retaining its views or operations.
+    final class Publication { var committed = false }
+    let publication = Publication()
+    var tips: [NodeView] = [], cursorRects: [NodeView] = []
+    #endif
     var frames: StageFrames?
     var preparedAll: Bool { cursor == batch.ops.count && attachments.isEmpty && accessibilityCursor == madeOrder.count }
 

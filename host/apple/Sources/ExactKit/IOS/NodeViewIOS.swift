@@ -26,6 +26,7 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
     private(set) var textRasterWhole = false
     var textRasterReady = false { didSet { if oldValue != textRasterReady { presenter?.noteOwedText(self) } } }
     var textRasterFailed = false { didSet { if oldValue != textRasterFailed { presenter?.noteOwedText(self) } } }
+    var proseMarker: CATextLayer?
     var textLayoutValid = false
     /// Whether a frame has shown it where it is (`Presenter.showed`).
     var shown = Shown.uncopied
@@ -220,15 +221,7 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
         if gestureRecognizer === swipeRecognizer, gestureRecognizer.numberOfTouches == 0 { swipeDownX = touch.location(in: window).x }
         if stopsAtPress(gestureRecognizer), pressBoundary(touch, presses: gestureRecognizer !== layoutPanRecognizer) { return false } // LLP 1057.001 rule 3
         #if os(iOS)
-        if gestureRecognizer === contextRecognizer {
-            guard presenter?.menus.eligible(self, contextMenu: true) == true,
-                  hasOwnContextMenu || inlineContextTarget(at: touch.location(in: self)) != nil else { return false }
-            if !ExactEnv.agentMode {
-                let run = inlineContextTarget(at: touch.location(in: self))
-                if (run?.props["contextPopover"] ?? (run == nil ? props["contextPopover"] : nil))?.isEmpty == false { return false }
-            }
-            if let hit = touch.view as? NodeView, let source = hit.contextMenuSource(at: touch.location(in: hit)), source !== self { return false }
-        }
+        if gestureRecognizer === contextRecognizer, !hearsLongPress(on: touch.view, at: touch.location(in: self)) { return false }
         #endif
         if hitsNativeEditor(touch.view) { return false }
         var hit = touch.view
@@ -792,7 +785,7 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
 
     /// The direct child of a canvas this node is under, when that child is
     /// placed by the surface: the node whose `placement` maps this subtree.
-    var placedAncestor: NodeView? {
+    package var placedAncestor: NodeView? {
         guard Self.placedViews.count > 0 else { return nil }
         var v: UIView? = self
         while let n = v {
@@ -1107,6 +1100,7 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
         for k in clear { next.removeValue(forKey: k) }
         for (k, v) in set { next[k] = v }
         props = next
+        if set["listMarker"] != nil || clear.contains("listMarker") { layoutProseMarker() }
         if isParagraph, set.keys.contains(where: Self.paragraphProps.contains) || clear.contains(where: Self.paragraphProps.contains) { invalidateText() }
         #if os(iOS)
         let nativeList = kind == "list" && next["listStyle"] != nil
@@ -1297,14 +1291,12 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
                 for child in children { sv.addSubview(child) }
             }
             scroll = sv
-            scrollBackendReplaced()
             if pageBand != .zero || bandInset != .zero || reachGiven { more.pageBand = .zero; more.bandInset = .zero; more.reach = .zero; more.reachGiven = false } // a new scroll view reaches no band, and has no reach, until asked (LLP 1130 D3, LLP 1123 D13)
             scrollWritten = nil
             updateRefresh()
             presenter?.navigation.scrollBackendChanged(self)
         }
         if !scrolls || groupedOwner, let sv = scroll {
-            scrollBackendReplaced()
             if groupedOwner { retainScrollPosition(from: sv) }
             dropZoom()
             // Neither axis scrolls any more: the children come back out.

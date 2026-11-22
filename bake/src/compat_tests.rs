@@ -1092,6 +1092,7 @@ fn a_bundle_needs_the_runtime_of_the_newest_option_it_names() {
     let needs = |bundle: &[u8]| super::typescript_runtime_of(bundle, "");
     assert_eq!(needs(b"export const answer = () => 'idle';"), 0);
     assert_eq!(needs(b"fetch(u)"), 0);
+    assert_eq!(needs(b"export const turnBudgetsJson = '{}';"), 16);
     assert_eq!(needs(b"fetch(u, {exactPrefetch: true})"), 13);
     assert_eq!(
         needs(b"fetch(u, {exactPrefetch: true, exactPreload: 'feed'})"),

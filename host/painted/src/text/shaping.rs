@@ -269,7 +269,7 @@ pub(super) struct ShapeData {
 mod hard_lines;
 #[cfg(test)]
 pub(super) use hard_lines::SPLIT_BYTES;
-use hard_lines::{hard_lines, Boxes, Empties, LineEdit, Pieces};
+use hard_lines::{hard_lines, LineEdit, SplitLine};
 
 /// A hard line's inline-box room (`Run::edges`), each room shaped as advance
 /// on one cluster, which line breaking keeps it with: a run's start on the
@@ -284,7 +284,7 @@ struct Edges {
     box_leads: Vec<(u32, f32)>,
 }
 
-fn run_edges(spec: &Spec, pieces: &[(usize, String, Pieces, Boxes, Empties)]) -> Vec<Edges> {
+fn run_edges(spec: &Spec, pieces: &[SplitLine<'_>]) -> Vec<Edges> {
     let mut out: Vec<Edges> = (0..pieces.len()).map(|_| Edges::default()).collect();
     if spec.runs.iter().all(|r| r.edges.is_empty()) {
         return out;
@@ -453,10 +453,34 @@ impl ShapedSource {
         let count = edit.prefix.len() + pieces.len() + edit.suffix.len();
         let mut lines = Vec::with_capacity(count);
         lines.extend_from_slice(edit.prefix);
+        let mut repeated = HashMap::new();
         let edges = run_edges(&spec, &pieces);
         for ((start, text, runs, boxes, _), edges) in pieces.into_iter().zip(edges) {
             let h = lines.len();
             let run_base = runs.first().map_or(0, |(_, index)| *index as u32);
+            // A line within one run borrows its bytes from the source. Its run selects
+            // the font and shaping style. A box, edge or first-line treatment is local.
+            let first_only = h == 0
+                && (spec.text_indent != 0.
+                    || spec.text_wrap_style == exact_kernel::TextWrapStyle::Balance);
+            if count > 1
+                && !first_only
+                && boxes.is_empty()
+                && edges.rooms.is_empty()
+                && edges.box_leads.is_empty()
+            {
+                if let std::borrow::Cow::Borrowed(bytes) = text {
+                    let prior = *repeated.entry((run_base, bytes)).or_insert(h);
+                    if prior != h {
+                        lines.push(HardLine {
+                            start,
+                            run_base,
+                            shape: lines[prior].shape.clone(),
+                        });
+                        continue;
+                    }
+                }
+            }
             if let Some(line) = old.and_then(|s| {
                 s.matching_line(h, count, |i, line| {
                     text == line.text
@@ -548,6 +572,7 @@ impl ShapedSource {
                     },
                 );
             }
+            let text = text.into_owned();
             lines.push(HardLine {
                 start,
                 run_base,
@@ -629,8 +654,11 @@ impl ShapedSource {
             v.capacity() * std::mem::size_of::<T>()
         }
         let mut bytes = vec(&self.data.lines) + vec(&self.data.run_metrics);
+        let mut shared = std::collections::HashSet::new();
         for line in &self.data.lines {
-            bytes += line.bytes + std::mem::size_of::<LineShape>();
+            if Arc::strong_count(&line.shape) == 1 || shared.insert(Arc::as_ptr(&line.shape)) {
+                bytes += line.bytes + std::mem::size_of::<LineShape>();
+            }
         }
         bytes
     }

@@ -73,6 +73,7 @@ package final class NodeView: NSView, NSTextViewDelegate, NSTextFieldDelegate {
     var contextClicked = false
     var cachedTextSpec: Spec? { didSet { cachedTextHeadroom = nil } }
     var cachedTextHeadroom: Float?
+    var proseMarker: CATextLayer?
     var textLayoutValid = false
     /// The node whose `accent-color` this view last read as its tint, nil for the system's (NodeColorMac.swift).
     var tintSource: ObjectIdentifier?
@@ -377,14 +378,8 @@ package final class NodeView: NSView, NSTextViewDelegate, NSTextFieldDelegate {
     package override func resetCursorRects() {
         super.resetCursorRects()
         guard !held else { return }
-        if let cursor = CSSCursor.value(style["cursor"]?.string ?? "auto") { addCursorRect(bounds, cursor: cursor); return }
-        // `cursor: auto` over a link is AppKit's pointing hand, as
-        // `NSTextView` shows over its links (LLP 1115 §3): a `link` node, and
-        // each `href` run of a paragraph.
-        if props["accessibilityRole"] == "link" || !(props["href"] ?? "").isEmpty {
-            addCursorRect(bounds, cursor: .pointingHand)
-            return
-        }
+        if let cursor = boxCursor { addCursorRect(bounds, cursor: cursor); return }
+        // An inline link has a pointing hand over its own fragments (LLP 1115 §3).
         for run in inlineText where run.isLink && !run.hidden {
             for rect in inlineRects(run) { addCursorRect(rect, cursor: .pointingHand) }
         }
@@ -1015,6 +1010,7 @@ package final class NodeView: NSView, NSTextViewDelegate, NSTextFieldDelegate {
         for k in clear { next.removeValue(forKey: k) }
         for (k, v) in set { next[k] = v }
         props = next
+        if set["listMarker"] != nil || clear.contains("listMarker") { layoutProseMarker() }
         if set["groupedSeparator"] != nil || clear.contains("groupedSeparator") { applyGroupedSeparator() }
         if set["symbolEffectValue"] != nil || set["symbolColorWritten"] != nil || clear.contains("symbolColorWritten")
             || set["symbolFillRule"] != nil || clear.contains("symbolFillRule") { updateSymbol() }
@@ -1457,7 +1453,7 @@ package final class NodeView: NSView, NSTextViewDelegate, NSTextFieldDelegate {
     /// The click that activates a window presses a control and nothing else,
     /// as in AppKit (LLP 1115.000 D7.9; `clicksThrough`, FocusMac.swift).
     /// The agent's window is never key, so its every click counts.
-    package override func acceptsFirstMouse(for event: NSEvent?) -> Bool { Self.everyClickCounts || clicksThrough }
+    package override func acceptsFirstMouse(for event: NSEvent?) -> Bool { Self.countsFirstMouse(event) || clicksThrough }
 
     // Press: down and up inside the bounds. A click on a button or a
     // pressable leaves the first responder where it is, as a click on an

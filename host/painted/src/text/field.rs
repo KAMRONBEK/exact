@@ -46,6 +46,60 @@ pub(crate) struct Geometry {
     len: u32,
 }
 
+/// A piece of a painted line with one baseline, font height and writing direction.
+#[derive(Clone, Copy)]
+pub struct FieldTextRun<'a> {
+    /// Source offset in UTF-16.
+    pub start: u32,
+    /// Visual line index, including soft wraps.
+    pub line: usize,
+    /// Rectangle in paragraph coordinates.
+    pub bounds: (f32, f32, f32, f32),
+    /// Characters advance from the right edge of this run.
+    pub rtl: bool,
+    base: u32,
+    spans: &'a [Span],
+}
+
+impl FieldTextRun<'_> {
+    /// Whether two paints retained the same glyph placements in this run.
+    pub fn same_metrics(&self, other: &Self) -> bool {
+        self.bounds == other.bounds
+            && self.rtl == other.rtl
+            && self.start - self.base == other.start - other.base
+            && std::ptr::eq(self.spans, other.spans)
+    }
+
+    /// Positions and widths of the editor's graphemes in logical order. Offsets
+    /// are UTF-16 boundaries relative to the run. A hard break has zero advance.
+    pub fn character_metrics(&self, source_start: u32, offsets: &[u32]) -> (Vec<f32>, Vec<f32>) {
+        let (left, _, width, _) = self.bounds;
+        let mut spans = self.spans;
+        let mut trailing = spans.first().map_or(left, |s| s.left);
+        let mut positions = Vec::with_capacity(offsets.len().saturating_sub(1));
+        let mut widths = Vec::with_capacity(positions.capacity());
+        for pair in offsets.windows(2) {
+            let start = source_start + pair[0];
+            let end = source_start + pair[1];
+            spans = &spans[spans.partition_point(|s| self.base + s.end <= start)..];
+            let mut extent: Option<(f32, f32)> = None;
+            for s in spans.iter().take_while(|s| self.base + s.start < end) {
+                let (x0, x1) = (s.left.min(s.right), s.left.max(s.right));
+                extent = Some(extent.map_or((x0, x1), |(l, r)| (l.min(x0), r.max(x1))));
+                trailing = s.right;
+            }
+            let (x0, x1) = extent.unwrap_or((trailing, trailing));
+            positions.push(if self.rtl {
+                left + width - x1
+            } else {
+                x0 - left
+            });
+            widths.push(x1 - x0);
+        }
+        (positions, widths)
+    }
+}
+
 pub(crate) fn line_left(align: TextAlign, direction: Direction, width: f32, w: f32) -> f32 {
     if w > width {
         return if direction == Direction::Rtl {
@@ -326,6 +380,41 @@ impl Geometry {
     #[cfg(test)]
     pub(crate) fn shares_spans(&self, row: usize, old: &Self, old_row: usize) -> bool {
         Rc::ptr_eq(&self.lines[row].spans, &old.lines[old_row].spans)
+    }
+
+    pub(crate) fn access_runs(&self) -> impl Iterator<Item = FieldTextRun<'_>> {
+        self.lines.iter().enumerate().flat_map(|(index, line)| {
+            // A mixed-direction line can put logically adjacent characters at opposite ends.
+            // Each AccessKit run advances in one direction from its own leading edge.
+            let chunks = line.spans.chunk_by(|a, b| {
+                (a.right < a.left) == (b.right < b.left)
+                    && (a.right - b.left).abs() < 0.01
+                    && a.ascent == b.ascent
+                    && a.height == b.height
+            });
+            chunks
+                .chain(line.spans.is_empty().then_some(&[][..]))
+                .map(move |spans| {
+                    let first = spans.first();
+                    let leading = first.map_or(line.empty_x, |s| s.left);
+                    let trailing = spans.last().map_or(leading, |s| s.right);
+                    let (top, height) =
+                        first.map_or(line.text, |s| (line.baseline - s.ascent, s.height));
+                    FieldTextRun {
+                        start: first.map_or(line.start, |s| line.base + s.start),
+                        line: index,
+                        bounds: (
+                            leading.min(trailing),
+                            top,
+                            (trailing - leading).abs(),
+                            height,
+                        ),
+                        rtl: trailing < leading,
+                        base: line.base,
+                        spans,
+                    }
+                })
+        })
     }
 
     pub(crate) fn wrap_boundary(&self, offset: u32) -> bool {

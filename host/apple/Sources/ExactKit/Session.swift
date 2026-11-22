@@ -332,6 +332,7 @@ package struct WeakSession {
 
 /// One runner, one plan, one clock (LLP 1031 D1).
 public final class ExactSession {
+    var budgetWarning: String?
     public enum State: Equatable {
         case created
         case ready
@@ -358,6 +359,8 @@ public final class ExactSession {
     /// A callback from an older generation is dropped.
     public var generation: Int { runtime.completionLease.generation }
     let storeRefresh = SessionStoreRefresh()
+    public internal(set) var windowState = [String: String]()
+    public var windowStateDidChange: (() -> Void)?
     var activatedGeneration: Int?
     /// The generation whose deferred data has activated (or failed to): the
     /// agent's `clock data` waits for it before a test's first step.
@@ -1020,6 +1023,7 @@ public final class ExactSession {
     }
 
     func presentCommitted(_ batch: Batch, label: String, assetChanges: [UInt32: Set<String>] = [:]) {
+        showBudgetWarning(nil)
         routerOp = nil
         let restart = booted, kept = keptFocus
         keptFocus = nil
@@ -1186,7 +1190,7 @@ public final class ExactSession {
         applying = true
         // What applying it cost, with its transactions, for the next sampled frame (LLP 1079 D3), told to the sampler there was when it began while the session keeps it: a recording the batch starts makes a new one, and one it stops lets a production bake's go.
         let timed = sampler, began = CACurrentMediaTime()
-        defer { if let timed, timed === sampler { timed.batch(batch.seq, ms: outermost ? (CACurrentMediaTime() - began) * 1000 : 0) }; logAlerts(batch.alerts); logJournal(batch.journal); relayStore(batch) }
+        defer { if let timed, timed === sampler { timed.batch(batch.seq, ms: outermost ? (CACurrentMediaTime() - began) * 1000 : 0) }; reportAlerts(batch); logJournal(batch.journal); relayStore(batch) }
         defer { if outermost { recordFrameHealthApply(batch, began: began) } }
         if batch.facts { app.buildFactsMoved() } // the app's own `setMode` or `setRootFontSize` (LLP 1122 D4)
         if let must = batch.mustFinish { finishHold.moved(must) }

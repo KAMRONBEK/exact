@@ -12,9 +12,10 @@ mod inert_commit_tests;
 pub(super) mod separator;
 
 /// The props `emit_layout` derives from a node's layout, not its author's.
-pub(super) const DERIVED_PROPS: [&str; 5] = [
+pub(super) const DERIVED_PROPS: [&str; 6] = [
     "fitScale",
     "flexGrows",
+    "listMarker",
     "textOffset",
     "textLeft",
     "textWidth",
@@ -86,6 +87,10 @@ impl<D: DataSource> Host<D> {
         batch.facts = self.facts_moved();
         batch.landing = self.runner.data_timer_landing();
         batch.stored = std::mem::take(&mut self.stored);
+        if std::mem::take(&mut self.window_state_changed) {
+            batch.window_state =
+                Some(serde_json::to_string(&self.runner.window_state()).expect("string map"));
+        }
         batch.announced = self.runner.store().take_announced();
         batch.wakelock = self.wakelock_moved();
         batch.orientationlock = self.orientation_moved();
@@ -145,6 +150,7 @@ impl<D: DataSource> Host<D> {
         }
         batch.seq = self.runner.seq_range();
         batch.alerts = self.runner.take_alerts();
+        batch.budget_warning = self.runner.take_budget_warning();
         batch.journal = self.runner.take_journal();
         if let Some(canvas) = self.turn.canvas {
             (canvas.onto)(self, batch);
@@ -497,18 +503,7 @@ impl<D: DataSource> Host<D> {
                 && node.style.flex_grow >= 1.0
                 && !node.style.mask.has(exact_kernel::StyleId::MaxHeight))
             .then(|| "true".to_string());
-            if m.props.get("flexGrows") != grows.as_ref() {
-                match grows {
-                    Some(value) => {
-                        batch.props(id, &[("flexGrows", value.clone())], &[]);
-                        m.props.insert("flexGrows", value);
-                    }
-                    None => {
-                        batch.props(id, &[], &["flexGrows"]);
-                        m.props.remove("flexGrows");
-                    }
-                }
-            }
+            m.derived_prop(id, "flexGrows", grows, batch);
             // The anonymous text item's placement within its content box.
             let offset = kernel.text_line_offset(&node);
             let item = kernel.text_item_box(&node);

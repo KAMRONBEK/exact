@@ -751,7 +751,7 @@ pub fn emit(plan: &Plan, site_attrs: bool, dev_reload: bool) -> Result<Output, S
             (!facts.is_empty(), facts.as_str()),
             (em.symbols.0, "import{symbols as $symbols}from\"./symbols.js\";"),
             (modes.is_some(), "import{modes as $modes,Sx}from\"./modes.js\";"),
-            (plan.slots.iter().any(|s| s.persist), "import{stored as $stored,keep as $keep}from\"./persist.js\";"),
+            (plan.slots.iter().any(|s| s.is_persisted()), "import{stored as $stored,keep as $keep}from\"./persist.js\";"),
             (exact_runner::uses::chooses_locale(plan), "import{localeSlot as $localeSlot,setLocale as $setLocale}from\"./chosen.js\";"),
             (plan.format.is_some(), "import{formats as $formats,formatSlot as $formatSlot}from\"./format-locale.js\";"),
         ]
@@ -1192,7 +1192,8 @@ impl Em<'_> {
             {
                 continue;
             }
-            if let Some(v) = style::literal(plan, plan.code(b.expr)) {
+            let admitted = b.kind == BindingKind::Prop && admitted_on_the_page(b.id);
+            if let Some(v) = style::literal(plan, plan.code(b.expr)).filter(|_| !admitted) {
                 if markdown && b.kind == BindingKind::Prop && b.id == PropId::Text as u16 {
                     let source = serde_json::to_string(v.as_str().unwrap_or_default()).unwrap();
                     self.markdown(i, &e, &format!("()=>{source}"), plan.code(b.expr));
@@ -1471,4 +1472,10 @@ impl Em<'_> {
         }
         Ok(slot)
     }
+}
+
+/// A drag's `url` or `files`: bound even when constant, for `drag.js`'s hooks
+/// to admit as the runner does on other hosts (LLP 1094.000 D1, D2).
+pub fn admitted_on_the_page(id: u16) -> bool {
+    id == PropId::DataTransferUrl as u16 || id == PropId::DataTransferFiles as u16
 }

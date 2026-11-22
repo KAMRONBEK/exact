@@ -147,6 +147,8 @@ extension NodeView {
         case "table": return (.table, nil)
         case "tr": return (.row, nil)
         case "th", "td": return (.cell, nil)
+        case "ul", "ol": return (.list, nil)
+        case "li", "blockquote": return (.group, nil)
         case "dl": return (.list, NSAccessibility.Subrole(rawValue: "AXDescriptionList"))
         case "dt": return (.group, NSAccessibility.Subrole(rawValue: "AXTerm"))
         case "dd": return (.group, NSAccessibility.Subrole(rawValue: "AXDescription"))
@@ -357,7 +359,7 @@ extension NodeView {
     var tableContainerType: UIAccessibilityContainerType? {
         switch semanticTag {
         case "table": return .dataTable
-        case "dl": return .list
+        case "dl", "ul", "ol": return .list
         default: return nil
         }
     }

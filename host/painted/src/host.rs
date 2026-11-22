@@ -720,7 +720,14 @@ impl<D: DataSource> Host<D> {
     /// The agent API's read operations (LLP 1012): `tree`, `state`, `logs`
     /// from the runner; `settle` from the engine, and a resource's re-ask.
     pub fn agent(&self, request: &str) -> String {
-        if exact_runner::json::field_str(request, "op").as_deref() == Some("settle") {
+        let op = exact_runner::json::field_str(request, "op");
+        if op.as_deref() == Some("saveWindow") {
+            let tree = crate::picker::store_root(self.runner.data_ref().app_id())
+                .ok()
+                .flatten();
+            return exact_data::storage::save_test_window(&self.runner, tree, request);
+        }
+        if op.as_deref() == Some("settle") {
             return match self
                 .engine
                 .settle_time()
@@ -1300,7 +1307,8 @@ impl<D: DataSource> Host<D> {
         // named `--storage` drive writes them into that scratch tree, so a
         // reload reads them back (platformer R10). The log is taken either way.
         // Written by the store's own thread (`store_writer.rs`), so no frame waits on a file's sync.
-        let writes = self.runner.take_store_writes();
+        let mut writes = self.runner.take_store_writes();
+        writes.retain(|w| !w.name.starts_with(exact_runner::Store::WINDOW_STATE));
         for line in self.secret_session.remember(&writes) {
             self.runner.log(line);
         }
