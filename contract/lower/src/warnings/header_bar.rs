@@ -344,15 +344,13 @@ fn opted_out(node: Visit<'_>) -> bool {
 }
 
 /// `region` into `bar`, from `start` (a glyph row, inside the heading's box,
-/// kept in the page). An `if` or a `match` is read arm by arm, each alone,
-/// as what it shows when taken: an arm's hosted elements and readouts are
-/// the bar's to name, and nothing in one arm counts against another.
+/// kept in the page). An `if` or a `match` is read at its place, arm by arm,
+/// each alone from where the walk stands, as what it shows when taken.
 fn walk_region<'a>(region: Structure<'a>, start: (bool, bool, bool), bar: &mut Bar<'a>) {
-    let mut arms = Vec::new();
     for _ in region.walk_regions_with(start, |node, &(glyphs, title, kept)| {
         if node.is_choice() {
             bar.doubt = true;
-            arms.extend(node.regions().map(|arm| (arm, (glyphs, title, kept))));
+            bar.arms(node, (glyphs, title, kept));
             return [None, None];
         }
         let kept = kept || opted_out(node);
@@ -362,17 +360,36 @@ fn walk_region<'a>(region: Structure<'a>, start: (bool, bool, bool), bar: &mut B
             None,
         ]
     }) {}
-    for (arm, state) in arms {
-        let mut one = Bar {
-            passed: bar.passed,
-            subtitle: bar.subtitle,
-            ..Bar::default()
-        };
-        walk_region(arm, state, &mut one);
-        bar.hosted.extend(one.hosted);
-        bar.readouts.extend(one.readouts);
-        bar.arm_headings.push(one.headings);
-        bar.arm_headings.extend(one.arm_headings);
+}
+
+impl<'a> Bar<'a> {
+    /// A choice's arms, each read alone from the places taken before it:
+    /// what each hides or hosts is named, and nothing in one counts against
+    /// another. After it, a place any arm took (the heading passed, the
+    /// subtitle, the search field, the tablist) is taken, as it is in that
+    /// arm's header.
+    fn arms(&mut self, choice: Visit<'a>, state: (bool, bool, bool)) {
+        let mut after = (self.passed, self.subtitle, self.search, self.tablist);
+        for arm in choice.regions() {
+            let mut one = Bar {
+                passed: self.passed,
+                subtitle: self.subtitle,
+                search: self.search,
+                tablist: self.tablist,
+                ..Bar::default()
+            };
+            walk_region(arm, state, &mut one);
+            self.hosted.extend(one.hosted);
+            self.readouts.extend(one.readouts);
+            self.unplaced.extend(one.unplaced);
+            self.arm_headings.push(one.headings);
+            self.arm_headings.extend(one.arm_headings);
+            after.0 |= one.passed;
+            after.1 |= one.subtitle;
+            after.2 |= one.search;
+            after.3 |= one.tablist;
+        }
+        (self.passed, self.subtitle, self.search, self.tablist) = after;
     }
 }
 
@@ -383,12 +400,13 @@ impl<'a> Bar<'a> {
     fn visit(&mut self, node: Visit<'a>, glyphs: bool, title: bool, kept: bool) -> bool {
         let bar = self;
         let span = node.span();
-        // Outside the heading's box the bar shows it as an item; inside, the
-        // title shows only its own parts.
-        let mut hide = |what: String| match title {
-            true => bar.unplaced.push((span, what)),
-            false if kept => {}
-            false => bar.hosted.push((span, what)),
+        // What its author keeps stays in the page. Outside the heading's box
+        // the bar shows the rest as an item; inside, the title shows only its
+        // own parts.
+        let mut hide = |what: String| match (kept, title) {
+            (true, _) => {}
+            (false, true) => bar.unplaced.push((span, what)),
+            (false, false) => bar.hosted.push((span, what)),
         };
         match part(node) {
             Part::Doubt => bar.doubt = true,
@@ -493,13 +511,14 @@ fn has_press(node: Visit<'_>) -> bool {
         .is_some_and(|(_, _, attrs)| has(attrs, "press"))
 }
 
-/// Whether the Mac's toolbar draws a readout (`MacBarFace`): a text, or a
-/// box of words, symbols and dots; anything else (a spinner, a picture, a
-/// control) it has no face for. A part the compiler cannot see is given the
-/// benefit.
+/// Whether the Mac's toolbar draws a readout (`MacBarFace`): a text, a
+/// symbol, or a box of words, symbols and dots; anything else (a spinner, a
+/// picture, a control) it has no face for. A part the compiler cannot see is
+/// given the benefit.
 fn mac_draws(readout: Visit<'_>) -> bool {
     match readout.element() {
         Some(("text", _, _)) => true,
+        Some(("image", _, _)) => symbol(readout),
         Some((tag, _, _)) if BOXES.contains(&tag) => readout.children().all(|k| match part(k) {
             Part::Text | Part::Hidden | Part::Doubt => true,
             Part::Box => mac_draws(k),
@@ -530,24 +549,62 @@ fn mac_button(button: Visit<'_>) -> bool {
     all(button, &mut pictures) && pictures <= 1
 }
 
+/// Whether the Mac's toolbar shows a tablist as its segments
+/// (`HeaderMac.titleTabs`): two or more tabs, each a `button role="tab"` that
+/// presses and shows its words alone. Tabs the compiler cannot count (an
+/// `if`, a `for`, a use) are given the benefit.
+fn mac_tabs(list: Visit<'_>) -> bool {
+    let mut tabs = 0;
+    for k in list.children() {
+        match part(k) {
+            Part::Hidden => continue,
+            Part::Doubt => return true,
+            _ => {}
+        }
+        let Some(("button", _, attrs)) = k.element() else {
+            return false;
+        };
+        let words = k
+            .children()
+            .all(|t| matches!(t.element(), Some(("text", _, _))));
+        if literal(attrs, "role") != Some("tab") || !has(attrs, "press") || !words {
+            return false;
+        }
+        tabs += 1;
+    }
+    tabs >= 2
+}
+
 /// The first part of `header` the Mac's toolbar has no place for, and why, as
 /// `HeaderMac.read` decides (LLP 1115.002 D2): it walks boxes, takes the
 /// heading, the first text after it as the window's subtitle, the buttons
 /// whose face an item shows, the readouts it draws, one search field and a
-/// tablist; anything else keeps the whole header in the page. An arm of a
-/// choice is read as if taken.
+/// tablist of titles; anything else keeps the whole header in the page. Each
+/// arm of a choice is read alone, as if taken, from the places taken before
+/// it.
 fn mac_refusal(header: Visit<'_>) -> Option<(Span, &'static str)> {
-    fn walk(
-        node: Visit<'_>,
+    fn walk<'a>(
+        nodes: impl Iterator<Item = Visit<'a>>,
         passed: &mut bool,
         subtitle: &mut bool,
     ) -> Option<(Span, &'static str)> {
-        for k in node.children() {
+        for k in nodes {
             let what = match part(k) {
-                _ if k.is_choice() => match walk(k, passed, subtitle) {
-                    Some(found) => return Some(found),
-                    None => continue,
-                },
+                _ if k.is_choice() => {
+                    let mut after = (*passed, *subtitle);
+                    for arm in k.regions() {
+                        let (mut p, mut s) = (*passed, *subtitle);
+                        if let Some(found) = walk(arm.roots(), &mut p, &mut s) {
+                            return Some(found);
+                        }
+                        (after.0, after.1) = (after.0 || p, after.1 || s);
+                    }
+                    (*passed, *subtitle) = after;
+                    continue;
+                }
+                Part::Tablist if !mac_tabs(k) => {
+                    "a tablist that is not two or more tabs each showing a title alone"
+                }
                 Part::Hidden | Part::Doubt | Part::Search | Part::Tablist => continue,
                 Part::Heading => {
                     *passed = true;
@@ -566,7 +623,7 @@ fn mac_refusal(header: Visit<'_>) -> Option<(Span, &'static str)> {
                 Part::Pressable => {
                     "a button whose face holds more than words, symbols, dots and one picture"
                 }
-                Part::Box => match walk(k, passed, subtitle) {
+                Part::Box => match walk(k.children(), passed, subtitle) {
                     Some(found) => return Some(found),
                     None => continue,
                 },
@@ -576,7 +633,7 @@ fn mac_refusal(header: Visit<'_>) -> Option<(Span, &'static str)> {
         }
         None
     }
-    walk(header, &mut false, &mut false)
+    walk(header.children(), &mut false, &mut false)
 }
 
 /// `header-item-left-out` (LLP 1141.004 D5), information, for the targets

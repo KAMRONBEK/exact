@@ -40,7 +40,8 @@ struct HeaderShape: Equatable {
         /// (`sharesBackground`). A bar item has no clear variant.
         let ownGlass: Bool
         /// The colour the author gave the item's face, light and dark: a
-        /// symbol's tint, else a `color` written on the button itself. Nil
+        /// symbol's tint, else a `color` written on its title's text, else
+        /// one written on the button itself. Nil
         /// (UIKit's tint, the platform default) for a colour the button
         /// only inherits or the compiler implied.
         let tint: [[Double]]?
@@ -142,15 +143,15 @@ struct HeaderShape: Equatable {
                 ? ButtonConfigurationIOS.font(Self.titleFont(bold: button.traitCollection.legibilityWeight == .bold), rows: rows) : nil
             #endif
             // The platform's tint unless the author said otherwise (LLP
-            // 1115.000 D2): a `color` written on the symbol, else a `color`
-            // written on the button, a platform colour as much as a literal.
+            // 1115.000 D2): a `color` written on the symbol, else on the title's
+            // text, else on the button, a platform colour as much as a literal.
             // One the button only inherits, or a sheet wrote, is unsaid.
             // Read from the node it is written on, the tint in it as a value (`carriedTint`)
             active = NativeButtonState(button)
             let ownsTitle = face.map { NativeButtonState.colorOwnership($0.rows).title } ?? (ink?.0.wrote("text_color") == true)
             activeTitleColor = symbol == nil && badge == nil && !hosted && !ownsTitle
                 && active.style.keys.allSatisfy { $0 == "press_color" } ? active.style["press_color"] : nil
-            let source = ink.flatMap { $0.0.kind == "image" && $0.0.ownColor("text_color") != nil ? $0.0 : nil } ?? (button.ownColor("text_color") != nil ? button : nil)
+            let source = ink.flatMap { $0.0.ownColor("text_color") != nil ? $0.0 : nil } ?? (button.ownColor("text_color") != nil ? button : nil)
             followsTint = source?.style["text_color"]?.tintAlpha == 1
             if !followsTint, let source, let light = source.carriedChannels("text_color", dark: false), let dark = source.carriedChannels("text_color", dark: true) {
                 tint = [light, dark]
@@ -165,9 +166,10 @@ struct HeaderShape: Equatable {
             // shows (`visibility: visible`) still may.
             (!node.cssVisibilityHidden && (node.isButton || node.actsAsButton || node.handlers.contains("press") || node.kind == "input"
                 || (node.kind == "control" && node.props["type"] != "progress") || node.props["href"] != nil
-                // A link or a press inline, which its paragraph owns, a Markdown link among them.
+                // A link or a press inline, which its paragraph owns; a link
+                // Markdown's parser found (a bare URL too, not one in code).
                 || node.inlineText.contains { $0.handlers.contains("press") || !($0.props["href"] ?? "").isEmpty }
-                || (node.props["markup"] == "markdown" && (node.props["text"] ?? "").contains("]("))))
+                || (node.props["markup"] == "markdown" && node.paragraphSpec().runs.contains { !$0.href.isEmpty })))
                 || shown(node).contains(where: presses)
         }
         /// `node`'s children that show (none `display: none`).
@@ -232,7 +234,8 @@ struct HeaderShape: Equatable {
         /// or picture fill, holding one text (no picture or link inline), one
         /// symbol or one picture, and no layer beside it.
         static func badge(_ button: NodeView) -> Bool {
-            guard button.kind == "button", BadgeFace(button) != nil, !layered(button) else { return false }
+            // An opacity or a filter on the button reaches the badge, which UIKit's item would drop.
+            guard button.kind == "button", BadgeFace(button) != nil, !layered(button), !button.wrote("opacity"), !button.wrote("filter") else { return false }
             let kids = shown(button)
             guard kids.count == 1, let box = kids.first, box.kind == "view", !layered(box), !box.cssVisibilityHidden,
                   box.handlers.isEmpty, box.props["backgroundMaterial"] == nil, !box.wrote("opacity"), !box.wrote("filter"),

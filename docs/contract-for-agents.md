@@ -4216,7 +4216,7 @@ main navigationKey=`${top(nav).id}` navigationBack="close" navigate=follow displ
   symbol beside a plain text (no box around them; a text with no span, link, Markdown or
   `press`, that writes nothing but its `color`, with no font, opacity or filter on it or
   the button) is UIKit's own bar item: a symbol is its image and a text its title, in the bar's
-  type, the platform's; with both, the symbol is the image and the text its spoken name,
+  type, the platform's, and the text's `color` the item's tint; with both, the symbol is the image and the text its spoken name,
   as a hand-built bar's item has them. The button's own fill, border and padding give way
   to the bar's glass. On a native button a `font-size` or `font-weight` sets that title's
   font, and its glass fits the words (`buttonStyle="glass" font-size=12` is a small
@@ -4228,7 +4228,7 @@ main navigationKey=`${top(nav).id}` navigationBack="close" navigate=follow displ
   A picture (`image url`, an avatar's photo) fills the box by its `object-fit`, clipped to
   its corners; until it loads the face is the box's fill. Any other pressable element (a
   `row press=`, a button with a dot beside its label, two texts, a picture or a link
-  inline, a badge with a second part or a border) is a hosted item: drawn as written, its
+  inline, a badge with a second part, a border, a material, a press, or an opacity or filter on it) is a hosted item: drawn as written, its
   own views, in the bar's shared glass, with its press. Leave the font unsaid
   for an ordinary Edit or Done.
 - Any element of the header besides the heading, the text after it, its buttons, its
@@ -4259,12 +4259,14 @@ main navigationKey=`${top(nav).id}` navigationBack="close" navigate=follow displ
     only when it has a place for every part: the heading, the first text after it (in a
     box or not) as the window's subtitle, buttons whose face is words, symbols, dots and
     at most one picture, readouts of words, symbols and dots, one search field and a
-    tablist of titles. Anything else (a spinner, a picture, a second text, a pressable
-    title, a button holding a spinner) sends the whole header to the page. The compiler
-    names each element Android or tvOS leaves out, and the first part the Mac has no
-    place for, once a header, for the targets your app ships (`header-item-left-out`,
-    information). To show something on every target, put it
-    below the `header`, in the route's content.
+    tablist of two or more tabs that each show a title alone. Anything else (a spinner, a
+    picture, a second text, a pressable title, a button holding a spinner, a tablist of
+    one tab) sends the whole header to the page. Android's bar also leaves out the title's
+    own parts: the subtitle, the avatar and the tap on the title. For the targets your
+    app ships, the compiler names each hosted element and readout Android or tvOS leaves
+    out, and the first part the Mac has no place for, once a header
+    (`header-item-left-out`, information); it does not name the title's own parts. To
+    show something on every target, put it below the `header`, in the route's content.
   - **An automatic size is held to a third of the bar's width and 44 points of height**,
     and UIKit shrinks or hides the title before the items; a `width`, `height` or minimum
     you write wins, and the item takes that size. A trailing or bottom `margin` on the

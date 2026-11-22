@@ -302,10 +302,10 @@ fn a_header_element_a_targets_bar_has_no_place_for_is_named() {
     // Arms of a choice never show together: a search field in each is no
     // second one, and a heading in each with a spinner after them is one
     // heading, the spinner still named.
-    let arms = |name: &str, header: &str| -> Vec<(String, String)> {
+    let arms = |name: &str, targets: &str, header: &str| -> Vec<(String, String)> {
         let dir =
             crate::scratch::Scratch::new(format!("exact2-arms-{name}-{}", std::process::id()));
-        std::fs::write(dir.join("app.json"), "{\"app\": {\"id\": \"dev.test.bar\", \"name\": \"Bar\"}, \"host\": {\"ios\": {}, \"android\": {}}}").unwrap();
+        std::fs::write(dir.join("app.json"), format!("{{\"app\": {{\"id\": \"dev.test.bar\", \"name\": \"Bar\"}}, \"host\": {{{targets}}}}}")).unwrap();
         std::fs::write(dir.join("app.contract"), format!("routes nav\n  home \"/\"\ncomponent App\n  state q = \"\"\n  state on = true\n  action typed(v: string)\n    q = v\n  view\n    main navigationKey=`${{top(nav).id}}` width=\"100%\" height=\"100%\"\n      for e in stack(nav) key=e.id\n        column navigationKey=`${{e.id}}` position=\"absolute\" inset=0\n          header display=\"flex\"\n{header}          text \"body\"\n")).unwrap();
         let (plan, warnings) = contract::compile_path_all_warned(&dir.at("app.contract"), false);
         plan.unwrap_or_else(|e| panic!("{e:?}"));
@@ -315,18 +315,76 @@ fn a_header_element_a_targets_bar_has_no_place_for_is_named() {
             .map(|w| (w.id.to_string(), w.message.clone()))
             .collect()
     };
-    let searches = arms("search", "            text \"Car\" role=\"heading\" aria-level=1\n            if on\n              input type=\"search\" value=q input=typed\n            else\n              input type=\"search\" value=q input=typed\n");
+    let phones = "\"ios\": {}, \"android\": {}";
+    let searches = arms("search", phones, "            text \"Car\" role=\"heading\" aria-level=1\n            if on\n              input type=\"search\" value=q input=typed\n            else\n              input type=\"search\" value=q input=typed\n");
     assert_eq!(
         searches,
         Vec::<(String, String)>::new(),
         "one search field whichever arm shows"
     );
-    let headed = arms("headed", "            if on\n              text \"Car\" role=\"heading\" aria-level=1\n            else\n              text \"Van\" role=\"heading\" aria-level=1\n            progress\n");
+    let headed = arms("headed", phones, "            if on\n              text \"Car\" role=\"heading\" aria-level=1\n            else\n              text \"Van\" role=\"heading\" aria-level=1\n            progress\n");
     assert_eq!(headed.len(), 1, "{headed:?}");
     assert!(
         headed[0].0 == "header-item-left-out" && headed[0].1.starts_with("this `progress`"),
         "{headed:?}"
     );
+    // A search field after one in each arm is the second whichever shows; a
+    // subtitle in each arm is the Mac's one subtitle.
+    let second = arms("second", phones, "            text \"Car\" role=\"heading\" aria-level=1\n            if on\n              input type=\"search\" value=q input=typed\n            else\n              input type=\"search\" value=q input=typed\n            input type=\"search\" value=q input=typed\n");
+    assert_eq!(second.len(), 1, "{second:?}");
+    assert!(
+        second[0].0 == "lower-header-unplaced"
+            && second[0].1.contains("a second `input type=\"search\"`"),
+        "{second:?}"
+    );
+    let mac = "\"ios\": {}, \"macos\": {}";
+    let subtitled = arms("subtitled", mac, "            text \"Car\" role=\"heading\" aria-level=1\n            if on\n              text \"On time\"\n            else\n              text \"Late\"\n");
+    assert_eq!(
+        subtitled,
+        Vec::<(String, String)>::new(),
+        "one subtitle whichever arm shows"
+    );
+    let after = arms("after", mac, "            text \"Car\" role=\"heading\" aria-level=1\n            if on\n              text \"On time\"\n            else\n              text \"Late\"\n            text \"Platform 2\"\n");
+    assert_eq!(after.len(), 1, "{after:?}");
+    assert!(
+        after[0]
+            .1
+            .contains("a text that is neither its heading nor the one after it"),
+        "{after:?}"
+    );
+    let inside = arms("inside", phones, "            text \"Car\" role=\"heading\" aria-level=1\n            input type=\"search\" value=q input=typed\n            if on\n              input type=\"search\" value=q input=typed\n");
+    assert_eq!(inside.len(), 1, "{inside:?}");
+    assert!(inside[0].0 == "lower-header-unplaced", "{inside:?}");
+    // The Mac's toolbar draws a symbol readout, and makes segments only of
+    // two or more titled tabs.
+    let symbol = arms("symbol", mac, "            text \"Car\" role=\"heading\" aria-level=1\n            image \"symbol:add\" role=\"status\" aria-label=\"New\"\n");
+    assert_eq!(
+        symbol,
+        Vec::<(String, String)>::new(),
+        "a symbol readout is drawn"
+    );
+    let tab = |n: usize| {
+        "              button role=\"tab\" press=typed(\"a\")\n                text \"A\"\n"
+            .repeat(n)
+    };
+    let tablist = |n: usize| {
+        format!("            text \"Car\" role=\"heading\" aria-level=1\n            row role=\"tablist\"\n{}", tab(n))
+    };
+    assert_eq!(
+        arms("tabs", mac, &tablist(2)),
+        Vec::<(String, String)>::new(),
+        "two titled tabs are segments"
+    );
+    let one = arms("tab", mac, &tablist(1));
+    assert_eq!(one.len(), 1, "{one:?}");
+    assert!(
+        one[0].1.contains("a tablist that is not two or more tabs"),
+        "{one:?}"
+    );
+    // What a title button its author keeps holds stays in the page, hidden
+    // by nothing.
+    let kept = arms("kept", phones, "            button press=typed(\"t\") appearance=\"none\"\n              text \"Car\" role=\"heading\" aria-level=1\n              progress\n");
+    assert_eq!(kept, Vec::<(String, String)>::new(), "kept in the page");
     assert!(contract_lower::warning_rank::information(
         "header-item-left-out"
     ));

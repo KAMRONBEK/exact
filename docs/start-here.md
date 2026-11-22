@@ -463,15 +463,17 @@ snapshot. The backend’s clock stays its own.
    the platform's bordered one; a document's own text (a note's title and body, as Notes
    draws them) says `border="none"`, and a chat's composer is `chat-thread`'s.
 2. **A `header` holds a heading (`h1 "Title"`), one text after it (the subtitle) and
-   buttons** (or a search field, a `tablist`). A button of one symbol, one text or both
-   is UIKit's own bar item. Anything else in it (a spinner and its words, a picture, a
+   buttons** (or a search field, a `tablist`). A button of one symbol, one plain text (no
+   Markdown, span or link, writing nothing but its `color`) or both is UIKit's own bar item. Anything else in it (a spinner and its words, a picture, a
    pressed row, a button with a dot beside its label) is a hosted item on its side of the heading, drawn as written, with no glass unless
    something in it presses; inside a box around the heading, only the title shows. An
    element the bar has no object for (a spinner, a picture, a text, a readout) is left out
    by Android's top app bar and tvOS's bar, and makes the Mac draw the header in the page
-   unless it is a readout of words, symbols and dots (the compiler's
-   `header-item-left-out` names each for the targets you ship): what must show
-   everywhere goes below the `header`. A hosted item's automatic size is at most a third
+   unless it is a readout of words, symbols and dots; Android also leaves out the
+   subtitle. The compiler's `header-item-left-out` names each hosted element and readout
+   left out, and the part that sends the Mac's header to the page, for the targets you
+   ship: what must show everywhere goes below the `header`. A hosted item's automatic
+   size is at most a third
    of the bar's width and 44 points high, a trailing or bottom margin is not kept, it
    takes the page's type and colour (write the `font-size` and `color` you want), and in
    UIKit's "⋯" menu it is only its own action. Desktop Linux and the web draw the header
