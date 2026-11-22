@@ -1,7 +1,7 @@
 import { test } from 'bun:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, relative, resolve } from 'node:path';
 import process from 'node:process';
@@ -65,6 +65,87 @@ test.skipIf(process.platform === 'win32')('a unit no build has read for a week g
     assert.ok(!has(t, 'incremental', 'a-2ajo1mk2vrgcf'));
     assert.ok(has(t, '.fingerprint', `b-${B}`) && has(t, 'deps', `libb-${B}.rlib`) && has(t, 'build', `b-${B}`));
     assert.ok(!existsSync(resolve(t, '.exact-swept')));
+  } finally { rmSync(t, { recursive: true, force: true }); }
+});
+
+test.skipIf(process.platform === 'win32')('orphaned incremental .rcgu.o sets and superseded sessions are swept without touching plain CGUs, linked ties, or sibling caches', async () => {
+  const t = target(), now = Date.now(), deps = resolve(t, 'debug/deps'), incr = resolve(t, 'debug/incremental');
+  const older = new Date(now - 60_000), newer = new Date(now + 10_000), newest = new Date(now + 20_000);
+
+  // 1. Plain non-incremental objects (`-cgu.<N>.rcgu.o`): indices 00..02 are all live in one build,
+  // even with staggered mtimes, and must never be treated as rebuild tags.
+  const plain0 = resolve(deps, 'cc-fb420d4abaebbebd.cc.8f24f1ac075cbf0f-cgu.00.rcgu.o');
+  const plain1 = resolve(deps, 'cc-fb420d4abaebbebd.cc.8f24f1ac075cbf0f-cgu.01.rcgu.o');
+  const plain2 = resolve(deps, 'cc-fb420d4abaebbebd.cc.8f24f1ac075cbf0f-cgu.02.rcgu.o');
+  for (const [p, mtime] of [[plain0, older], [plain1, newer], [plain2, newest]]) {
+    writeFileSync(p, 'plain');
+    utimesSync(p, mtime, mtime);
+  }
+
+  // 2. Incremental objects (`<unit>.<25 base-36>.<7 base-36>.rcgu.o`) with one recompiled CGU and
+  // one hardlinked reused CGU: old tag `0h3oitd` is strictly older than new tag `1ccoadi` and goes,
+  // while the new tag (including its hardlink to the reused CGU) stays intact.
+  const incOldChanged = resolve(deps, 'exact_plan-7855ad78591661c6.8ebodo4awrbx3jxe4yjnnvcga.0h3oitd.rcgu.o');
+  const incOldReused = resolve(deps, 'exact_plan-7855ad78591661c6.93nxtgfjgrbildjtag3kno7jr.0h3oitd.rcgu.o');
+  const incNewChanged = resolve(deps, 'exact_plan-7855ad78591661c6.8ebodo4awrbx3jxe4yjnnvcga.1ccoadi.rcgu.o');
+  const incNewReused = resolve(deps, 'exact_plan-7855ad78591661c6.93nxtgfjgrbildjtag3kno7jr.1ccoadi.rcgu.o');
+  writeFileSync(incOldChanged, 'old-cgu');
+  writeFileSync(incOldReused, 'shared-cgu');
+  linkSync(incOldReused, incNewReused);
+  writeFileSync(incNewChanged, 'new-cgu');
+  utimesSync(incOldChanged, older, older);
+  utimesSync(incOldReused, older, older);
+  utimesSync(incNewChanged, newer, newer);
+
+  // 3. Full-reuse hardlink tie: every CGU in the new tag was hardlinked from the prior tag, so both
+  // tags share the exact same newest mtime. Both tags must be kept.
+  const tieA = resolve(deps, 'exact_svg_file-4288274af3aa3aac.5gn7030ns76jztdeow2ux2yia.03s0tzj.rcgu.o');
+  const tieB = resolve(deps, 'exact_svg_file-4288274af3aa3aac.5gn7030ns76jztdeow2ux2yia.1plz78a.rcgu.o');
+  writeFileSync(tieA, 'reused-only');
+  linkSync(tieA, tieB);
+  utimesSync(tieA, older, older);
+
+  // 4. Within one incremental cache: remove abandoned `-working` and older completed `s-*` sessions
+  // plus their `.lock` files, keeping the newest completed `s-*` session and its `.lock`.
+  const activeCache = resolve(incr, 'exact_kernel-2ajo1mk2vrgcf');
+  const sOld = resolve(activeCache, 's-hoensmxwyy-0jdnav7-202u7uhbq2x49og73537n6x11');
+  const sNew = resolve(activeCache, 's-hoep4z8ar6-1kg16cg-4j7mundduc6eepln5mwp21tr6');
+  const sWorking = resolve(activeCache, 's-hoeq3b8k0z-1xawk5k-working');
+  mkdirSync(sOld, { recursive: true });
+  mkdirSync(sNew, { recursive: true });
+  mkdirSync(sWorking, { recursive: true });
+  writeFileSync(resolve(activeCache, 's-hoensmxwyy-0jdnav7.lock'), '');
+  writeFileSync(resolve(activeCache, 's-hoep4z8ar6-1kg16cg.lock'), '');
+  writeFileSync(resolve(activeCache, 's-hoeq3b8k0z-1xawk5k.lock'), '');
+  utimesSync(sOld, older, older);
+  utimesSync(sNew, newer, newer);
+  utimesSync(sWorking, newest, newest);
+
+  // 5. Sibling incremental cache for another build mode of the same crate (e.g. lib vs test), used
+  // 2 hours ago (within `KEEP`): must NOT be evicted.
+  const siblingCache = resolve(incr, 'exact_kernel-13qy4wzro974q');
+  const siblingSession = resolve(siblingCache, 's-hoensowkvb-15utmu8-29sc8x5u29tighly4942zf8rc');
+  mkdirSync(siblingSession, { recursive: true });
+  const twoHoursAgo = new Date(now - 2 * 3_600_000);
+  utimesSync(siblingSession, twoHoursAgo, twoHoursAgo);
+  utimesSync(siblingCache, twoHoursAgo, twoHoursAgo);
+
+  try {
+    const removed = await sweep(t, now);
+    assert.equal(removed.debug, 4, `expected 2 superseded rcgu.o + 1 working dir + 1 old session: ${JSON.stringify(removed)}`);
+    for (const p of [plain0, plain1, plain2]) assert.ok(existsSync(p), `plain CGU kept: ${p}`);
+    assert.ok(!existsSync(incOldChanged), 'superseded incremental CGU removed');
+    assert.ok(!existsSync(incOldReused), 'superseded hardlink name removed');
+    assert.ok(existsSync(incNewChanged), 'newest incremental CGU kept');
+    assert.equal(readFileSync(incNewReused, 'utf8'), 'shared-cgu', 'reused hardlinked inode intact under new tag');
+    assert.ok(existsSync(tieA) && existsSync(tieB), 'both tied hardlink tags kept');
+    assert.ok(!existsSync(sWorking), 'abandoned -working session removed');
+    assert.ok(!existsSync(resolve(activeCache, 's-hoeq3b8k0z-1xawk5k.lock')), 'abandoned -working lock removed');
+    assert.ok(!existsSync(sOld), 'superseded s-* session removed');
+    assert.ok(!existsSync(resolve(activeCache, 's-hoensmxwyy-0jdnav7.lock')), 'superseded s-* lock removed');
+    assert.ok(existsSync(sNew), 'newest completed s-* session kept');
+    assert.ok(existsSync(resolve(activeCache, 's-hoep4z8ar6-1kg16cg.lock')), 'newest session lock kept');
+    assert.ok(existsSync(siblingSession), 'sibling incremental cache of same crate kept within KEEP');
   } finally { rmSync(t, { recursive: true, force: true }); }
 });
 

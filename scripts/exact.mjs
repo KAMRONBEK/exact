@@ -62,6 +62,7 @@ const { gameDefaults, prepareContractGame, sdkFetch } = await import('../game/ap
 const { HOST_SDKS, HOST_SWIFT, appleSdkName, developerDir, xcodeRefusal } = await import('../host/apple/devices.mjs');
 const { appleArtifacts, assertAppleIdentity } = await import('../host/apple/build.mjs');
 const { closeFilesystemReader } = await import('./filesystem.mjs');
+const { startSweep } = await import('./sweep.mjs');
 const { builtAppMatches, jsTargetBuild } = await import('../host/web/serve.mjs');
 const { signRelease } = await import('../host/apple/assets.mjs');
 const { appleCrossReport, CROSS_IOS_ROWS, hasCrossSdk, iosSimulatorTarget } = await import('../host/apple/sdk.mjs');
@@ -648,6 +649,7 @@ export async function contract(args, env = process.env) {
   if (!tool || !prepareContractGame(args)) return 1;
   const result = spawnSync(tool.cmd, [...tool.pre, ...args], {stdio: ['inherit', json ? 'pipe' : 'inherit', 'inherit'], env: tool.env, encoding: 'utf8', maxBuffer: 1 << 26});
   if (result.error) throw new Error(`${tool.cmd}: ${result.error.message}${tool.cmd === 'cargo' ? ' (install rustup from https://rustup.rs)' : ''}`);
+  if (tool.cmd === 'cargo' && !json && !args.includes('--json')) startSweep(resolve(ROOT, 'target'));
   // Cargo's own failures exit 101; one that is not rustup's refuses `+<pin>` before the compiler runs.
   if (result.status === 101 && tool.cmd === 'cargo') { const fault = cargoProxyFault(tool.pin, tool.env); if (fault) console.error(`exact contract: ${fault}`); }
   if (result.status === 0 && input && basename(input) === 'app.contract') {
