@@ -143,7 +143,9 @@ fn a_header_button_that_presses_nothing_is_named() {
 #[test]
 fn a_symbol_beside_the_heading_in_its_row_is_the_titles() {
     let header = |row: &str, image: &str, extra: &str| {
-        format!("header display=\"flex\" align-items=\"center\"\n            {row}\n              image \"{image}\"\n              text \"Detail\" role=\"heading\" aria-level=2{extra}")
+        format!(
+            "header display=\"flex\" align-items=\"center\"\n            {row}\n              image \"{image}\"\n              text \"Detail\" role=\"heading\" aria-level=2{extra}"
+        )
     };
     let unplaced = |header: String| {
         let src = stack("", "", "").replace("column \n", &format!("{header}\n          column\n"));
@@ -175,7 +177,9 @@ fn a_symbol_beside_the_heading_in_its_row_is_the_titles() {
 fn a_header_of_buttons_alone_is_the_bar_and_one_with_a_text_is_named() {
     let route = |header: &str| {
         let header: String = header.lines().map(|l| format!("          {l}\n")).collect();
-        format!("routes nav\n  home \"/\"\ncomponent App\n  state n = 0\n  action go\n    n = n + 1\n  view\n    main navigationKey=`${{top(nav).id}}` width=\"100%\" height=\"100%\"\n      for e in stack(nav) key=e.id\n        column navigationKey=`${{e.id}}` position=\"absolute\" inset=0\n          header\n{header}          scroll flex=1\n            text \"body\"\n")
+        format!(
+            "routes nav\n  home \"/\"\ncomponent App\n  state n = 0\n  action go\n    n = n + 1\n  view\n    main navigationKey=`${{top(nav).id}}` width=\"100%\" height=\"100%\"\n      for e in stack(nav) key=e.id\n        column navigationKey=`${{e.id}}` position=\"absolute\" inset=0\n          header\n{header}          scroll flex=1\n            text \"body\"\n"
+        )
     };
     for header in [
         "  button press=go aria-label=\"Add\"\n    image \"symbol:add\"",
@@ -218,7 +222,9 @@ fn a_header_of_buttons_alone_is_the_bar_and_one_with_a_text_is_named() {
 #[test]
 fn a_header_element_a_targets_bar_has_no_place_for_is_named() {
     let app = |header: &str| {
-        format!("routes nav\n  home \"/\"\ncomponent App\n  state n = 0\n  action go\n    n = n + 1\n  view\n    main navigationKey=`${{top(nav).id}}` width=\"100%\" height=\"100%\"\n      for e in stack(nav) key=e.id\n        column navigationKey=`${{e.id}}` position=\"absolute\" inset=0\n          header display=\"flex\"\n            text \"Car\" role=\"heading\" aria-level=1\n{header}          text \"body\"\n")
+        format!(
+            "routes nav\n  home \"/\"\ncomponent App\n  state n = 0\n  action go\n    n = n + 1\n  view\n    main navigationKey=`${{top(nav).id}}` width=\"100%\" height=\"100%\"\n      for e in stack(nav) key=e.id\n        column navigationKey=`${{e.id}}` position=\"absolute\" inset=0\n          header display=\"flex\"\n            text \"Car\" role=\"heading\" aria-level=1\n{header}          text \"body\"\n"
+        )
     };
     let said = |name: &str, targets: &str, view: &str| -> Vec<String> {
         let dir =
@@ -237,7 +243,9 @@ fn a_header_element_a_targets_bar_has_no_place_for_is_named() {
     // A readout of words the Mac draws, and a spinner it has no place for:
     // each left out on Android, and the spinner sends the Mac's header to
     // the page, said once.
-    let words = app("            row role=\"status\" aria-label=\"Live\"\n              text \"Live\"\n            progress\n");
+    let words = app(
+        "            row role=\"status\" aria-label=\"Live\"\n              text \"Live\"\n            progress\n",
+    );
     assert_eq!(
         said("apple", "\"ios\": {}, \"web\": {}", &words),
         Vec::<String>::new(),
@@ -266,7 +274,9 @@ fn a_header_element_a_targets_bar_has_no_place_for_is_named() {
     // left out on Android, and no face for the Mac's toolbar; a button whose
     // face iOS hosts is an action everywhere; what its author keeps in the
     // page is no item.
-    let more = app("            if true\n              row role=\"status\" aria-label=\"Updating\"\n                progress\n            button press=go aria-label=\"Live\"\n              column width=6 height=6 background-color=\"#0a0\"\n              text \"Live\"\n            progress appearance=\"none\"\n");
+    let more = app(
+        "            if true\n              row role=\"status\" aria-label=\"Updating\"\n                progress\n            button press=go aria-label=\"Live\"\n              column width=6 height=6 background-color=\"#0a0\"\n              text \"Live\"\n            progress appearance=\"none\"\n",
+    );
     let said_more = said("more", all, &more);
     assert_eq!(said_more.len(), 2, "{said_more:?}");
     assert!(
@@ -302,27 +312,22 @@ fn a_header_element_a_targets_bar_has_no_place_for_is_named() {
     // Arms of a choice never show together: a search field in each is no
     // second one, and a heading in each with a spinner after them is one
     // heading, the spinner still named.
-    let arms = |name: &str, targets: &str, header: &str| -> Vec<(String, String)> {
-        let dir =
-            crate::scratch::Scratch::new(format!("exact2-arms-{name}-{}", std::process::id()));
-        std::fs::write(dir.join("app.json"), format!("{{\"app\": {{\"id\": \"dev.test.bar\", \"name\": \"Bar\"}}, \"host\": {{{targets}}}}}")).unwrap();
-        std::fs::write(dir.join("app.contract"), format!("routes nav\n  home \"/\"\ncomponent App\n  state q = \"\"\n  state on = true\n  action typed(v: string)\n    q = v\n  view\n    main navigationKey=`${{top(nav).id}}` width=\"100%\" height=\"100%\"\n      for e in stack(nav) key=e.id\n        column navigationKey=`${{e.id}}` position=\"absolute\" inset=0\n          header display=\"flex\"\n{header}          text \"body\"\n")).unwrap();
-        let (plan, warnings) = contract::compile_path_all_warned(&dir.at("app.contract"), false);
-        plan.unwrap_or_else(|e| panic!("{e:?}"));
-        warnings
-            .iter()
-            .filter(|w| w.id.starts_with("lower-header") || w.id == "header-item-left-out")
-            .map(|w| (w.id.to_string(), w.message.clone()))
-            .collect()
-    };
     let phones = "\"ios\": {}, \"android\": {}";
-    let searches = arms("search", phones, "            text \"Car\" role=\"heading\" aria-level=1\n            if on\n              input type=\"search\" value=q input=typed\n            else\n              input type=\"search\" value=q input=typed\n");
+    let searches = header_warnings(
+        "search",
+        phones,
+        "            text \"Car\" role=\"heading\" aria-level=1\n            if on\n              input type=\"search\" value=q input=typed\n            else\n              input type=\"search\" value=q input=typed\n",
+    );
     assert_eq!(
         searches,
         Vec::<(String, String)>::new(),
         "one search field whichever arm shows"
     );
-    let headed = arms("headed", phones, "            if on\n              text \"Car\" role=\"heading\" aria-level=1\n            else\n              text \"Van\" role=\"heading\" aria-level=1\n            progress\n");
+    let headed = header_warnings(
+        "headed",
+        phones,
+        "            if on\n              text \"Car\" role=\"heading\" aria-level=1\n            else\n              text \"Van\" role=\"heading\" aria-level=1\n            progress\n",
+    );
     assert_eq!(headed.len(), 1, "{headed:?}");
     assert!(
         headed[0].0 == "header-item-left-out" && headed[0].1.starts_with("this `progress`"),
@@ -330,7 +335,11 @@ fn a_header_element_a_targets_bar_has_no_place_for_is_named() {
     );
     // A search field after one in each arm is the second whichever shows; a
     // subtitle in each arm is the Mac's one subtitle.
-    let second = arms("second", phones, "            text \"Car\" role=\"heading\" aria-level=1\n            if on\n              input type=\"search\" value=q input=typed\n            else\n              input type=\"search\" value=q input=typed\n            input type=\"search\" value=q input=typed\n");
+    let second = header_warnings(
+        "second",
+        phones,
+        "            text \"Car\" role=\"heading\" aria-level=1\n            if on\n              input type=\"search\" value=q input=typed\n            else\n              input type=\"search\" value=q input=typed\n            input type=\"search\" value=q input=typed\n",
+    );
     assert_eq!(second.len(), 1, "{second:?}");
     assert!(
         second[0].0 == "lower-header-unplaced"
@@ -338,13 +347,21 @@ fn a_header_element_a_targets_bar_has_no_place_for_is_named() {
         "{second:?}"
     );
     let mac = "\"ios\": {}, \"macos\": {}";
-    let subtitled = arms("subtitled", mac, "            text \"Car\" role=\"heading\" aria-level=1\n            if on\n              text \"On time\"\n            else\n              text \"Late\"\n");
+    let subtitled = header_warnings(
+        "subtitled",
+        mac,
+        "            text \"Car\" role=\"heading\" aria-level=1\n            if on\n              text \"On time\"\n            else\n              text \"Late\"\n",
+    );
     assert_eq!(
         subtitled,
         Vec::<(String, String)>::new(),
         "one subtitle whichever arm shows"
     );
-    let after = arms("after", mac, "            text \"Car\" role=\"heading\" aria-level=1\n            if on\n              text \"On time\"\n            else\n              text \"Late\"\n            text \"Platform 2\"\n");
+    let after = header_warnings(
+        "after",
+        mac,
+        "            text \"Car\" role=\"heading\" aria-level=1\n            if on\n              text \"On time\"\n            else\n              text \"Late\"\n            text \"Platform 2\"\n",
+    );
     assert_eq!(after.len(), 1, "{after:?}");
     assert!(
         after[0]
@@ -352,12 +369,20 @@ fn a_header_element_a_targets_bar_has_no_place_for_is_named() {
             .contains("a text that is neither its heading nor the one after it"),
         "{after:?}"
     );
-    let inside = arms("inside", phones, "            text \"Car\" role=\"heading\" aria-level=1\n            input type=\"search\" value=q input=typed\n            if on\n              input type=\"search\" value=q input=typed\n");
+    let inside = header_warnings(
+        "inside",
+        phones,
+        "            text \"Car\" role=\"heading\" aria-level=1\n            input type=\"search\" value=q input=typed\n            if on\n              input type=\"search\" value=q input=typed\n",
+    );
     assert_eq!(inside.len(), 1, "{inside:?}");
     assert!(inside[0].0 == "lower-header-unplaced", "{inside:?}");
     // The Mac's toolbar draws a symbol readout, and makes segments only of
     // two or more titled tabs.
-    let symbol = arms("symbol", mac, "            text \"Car\" role=\"heading\" aria-level=1\n            image \"symbol:add\" role=\"status\" aria-label=\"New\"\n");
+    let symbol = header_warnings(
+        "symbol",
+        mac,
+        "            text \"Car\" role=\"heading\" aria-level=1\n            image \"symbol:add\" role=\"status\" aria-label=\"New\"\n",
+    );
     assert_eq!(
         symbol,
         Vec::<(String, String)>::new(),
@@ -368,14 +393,17 @@ fn a_header_element_a_targets_bar_has_no_place_for_is_named() {
             .repeat(n)
     };
     let tablist = |n: usize| {
-        format!("            text \"Car\" role=\"heading\" aria-level=1\n            row role=\"tablist\"\n{}", tab(n))
+        format!(
+            "            text \"Car\" role=\"heading\" aria-level=1\n            row role=\"tablist\"\n{}",
+            tab(n)
+        )
     };
     assert_eq!(
-        arms("tabs", mac, &tablist(2)),
+        header_warnings("tabs", mac, &tablist(2)),
         Vec::<(String, String)>::new(),
         "two titled tabs are segments"
     );
-    let one = arms("tab", mac, &tablist(1));
+    let one = header_warnings("tab", mac, &tablist(1));
     assert_eq!(one.len(), 1, "{one:?}");
     assert!(
         one[0].1.contains("a tablist that is not two or more tabs"),
@@ -383,22 +411,38 @@ fn a_header_element_a_targets_bar_has_no_place_for_is_named() {
     );
     // What a title button its author keeps holds stays in the page, hidden
     // by nothing, a second search field in it too.
-    let kept = arms("kept", phones, "            button press=typed(\"t\") appearance=\"none\"\n              text \"Car\" role=\"heading\" aria-level=1\n              progress\n              input type=\"search\" value=q input=typed\n              input type=\"search\" value=q input=typed\n");
+    let kept = header_warnings(
+        "kept",
+        phones,
+        "            button press=typed(\"t\") appearance=\"none\"\n              text \"Car\" role=\"heading\" aria-level=1\n              progress\n              input type=\"search\" value=q input=typed\n              input type=\"search\" value=q input=typed\n",
+    );
     assert_eq!(kept, Vec::<(String, String)>::new(), "kept in the page");
     // A message about a place holds however the choices go: two search
     // fields after a heading in each arm, the second hidden; a search field
     // in each of two `if`s, which may never show together, given the benefit.
-    let headed_twice = arms("headed-twice", phones, "            if on\n              text \"Car\" role=\"heading\" aria-level=1\n            else\n              text \"Van\" role=\"heading\" aria-level=1\n            input type=\"search\" value=q input=typed\n            input type=\"search\" value=q input=typed\n");
+    let headed_twice = header_warnings(
+        "headed-twice",
+        phones,
+        "            if on\n              text \"Car\" role=\"heading\" aria-level=1\n            else\n              text \"Van\" role=\"heading\" aria-level=1\n            input type=\"search\" value=q input=typed\n            input type=\"search\" value=q input=typed\n",
+    );
     assert_eq!(headed_twice.len(), 1, "{headed_twice:?}");
     assert!(
         headed_twice[0].0 == "lower-header-unplaced",
         "{headed_twice:?}"
     );
-    let apart = arms("apart", phones, "            text \"Car\" role=\"heading\" aria-level=1\n            if on\n              input type=\"search\" value=q input=typed\n            if !on\n              input type=\"search\" value=q input=typed\n");
+    let apart = header_warnings(
+        "apart",
+        phones,
+        "            text \"Car\" role=\"heading\" aria-level=1\n            if on\n              input type=\"search\" value=q input=typed\n            if !on\n              input type=\"search\" value=q input=typed\n",
+    );
     assert_eq!(apart, Vec::<(String, String)>::new(), "the benefit");
     // The Mac's toolbar has one search field, and a tab's title is its words,
     // not its `aria-label`; words chosen by an `if` are given the benefit.
-    let searched = arms("searched", mac, "            text \"Car\" role=\"heading\" aria-level=1\n            input type=\"search\" value=q input=typed\n            input type=\"search\" value=q input=typed\n");
+    let searched = header_warnings(
+        "searched",
+        mac,
+        "            text \"Car\" role=\"heading\" aria-level=1\n            input type=\"search\" value=q input=typed\n            input type=\"search\" value=q input=typed\n",
+    );
     assert!(
         searched
             .iter()
@@ -406,7 +450,7 @@ fn a_header_element_a_targets_bar_has_no_place_for_is_named() {
         "{searched:?}"
     );
     let blank = "              button role=\"tab\" press=typed(\"b\") aria-label=\"B\"\n                text \"\"\n";
-    let blank = arms("blank", mac, &format!("{}{blank}", tablist(1)));
+    let blank = header_warnings("blank", mac, &format!("{}{blank}", tablist(1)));
     assert_eq!(blank.len(), 1, "{blank:?}");
     assert!(
         blank[0]
@@ -416,13 +460,13 @@ fn a_header_element_a_targets_bar_has_no_place_for_is_named() {
     );
     let chosen = "              button role=\"tab\" press=typed(\"b\")\n                if on\n                  text \"B\"\n                else\n                  text \"C\"\n";
     assert_eq!(
-        arms("chosen", mac, &format!("{}{chosen}", tablist(1))),
+        header_warnings("chosen", mac, &format!("{}{chosen}", tablist(1))),
         Vec::<(String, String)>::new(),
         "either title"
     );
     // Beside a tablist's segments a line of glyphs is an item of its own,
     // which Android leaves out.
-    let lined = arms(
+    let lined = header_warnings(
         "lined",
         phones,
         &format!(
@@ -438,4 +482,175 @@ fn a_header_element_a_targets_bar_has_no_place_for_is_named() {
     assert!(contract_lower::warning_rank::information(
         "header-item-left-out"
     ));
+}
+
+fn header_warnings(name: &str, targets: &str, header: &str) -> Vec<(String, String)> {
+    let dir = crate::scratch::Scratch::new(format!("exact2-header-{name}-{}", std::process::id()));
+    std::fs::write(
+        dir.join("app.json"),
+        format!(
+            "{{\"app\": {{\"id\": \"dev.test.bar\", \"name\": \"Bar\"}}, \"host\": {{{targets}}}}}"
+        ),
+    )
+    .unwrap();
+    std::fs::write(dir.join("app.contract"), format!("routes nav\n  home \"/\"\ncomponent App\n  state q = \"\"\n  state on = true\n  action typed(v: string)\n    q = v\n  view\n    main navigationKey=`${{top(nav).id}}` width=\"100%\" height=\"100%\"\n      for e in stack(nav) key=e.id\n        column navigationKey=`${{e.id}}` position=\"absolute\" inset=0\n          header display=\"flex\"\n{header}          text \"body\"\n")).unwrap();
+    let (plan, warnings) = contract::compile_path_all_warned(&dir.at("app.contract"), false);
+    plan.unwrap_or_else(|e| panic!("{e:?}"));
+    warnings
+        .iter()
+        .filter(|w| w.id.starts_with("lower-header") || w.id == "header-item-left-out")
+        .map(|w| (w.id.to_string(), w.message.clone()))
+        .collect()
+}
+
+#[test]
+fn header_headings_add_in_sequence_and_join_in_choices() {
+    let phones = "\"ios\": {}, \"android\": {}";
+    let choice = r#"            if on
+              text "Car" role="heading"
+            else
+              text "Van" role="heading"
+"#;
+    let spinner = "            progress\n";
+    let another_arm = "            else if q == \"\"\n              text \"Bus\" role=\"heading\"\n            else\n";
+    let chained = choice.replace("            else\n", another_arm);
+    let cases = [
+        ("one-choice", format!("{choice}{spinner}")),
+        ("two-choices", format!("{choice}{choice}{spinner}")),
+        ("else-if", format!("{chained}{spinner}")),
+        (
+            "conditional-spinner",
+            format!("{choice}            if on\n  {spinner}"),
+        ),
+    ];
+    let actual = cases.map(|(name, header)| {
+        let warnings = header_warnings(name, phones, &header);
+        for (id, message) in &warnings {
+            assert_eq!(id, "header-item-left-out");
+            assert!(message.starts_with("this `progress`"), "{message}");
+        }
+        (name, warnings.len())
+    });
+    assert_eq!(
+        actual,
+        [
+            ("one-choice", 1),
+            ("two-choices", 0),
+            ("else-if", 1),
+            ("conditional-spinner", 1)
+        ]
+    );
+}
+
+#[test]
+fn a_title_avatar_needs_a_drawable_face_inside_the_title_wrapper() {
+    let phones = "\"ios\": {}, \"android\": {}";
+    let sibling = r#"            box background-color="-exact-system-blue"
+              text "AL"
+            text "Ada" role="heading"
+"#;
+    let spacer = r#"            box background-color="-exact-system-blue"
+            button press=typed("ok")
+              text "OK"
+"#;
+    let wrapper = r#"            row
+              box background-color="-exact-system-blue"
+                text "AL"
+              text "Ada" role="heading"
+"#;
+    let spinner = wrapper.replace("text \"AL\"", "progress");
+    let cases = [
+        ("sibling", sibling),
+        ("spinner", &spinner),
+        ("spacer", spacer),
+        ("avatar", wrapper),
+    ];
+    let actual = cases.map(|(name, header)| {
+        let warnings = header_warnings(name, phones, header);
+        (
+            name,
+            warnings.into_iter().map(|(id, _)| id).collect::<Vec<_>>(),
+        )
+    });
+    assert_eq!(
+        actual,
+        [
+            ("sibling", vec!["header-item-left-out".to_string()]),
+            ("spinner", vec!["lower-header-unplaced".to_string()]),
+            ("spacer", vec![]),
+            ("avatar", vec![]),
+        ]
+    );
+}
+
+#[test]
+fn a_mac_toolbar_button_with_two_symbols_needs_a_painted_face() {
+    let mac = "\"ios\": {}, \"macos\": {}";
+    let header = r#"            text "History" role="heading"
+            button press=typed("more") aria-label="More"
+              image "symbol:add"
+"#;
+    let two = format!("{header}              image \"symbol:history\"\n");
+    let dot = format!("{two}              box background-color=\"red\" width=6 height=6\n");
+    let font = format!("{two}              text \"New\" font-size=18\n");
+    let cases = [
+        ("one-symbol", header),
+        ("two-symbols", &two),
+        ("dot", &dot),
+        ("font", &font),
+    ];
+    let actual = cases.map(|(name, header)| {
+        let warnings = header_warnings(name, mac, header);
+        for (id, message) in &warnings {
+            assert_eq!(id, "header-item-left-out");
+            assert!(
+                message.starts_with("on macos") && message.contains("a button"),
+                "{message}"
+            );
+        }
+        (name, warnings.len())
+    });
+    assert_eq!(
+        actual,
+        [
+            ("one-symbol", 0),
+            ("two-symbols", 1),
+            ("dot", 0),
+            ("font", 0)
+        ]
+    );
+}
+
+#[test]
+fn a_mac_toolbar_header_names_a_popover_or_dialog() {
+    let mac = "\"ios\": {}, \"macos\": {}";
+    let heading = "            text \"History\" role=\"heading\"\n";
+    let popover = r#"            box id="more" popover="auto"
+              text "More"
+"#;
+    let dialog = r#"            row
+              dialog id="details" aria-label="Details"
+                text "Details"
+"#;
+    let hidden = popover.replace("popover=", "display=\"none\" popover=");
+    let cases = [
+        ("popover", popover),
+        ("dialog", dialog),
+        ("hidden-popover", &hidden),
+    ];
+    let actual = cases.map(|(name, body)| {
+        let warnings = header_warnings(name, mac, &format!("{heading}{body}"));
+        for (id, message) in &warnings {
+            assert_eq!(id, "header-item-left-out");
+            assert!(
+                message.starts_with("on macos") && message.contains(&format!("holds a {name}")),
+                "{message}"
+            );
+        }
+        (name, warnings.len())
+    });
+    assert_eq!(
+        actual,
+        [("popover", 1), ("dialog", 1), ("hidden-popover", 0)]
+    );
 }

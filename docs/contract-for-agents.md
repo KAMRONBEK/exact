@@ -4286,19 +4286,18 @@ main navigationKey=`${top(nav).id}` navigationBack="close" navigate=follow displ
   - **Android and tvOS leave out an element the bar has no object for** (a spinner, a
     picture, a text, a readout). A button whose face iOS hosts (a dot beside its label) is
     still an action there, shown by its words or symbol. The Mac's toolbar takes a header
-    only when it has a place for every part: the heading, the first text after it (in a
-    box or not) as the window's subtitle, buttons whose face is words, symbols, dots and
-    at most one picture, readouts of words, symbols and dots, one search field and a
-    tablist of two or more tabs that each show a title alone. Anything else (a spinner, a
-    picture, a second text, a pressable title, a button holding a spinner, a tablist of
-    one tab, a second search field) sends the whole header to the page. Where an `if` or
-    a `match` decides which text is the subtitle or which search field is the second,
-    the compiler gives it the benefit and says nothing. Android's bar also leaves out the title's
-    own parts: the subtitle, the avatar and the tap on the title. For the targets your
-    app ships, the compiler names each hosted element and readout Android or tvOS leaves
-    out, and the first part the Mac has no place for, once a header
-    (`header-item-left-out`, information); it does not name the title's own parts. To
-    show something on every target, put it below the `header`, in the route's content.
+    when it has a place for every part, including the first text after the heading as
+    the subtitle, buttons, readouts of words, symbols and dots, one search field and
+    a tablist of at least two tabs that show a title alone. A plain button face can
+    have text and one image, including a symbol. The toolbar can also draw a filled
+    badge or a painted face with a sized dot or text in an authored font. A popover
+    or dialog beside the heading sends the whole header to the page. If an `if` or a
+    `match` makes the subtitle or the second search field ambiguous, the compiler
+    leaves it unreported. Android's bar also leaves out the subtitle, avatar and tap on
+    the title. For the targets your app ships, the compiler names each hosted element
+    and readout Android or tvOS leaves out, and the first part the Mac has no place for
+    (`header-item-left-out`, information). To show something on every target, put it
+    below the `header`, in the route's content.
   - **An automatic size is held to a third of the bar's width and 44 points of height**,
     and UIKit shrinks or hides the title before the items; a `width`, `height` or minimum
     you write wins, and the item takes that size. A trailing or bottom `margin` on the
@@ -4306,8 +4305,9 @@ main navigationKey=`${top(nav).id}` navigationBack="close" navigate=follow displ
   - **UIKit's "⋯" menu holds its own action only**: a switch flips, a `press` or a link
     presses; a row, a readout, a field or a slider is its name, dimmed, and a command
     (`commandfor`, `popovertarget`) opens only from the item in the bar.
-  - **Inside the heading's own box only the title shows**: the rest is hidden
-    (`lower-header-unplaced`). Put an item outside that box.
+  - **The heading's own box shows the title.** A filled box before the heading is its
+    avatar if it holds shown text, a symbol or a picture and no bar controls or readouts.
+    The compiler reports hidden content there as `lower-header-unplaced`.
   - A hosted item is drawn as the page draws it, so it takes the page's type and colour,
     not the bar's: write the `font-size` and `color` you want (`-exact-secondary-label`
     for a quiet label).
