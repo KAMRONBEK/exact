@@ -382,9 +382,59 @@ fn a_header_element_a_targets_bar_has_no_place_for_is_named() {
         "{one:?}"
     );
     // What a title button its author keeps holds stays in the page, hidden
-    // by nothing.
-    let kept = arms("kept", phones, "            button press=typed(\"t\") appearance=\"none\"\n              text \"Car\" role=\"heading\" aria-level=1\n              progress\n");
+    // by nothing, a second search field in it too.
+    let kept = arms("kept", phones, "            button press=typed(\"t\") appearance=\"none\"\n              text \"Car\" role=\"heading\" aria-level=1\n              progress\n              input type=\"search\" value=q input=typed\n              input type=\"search\" value=q input=typed\n");
     assert_eq!(kept, Vec::<(String, String)>::new(), "kept in the page");
+    // A message about a place holds however the choices go: two search
+    // fields after a heading in each arm, the second hidden; a search field
+    // in each of two `if`s, which may never show together, given the benefit.
+    let headed_twice = arms("headed-twice", phones, "            if on\n              text \"Car\" role=\"heading\" aria-level=1\n            else\n              text \"Van\" role=\"heading\" aria-level=1\n            input type=\"search\" value=q input=typed\n            input type=\"search\" value=q input=typed\n");
+    assert_eq!(headed_twice.len(), 1, "{headed_twice:?}");
+    assert!(
+        headed_twice[0].0 == "lower-header-unplaced",
+        "{headed_twice:?}"
+    );
+    let apart = arms("apart", phones, "            text \"Car\" role=\"heading\" aria-level=1\n            if on\n              input type=\"search\" value=q input=typed\n            if !on\n              input type=\"search\" value=q input=typed\n");
+    assert_eq!(apart, Vec::<(String, String)>::new(), "the benefit");
+    // The Mac's toolbar has one search field, and a tab's title is its words,
+    // not its `aria-label`; words chosen by an `if` are given the benefit.
+    let searched = arms("searched", mac, "            text \"Car\" role=\"heading\" aria-level=1\n            input type=\"search\" value=q input=typed\n            input type=\"search\" value=q input=typed\n");
+    assert!(
+        searched
+            .iter()
+            .any(|(id, m)| id == "header-item-left-out" && m.contains("a second search field")),
+        "{searched:?}"
+    );
+    let blank = "              button role=\"tab\" press=typed(\"b\") aria-label=\"B\"\n                text \"\"\n";
+    let blank = arms("blank", mac, &format!("{}{blank}", tablist(1)));
+    assert_eq!(blank.len(), 1, "{blank:?}");
+    assert!(
+        blank[0]
+            .1
+            .contains("a tablist that is not two or more tabs"),
+        "{blank:?}"
+    );
+    let chosen = "              button role=\"tab\" press=typed(\"b\")\n                if on\n                  text \"B\"\n                else\n                  text \"C\"\n";
+    assert_eq!(
+        arms("chosen", mac, &format!("{}{chosen}", tablist(1))),
+        Vec::<(String, String)>::new(),
+        "either title"
+    );
+    // Beside a tablist's segments a line of glyphs is an item of its own,
+    // which Android leaves out.
+    let lined = arms(
+        "lined",
+        phones,
+        &format!(
+            "{}            row\n              image \"symbol:add\"\n              text \"Muted\"\n",
+            tablist(2)
+        ),
+    );
+    assert_eq!(lined.len(), 1, "{lined:?}");
+    assert!(
+        lined[0].1.starts_with("this line of glyphs") && lined[0].1.contains("android"),
+        "{lined:?}"
+    );
     assert!(contract_lower::warning_rank::information(
         "header-item-left-out"
     ));

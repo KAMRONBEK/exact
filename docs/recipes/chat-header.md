@@ -1,6 +1,6 @@
 # Recipe: a chat header with an avatar, and day pills
 
-Android's bar and the Mac's toolbar show no photo, so a chat's header is its own row.
+Android's bar and the Mac's title show no avatar, so a chat's header is its own row.
 
 ```contract
 routes nav

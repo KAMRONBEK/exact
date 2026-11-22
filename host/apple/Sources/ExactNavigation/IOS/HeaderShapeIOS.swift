@@ -144,7 +144,8 @@ struct HeaderShape: Equatable {
             #endif
             // The platform's tint unless the author said otherwise (LLP
             // 1115.000 D2): a `color` written on the symbol, else on the title's
-            // text, else on the button, a platform colour as much as a literal.
+            // text (a native button's face rows too), else on the button, a
+            // platform colour as much as a literal.
             // One the button only inherits, or a sheet wrote, is unsaid.
             // Read from the node it is written on, the tint in it as a value (`carriedTint`)
             active = NativeButtonState(button)
@@ -152,8 +153,22 @@ struct HeaderShape: Equatable {
             activeTitleColor = symbol == nil && badge == nil && !hosted && !ownsTitle
                 && active.style.keys.allSatisfy { $0 == "press_color" } ? active.style["press_color"] : nil
             let source = ink.flatMap { $0.0.ownColor("text_color") != nil ? $0.0 : nil } ?? (button.ownColor("text_color") != nil ? button : nil)
-            followsTint = source?.style["text_color"]?.tintAlpha == 1
-            if !followsTint, let source, let light = source.carriedChannels("text_color", dark: false), let dark = source.carriedChannels("text_color", dark: true) {
+            // A native button's face has no views: its rows keep the colour
+            // its author wrote on the symbol, else on the title.
+            let faceInk: BatchValue? = face.flatMap { face in
+                let owns = NativeButtonState.colorOwnership(face.rows)
+                if face.symbol != nil { return owns.image ? face.rows.symbol["tint_color"] ?? face.rows.symbol["text_color"] : nil }
+                return owns.title ? face.rows.title["text_color"] : nil
+            }
+            followsTint = (faceInk ?? source?.style["text_color"])?.tintAlpha == 1
+            if followsTint {
+                tint = nil
+            } else if let faceInk {
+                let pair = [false, true].compactMap { dark in
+                    faceInk.channels(dark: dark, contrast: button.drawsHighContrast, elevated: button.drawsElevated, tint: faceInk.namesTint ? button.carriedTint : nil)
+                }
+                tint = pair.count == 2 ? pair : nil
+            } else if let source, let light = source.carriedChannels("text_color", dark: false), let dark = source.carriedChannels("text_color", dark: true) {
                 tint = [light, dark]
             } else {
                 tint = nil
@@ -201,15 +216,32 @@ struct HeaderShape: Equatable {
             guard !layered(button), !["font_family", "font_size", "font_weight", "font_style", "opacity", "filter"].contains(where: button.wrote) else { return false }
             let parts = shown(button)
             guard (1...2).contains(parts.count) else { return false }
-            var texts = 0, symbols = 0
+            var texts: [NodeView] = [], symbols = 0
             for part in parts {
-                guard !part.cssVisibilityHidden, part.handlers.isEmpty else { return false }
-                if plainText(part) { texts += 1 }
+                guard !part.cssVisibilityHidden, part.handlers.isEmpty, saysOnly(part) else { return false }
+                if plainText(part) { texts.append(part) }
                 else if part.kind == "image", part.faceSymbol != nil, written(part).allSatisfy(symbolRows.contains) { symbols += 1 }
                 else { return false }
             }
-            return texts <= 1 && symbols <= 1
+            // Beside a symbol UIKit shows the symbol alone and speaks the
+            // text, so a colour on the text would not show.
+            return texts.count <= 1 && symbols <= 1 && !(symbols == 1 && texts.contains { $0.wrote("text_color") })
         }
+        /// Whether `node`'s props say nothing UIKit's item would drop: its
+        /// words or symbol, its names, its language and its ids. Any other
+        /// (a material, a decoration, a font shorthand, an effect) is drawing.
+        static func saysOnly(_ node: NodeView) -> Bool {
+            node.props.allSatisfy { key, value in
+                plainProps.contains(key) || (key == "accessibilityRole" && ["image", "img", "none", "presentation"].contains(value))
+            }
+        }
+        /// The props a plain part may carry: its words or symbol (and what
+        /// the compiler says of it: `symbolColorWritten`, a badge box's
+        /// `faceBoxSize`), its names, its language and its ids.
+        static let plainProps: Set<String> = ["text", "imageSource", "symbolName", "symbolAsset", "symbolPath", "symbolViewBox", "symbolFillRule",
+                                              "symbolColorWritten", "faceBoxSize",
+                                              "accessibilityLabel", "accessibilityHint", "accessibilityElementsHidden", "lang", "paragraphDirs",
+                                              "testId", "nativeId", "id", "dataset", "title"]
         /// One run of words in the bar's type, which acts as nothing of its own
         /// and writes nothing UIKit's title would drop: its colour and where
         /// it sits only, no Markdown, no span, `href` or handler.
@@ -225,25 +257,38 @@ struct HeaderShape: Equatable {
         /// What a plain symbol may write besides: its size and weight, which
         /// the bar's image size replaces, and its tint.
         static let symbolRows: Set<String> = plainRows.union(["font_size", "font_weight", "tint_color", "object_fit"])
+        static let corners: Set<String> = ["border_radius_top_left", "border_radius_top_right", "border_radius_bottom_right",
+                                           "border_radius_bottom_left", "corner_shape"]
+        /// What a badge's box may write: its fill and corners, how it lays its
+        /// part out, and where it sits.
+        static let badgeRows: Set<String> = plainRows.union(corners).union(["background_color", "display", "flex_direction", "align_items",
+                                                                            "justify_content", "overflow_x", "overflow_y",
+                                                                            "aspect_ratio", "box_sizing"])
+        /// What a badge's part may write: a badge draws its text at its own
+        /// size in the author's font (§9.6), and a picture by its fit and corners.
+        static let badgePartRows: Set<String> = symbolRows.union(corners).union(["font_family", "font_style", "font_variant_numeric",
+                                                                                 "object_position", "aspect_ratio"])
         /// The style rows `node`'s author wrote.
         static func written(_ node: NodeView) -> [String] {
             guard case .array(let rows)? = node.style["written"] else { return [] }
             return rows.compactMap { if case .string(let key) = $0 { return key } else { return nil } }
         }
-        /// The badge of §9.6, and only it: one filled box, no border, shadow
-        /// or picture fill, holding one text (no picture or link inline), one
-        /// symbol or one picture, and no layer beside it.
+        /// The badge of §9.6, and only it: one box that writes its fill, its
+        /// corners and where it sits (no border, shadow, picture fill,
+        /// material or fade), holding one text (no picture or link inline),
+        /// one symbol or one picture that writes its type, colour, fit and
+        /// corners, and no layer beside it.
         static func badge(_ button: NodeView) -> Bool {
             // An opacity or a filter on the button reaches the badge, which UIKit's item would drop.
             guard button.kind == "button", BadgeFace(button) != nil, !layered(button), !button.wrote("opacity"), !button.wrote("filter") else { return false }
             let kids = shown(button)
             guard kids.count == 1, let box = kids.first, box.kind == "view", !layered(box), !box.cssVisibilityHidden,
-                  box.handlers.isEmpty, box.props["backgroundMaterial"] == nil, !box.wrote("opacity"), !box.wrote("filter"),
-                  box.style["box_shadow"] == nil, box.style["background_image"] == nil, box.number("border_width") == 0,
+                  box.handlers.isEmpty, saysOnly(box), written(box).allSatisfy(badgeRows.contains),
+                  box.style["box_shadow"] == nil, box.style["background_image"] == nil,
                   !["top", "right", "bottom", "left"].contains(where: { box.number("border_width_" + $0) > 0 }) else { return false }
             let parts = shown(box)
             guard parts.count == 1, let part = parts.first, !part.cssVisibilityHidden else { return false }
-            guard part.handlers.isEmpty, !part.wrote("opacity"), !part.wrote("filter") else { return false }
+            guard part.handlers.isEmpty, saysOnly(part), written(part).allSatisfy(badgePartRows.contains) else { return false }
             // A badge draws its text at its own size (§9.6), a font of the author's or not.
             if part.isParagraph { return part.inlineText.isEmpty && (part.props["href"] ?? "").isEmpty && part.props["markup"] == nil }
             return part.kind == "image" && (part.faceSymbol != nil || part.imageSource != nil)

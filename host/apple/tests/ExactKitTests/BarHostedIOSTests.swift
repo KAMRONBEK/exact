@@ -351,8 +351,9 @@ final class BarHostedIOSTests: XCTestCase {
 
     /// A plain face writes nothing UIKit's title would drop, and a badge's box
     /// is one fill: words in Markdown, an opacity on the words or the button,
-    /// and a badge box with a material, a press, a border or a faded part are
-    /// each hosted and drawn as written. A colour on the words is still plain,
+    /// a coloured text beside a symbol, a material on a label, and a badge box
+    /// with a material, a press, a border or a faded part are each hosted and
+    /// drawn as written. A colour on the words is still plain,
     /// and the item's tint. A readout whose one action is a link Markdown's
     /// parser finds (a bare URL too, none in code) presses, so it has glass.
     func testAPlainFaceWritesOnlyColourAndABadgeIsOneFill() throws {
@@ -363,34 +364,44 @@ final class BarHostedIOSTests: XCTestCase {
                            press(10, ["opacity": 0.5, "written": ["opacity"]]), text(11, "Live"),
                            status(12), text(13, "See [History](/history)", ["markup": "markdown"]),
                            status(14), text(15, "See https://example.com", ["markup": "markdown"]),
-                           status(16), text(17, "Type `[x](/go)`", ["markup": "markdown"])],
-                          kids: [4, 6, 8, 10, 12, 14, 16], more: [["op": "children", "id": 4, "ids": [5]], ["op": "children", "id": 6, "ids": [7]],
-                                                                  ["op": "children", "id": 8, "ids": [9]], ["op": "children", "id": 10, "ids": [11]],
-                                                                  ["op": "children", "id": 12, "ids": [13]], ["op": "children", "id": 14, "ids": [15]],
-                                                                  ["op": "children", "id": 16, "ids": [17]]])
+                           status(16), text(17, "Type `[x](/go)`", ["markup": "markdown"]),
+                           press(18, [:]), ["op": "create", "id": 19, "kind": "image", "props": ["imageSource": "symbol:sf/stop", "symbolName": "stop"]],
+                           text(20, "Stop", style: ["text_color": [255, 0, 0, 255], "written": ["text_color"]]),
+                           press(21, [:]), text(22, "AB", ["backgroundMaterial": "regular"])],
+                          kids: [4, 6, 8, 10, 12, 14, 16, 18, 21], more: [["op": "children", "id": 4, "ids": [5]], ["op": "children", "id": 6, "ids": [7]],
+                                                                          ["op": "children", "id": 8, "ids": [9]], ["op": "children", "id": 10, "ids": [11]],
+                                                                          ["op": "children", "id": 12, "ids": [13]], ["op": "children", "id": 14, "ids": [15]],
+                                                                          ["op": "children", "id": 16, "ids": [17]], ["op": "children", "id": 18, "ids": [19, 20]],
+                                                                          ["op": "children", "id": 21, "ids": [22]]])
         let plain = try bar(words)
-        XCTAssertEqual(plain.trailing.map(\.hosted), [false, true, true, true, true, true, true])
+        // A coloured text beside a symbol, which UIKit would not show, and a
+        // material on a label, are drawn as written.
+        XCTAssertEqual(plain.trailing.map(\.hosted), [false, true, true, true, true, true, true, true, true])
         XCTAssertEqual(plain.trailing.first?.title, "Live")
         XCTAssertEqual(Array(plain.trailing.first?.tint?.first?.prefix(3) ?? []), [255, 0, 0], "the words' colour is the item's tint")
-        XCTAssertEqual(plain.trailing.suffix(3).map(\.hostedGlass), [true, true, false], "a link presses; a link in code is words")
+        XCTAssertEqual(plain.trailing[4...6].map(\.hostedGlass), [true, true, false], "a link presses; a link in code is words")
         let fill: [String: Any] = ["background_color": [40, 100, 200, 255], "border_radius": 16]
         let me: (Int) -> [String: Any] = { ["op": "create", "id": $0, "kind": "button", "handlers": ["press"], "props": ["accessibilityLabel": "Me"]] }
         let box: (Int, [String: Any], [String: Any]) -> [String: Any] = { ["op": "create", "id": $0, "kind": "view", "style": fill.merging($1) { $1 }, "props": $2] }
         let badges = route([me(4), box(5, [:], [:]), text(6, "AB"),
                             me(7), box(8, [:], ["backgroundMaterial": "regular"]), text(9, "AB"),
                             me(10), ["op": "create", "id": 11, "kind": "view", "style": fill, "handlers": ["press"]], text(12, "AB"),
-                            me(13), box(14, ["border_width": 1, "border_color": [0, 0, 0, 255]], [:]), text(15, "AB"),
+                            me(13), box(14, ["border_width_top": 1, "border_width_right": 1, "border_width_bottom": 1, "border_width_left": 1, "border_color_top": [0, 0, 0, 255]], [:]), text(15, "AB"),
                             me(16), box(17, [:], [:]), text(18, "AB", style: ["opacity": 0.5, "written": ["opacity"]]),
                             ["op": "create", "id": 19, "kind": "button", "handlers": ["press"], "props": ["accessibilityLabel": "Me"], "style": ["opacity": 0, "written": ["opacity"]]],
-                            box(20, [:], [:]), text(21, "AB")],
-                           kids: [4, 7, 10, 13, 16, 19], more: [["op": "children", "id": 4, "ids": [5]], ["op": "children", "id": 5, "ids": [6]],
+                            box(20, [:], [:]), text(21, "AB"),
+                            me(22), box(23, [:], [:]), text(24, "AB", ["backgroundMaterial": "regular"]),
+                            me(25), box(26, ["opacity": 0.5, "written": ["opacity"]], [:]), text(27, "AB")],
+                           kids: [4, 7, 10, 13, 16, 19, 22, 25], more: [["op": "children", "id": 4, "ids": [5]], ["op": "children", "id": 5, "ids": [6]],
                                                             ["op": "children", "id": 7, "ids": [8]], ["op": "children", "id": 8, "ids": [9]],
                                                             ["op": "children", "id": 10, "ids": [11]], ["op": "children", "id": 11, "ids": [12]],
                                                             ["op": "children", "id": 13, "ids": [14]], ["op": "children", "id": 14, "ids": [15]],
                                                             ["op": "children", "id": 16, "ids": [17]], ["op": "children", "id": 17, "ids": [18]],
-                                                            ["op": "children", "id": 19, "ids": [20]], ["op": "children", "id": 20, "ids": [21]]])
+                                                            ["op": "children", "id": 19, "ids": [20]], ["op": "children", "id": 20, "ids": [21]],
+                                                            ["op": "children", "id": 22, "ids": [23]], ["op": "children", "id": 23, "ids": [24]],
+                                                            ["op": "children", "id": 25, "ids": [26]], ["op": "children", "id": 26, "ids": [27]]])
         let drawn = try bar(badges)
-        XCTAssertEqual(drawn.trailing.map(\.hosted), [false, true, true, true, true, true])
+        XCTAssertEqual(drawn.trailing.map(\.hosted), [false, true, true, true, true, true, true, true])
         XCTAssertEqual(drawn.trailing.first?.badge?.text, "AB")
     }
 
@@ -586,6 +597,13 @@ final class BarHostedIOSTests: XCTestCase {
         spin(0.3)
         XCTAssertEqual(try node("noted").accessibleText, "1", "no press from Home's bar under History's")
         let history = try XCTUnwrap(nav.topViewController)
+        // A native button's words' colour is its item's tint; a filled
+        // button of one compiled text is UIKit's own item.
+        let red = try XCTUnwrap(item("stop", on: history).tintColor, "the words' colour").resolvedColor(with: history.traitCollection)
+        var (r, g, b, a) = (CGFloat(0), CGFloat(0), CGFloat(0), CGFloat(0))
+        red.getRed(&r, green: &g, blue: &b, alpha: &a)
+        XCTAssertTrue(r > 0.8 && g < 0.4 && b < 0.4, "system red, not the bar's tint: \(red)")
+        XCTAssertNil(try item("note-button", on: history).customView, "UIKit's own item")
         try XCTUnwrap(item("about-link", on: history).target as? BarPress).press()
         until("a tap on the item followed the link") { nav.viewControllers.count == 3 }
     }
