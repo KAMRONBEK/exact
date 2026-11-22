@@ -890,7 +890,7 @@ extension Presenter {
                     NSAccessibility.post(element: node.liveAnnouncementView ?? node.paragraphOwner, notification: .announcementRequested,
                         userInfo: [.announcement: text, .priority: (live == "assertive" ? NSAccessibilityPriorityLevel.high : .low).rawValue])
                     #else
-                    UIAccessibility.post(notification: .announcement, argument: NSAttributedString(string: text,
+                    Self.postAnnouncement(NSAttributedString(string: text,
                         attributes: [.accessibilitySpeechQueueAnnouncement: live == "polite"]))
                     #endif
                 }

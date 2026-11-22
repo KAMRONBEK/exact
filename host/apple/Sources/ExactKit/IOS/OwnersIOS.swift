@@ -98,7 +98,8 @@ extension Presenter {
         var at: UIView? = start, crossed = false
         while let cur = at, cur !== target {
             let up = listenerParent(of: cur)
-            // A node lifted over the tab container stays inside its parent's box on the page
+            // Panel siblings stay within their parent's box. Bar items and the
+            // tab accessory are held apart from it.
             crossed = crossed || (up !== cur.superview && (up !== navigation.lifted?.parent(of: cur) || navigation.lifted?.heldApart(cur) == true))
             at = up
         }

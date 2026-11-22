@@ -56,7 +56,7 @@ final class TintEdgesIOSTests: XCTestCase {
         view.layer.render(in: context)
         let at = ((h / 2) * w + Int(Double(w) * x)) * 4
         let alpha = Double(bytes[at + 3])
-        XCTAssertGreaterThan(alpha, 0, "the image draws at its centre")
+        XCTAssertGreaterThan(alpha, 0, "the sampled pixel is painted")
         return (0..<3).map { Double(bytes[at + $0]) * 255 / max(1, alpha) } + [alpha]
     }
 
@@ -70,7 +70,7 @@ final class TintEdgesIOSTests: XCTestCase {
     }
 
     // An original image retains a tint-derived colour, resolved in its image view's traits.
-    // This is the UIKit oracle for the page symbol and readout below.
+    // This is the UIKit oracle for the page symbols below.
     func testOriginalImagesResolveTintDerivedInkWithoutForcingNormal() throws {
         guard !UIApplication.shared.connectedScenes.isEmpty else { throw missing("scene", "an alert needs a scene window") }
         _ = mount()
@@ -178,34 +178,46 @@ final class TintEdgesIOSTests: XCTestCase {
     func testBarFacesDimOnlyTheirTintPartsAndRecover() throws {
         guard !UIApplication.shared.connectedScenes.isEmpty else { throw missing("scene", "an alert needs a scene window") }
         let p = mount()
+        window.tintColor = red
         p.viewport.tintColor = red
         p.apply(wireBatch([
-            ["op": "create", "id": 1, "kind": "view"],
-            ["op": "create", "id": 2, "kind": "button", "handlers": ["press"]],
+            ["op": "create", "id": 1, "kind": "view", "props": ["navigationKey": "tint"]],
+            ["op": "create", "id": 2, "kind": "button", "props": ["testId": "boxes"], "handlers": ["press"]],
             ["op": "create", "id": 3, "kind": "view", "style": ["background_color": tint, "width": 24, "height": 24]],
             ["op": "create", "id": 4, "kind": "view", "style": ["background_color": [0, 255, 0, 255], "width": 24, "height": 24]],
-            ["op": "create", "id": 5, "kind": "button", "handlers": ["press"]],
-            ["op": "create", "id": 6, "kind": "text", "props": ["text": "Go"],
-             "style": ["font_size": 24, "written": ["font_size"]]],
+            ["op": "create", "id": 5, "kind": "button", "props": ["testId": "plain"], "handlers": ["press"]],
+            ["op": "create", "id": 6, "kind": "text", "props": ["text": "Go"]],
             ["op": "create", "id": 7, "kind": "image", "props": ["imageSource": "symbol:sf/square.fill", "symbolName": "square.fill"],
              "style": ["font_size": 24]],
+            ["op": "create", "id": 8, "kind": "view", "props": ["semanticTag": "header"]],
+            ["op": "create", "id": 9, "kind": "text", "props": ["text": "Tint", "accessibilityRole": "heading"]],
+            ["op": "frame", "id": 2, "x": 0, "y": 0, "w": 48, "h": 24],
+            ["op": "frame", "id": 3, "x": 0, "y": 0, "w": 24, "h": 24],
+            ["op": "frame", "id": 4, "x": 24, "y": 0, "w": 24, "h": 24],
             ["op": "children", "id": 5, "ids": [6, 7]],
-            ["op": "children", "id": 2, "ids": [3, 4]], ["op": "children", "id": 1, "ids": [2, 5]], ["op": "roots", "ids": [1]],
+            ["op": "children", "id": 2, "ids": [3, 4]],
+            ["op": "children", "id": 8, "ids": [9, 2, 5]], ["op": "children", "id": 1, "ids": [8]], ["op": "roots", "ids": [1]],
         ]))
         let route = RouteController(try XCTUnwrap(p.views[1]))
-        let nav = p.navigationHost.makeNavigation(first: nil)
+        let nav = p.navigationHost.makeNavigation(first: route.node)
         nav.setViewControllers([route], animated: false)
-        let item = try XCTUnwrap(p.navigationHost.barItems([HeaderShape.Item(try XCTUnwrap(p.views[2]))], route).first)
-        let uncoloured = try XCTUnwrap(p.navigationHost.barItems([HeaderShape.Item(try XCTUnwrap(p.views[5]))], route).first)
-        route.navigationItem.rightBarButtonItems = [item, uncoloured]
+        let shape = try XCTUnwrap(HeaderShape(route: route.node, back: nil, projected: true))
+        let items = p.navigationHost.barItems(Array(shape.trailing.reversed()), route)
+        let hosted = try XCTUnwrap(items.first { $0.accessibilityIdentifier == "boxes" }?.customView)
+        let uncoloured = try XCTUnwrap(items.first { $0.accessibilityIdentifier == "plain" })
+        route.navigationItem.rightBarButtonItems = items
         window.rootViewController = nav
         controller = route
         nav.view.layoutIfNeeded()
+        let button = try XCTUnwrap(p.views[2])
+        XCTAssertTrue(hosted.isDescendant(of: nav.navigationBar))
+        XCTAssertTrue(button.isDescendant(of: hosted))
+        XCTAssertEqual(button.bounds.size, CGSize(width: 48, height: 24))
+        XCTAssertNil(uncoloured.customView)
         func check() throws {
-            let image = UIImageView(image: try XCTUnwrap(item.image)); image.frame.size = CGSize(width: 48, height: 24)
             let current = nav.navigationBar.tintAdjustmentMode == .dimmed ? dimmed(red) : red
-            assertColor(try pixel(image, x: 0.25), current, alpha: Double(current.cgColor.alpha) * 255)
-            assertColor(try pixel(image, x: 0.75), green)
+            assertColor(try pixel(button, x: 0.25), current, alpha: Double(current.cgColor.alpha) * 255)
+            assertColor(try pixel(button, x: 0.75), green)
             let plain = UIImageView(image: try XCTUnwrap(uncoloured.image))
             var ink = current
             if #available(iOS 26.0, *) { ink = UIColor.label.resolvedColor(with: nav.traitCollection) }

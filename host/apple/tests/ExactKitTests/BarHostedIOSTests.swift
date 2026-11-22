@@ -4,11 +4,9 @@ import XCTest
 @testable import ExactKit
 @testable import ExactNavigation
 
-/// A header's hosted items (LLP 1141.004) over hand-built routes: what is one,
-/// what the title takes of them, when one shares the bar's glass, and the
-/// element lifted into its item and back. These presenters have no kernel, so
-/// nothing is laid out; the native fixture's readout, pushed and laid out, is
-/// NavigationBasicsIOSTests'.
+/// A header's hosted items (LLP 1141.004). Hand-built routes check projection
+/// and lifting. The app fixture covers the laid-out bar's input, overflow and
+/// accessibility.
 final class BarHostedIOSTests: XCTestCase {
     private var window: UIWindow!
     private var sessions: [ExactSession] = []
@@ -524,6 +522,160 @@ final class BarHostedIOSTests: XCTestCase {
         return session
     }
 
+    private func node(_ testId: String, in p: Presenter) throws -> NodeView {
+        try XCTUnwrap(p.views.values.first { $0.props["testId"] == testId }, testId)
+    }
+
+    private func item(_ testId: String, on c: UIViewController) throws -> UIBarButtonItem {
+        let items = (c.navigationItem.leftBarButtonItems ?? []) + (c.navigationItem.rightBarButtonItems ?? [])
+        return try XCTUnwrap(items.first { $0.accessibilityIdentifier == testId }, testId)
+    }
+
+    private func tap(_ point: CGPoint, with touch: TouchRunner) throws {
+        var request = try TouchRunner.aim(point, in: window)
+        request["op"] = "tap"
+        XCTAssertEqual(try touch.ask(request)["done"] as? Bool, true)
+    }
+
+    func testATapOnAHostedReadoutPressesItsHeader() throws {
+        guard ProcessInfo.processInfo.environment["EXACT_TOUCH_PORT"] != nil else {
+            throw missing("touch", "a touch in the bar reaches the header through UIKit")
+        }
+        let touch = try TouchRunner(self)
+        defer { touch.connection.cancel() }
+        let session = try session(), p = session.presenter
+        let words = try node("offline-text", in: p), presses = try node("header-presses", in: p)
+        waitFor("the readout's words are laid out in the bar") { words.window != nil && !words.bounds.isEmpty }
+        XCTAssertEqual(presses.accessibleText, "0")
+        try tap(words.convert(CGPoint(x: words.bounds.midX, y: words.bounds.midY), to: window), with: touch)
+        waitFor("the hosted readout's tap pressed the header", cap: 5) { presses.accessibleText == "1" }
+    }
+
+    func testMoreShowsAndFlipsASwitchChangedByTheApp() throws {
+        guard ProcessInfo.processInfo.environment["EXACT_TOUCH_PORT"] != nil else {
+            throw missing("touch", "open UIKit's More menu and choose its entry")
+        }
+        let touch = try TouchRunner(self)
+        defer { touch.connection.cancel() }
+        let session = try session(), p = session.presenter
+        let nav = try XCTUnwrap(p.navigationHost.primaryNavigation)
+        let home = try XCTUnwrap(nav.topViewController)
+        let alerts = try item("alerts-switch", on: home)
+        let switchNode = try node("alerts-switch", in: p), value = try node("alerts", in: p), noted = try node("noted", in: p)
+        waitForActivation(session)
+        XCTAssertEqual((alerts.menuRepresentation as? UIAction)?.state, .off)
+        // Check the offer in the action's batch, before another layout can refresh it.
+        let batch = session.runtime.press(try node("enable-alerts", in: p).id, now: session.now())
+        XCTAssertNil(batch.error)
+        p.apply(batch)
+        XCTAssertEqual(value.accessibleText, "on")
+        XCTAssertEqual((p.controls.controls[switchNode.id] as? UISwitch)?.isOn, true)
+        XCTAssertEqual((alerts.menuRepresentation as? UIAction)?.state, .on, "the action's batch updates the More entry")
+        XCTAssertEqual(noted.accessibleText, "0")
+
+        // A center group in a navigator bar goes into UIKit's More menu.
+        let navigationItem = home.navigationItem
+        UIView.performWithoutAnimation {
+            navigationItem.style = .navigator
+            navigationItem.rightBarButtonItems = nil
+            navigationItem.centerItemGroups = [UIBarButtonItemGroup(barButtonItems: [alerts], representativeItem: nil)]
+            nav.navigationBar.layoutIfNeeded()
+        }
+        var morePoint: CGPoint?
+        waitFor("UIKit's More button is hit-testable") {
+            guard let frame = navigationItem.overflowPresentationSource?.frame(in: self.window), !frame.isEmpty else { return false }
+            let point = CGPoint(x: frame.midX, y: frame.midY)
+            guard let hit = self.window.hitTest(point, with: nil),
+                  sequence(first: hit, next: \.superview).prefix(while: { $0 !== nav.navigationBar }).contains(where: { $0 is UIControl }) else { return false }
+            morePoint = point
+            return true
+        }
+        let point = try XCTUnwrap(morePoint)
+        let bar = try XCTUnwrap(touch.ask(["op": "tree"])["elements"] as? [[String: Any]])
+        XCTAssertTrue(bar.contains { $0["label"] as? String == "More" })
+        var entry: [String: Any]?, labels: [String] = [], snapshotError: Error?
+        func menuShowsAlerts() -> Bool {
+            if entry == nil && snapshotError == nil {
+                do {
+                    let elements = try XCTUnwrap(touch.ask(["op": "tree"])["elements"] as? [[String: Any]])
+                    labels = elements.compactMap { $0["label"] as? String }
+                    entry = elements.first { $0["label"] as? String == "Alerts" }
+                } catch { snapshotError = error }
+            }
+            return entry != nil || snapshotError != nil
+        }
+        try tap(point, with: touch)
+        waitFor("More opens", cap: 2, onFailure: { _ in }, menuShowsAlerts)
+        // UIKit can drop the first gesture after the previous test's window closes.
+        if entry == nil && snapshotError == nil {
+            try tap(point, with: touch)
+            waitFor("More contains Alerts", cap: 6, facts: { "labels: \(labels)" }, menuShowsAlerts)
+        }
+        if let snapshotError { throw snapshotError }
+        let shown = try XCTUnwrap(entry)
+        XCTAssertEqual(shown["selected"] as? Bool, true, "More's Alerts entry is checked")
+        let frame = try XCTUnwrap(shown["frame"] as? [Double])
+        try tap(CGPoint(x: frame[0] + frame[2] / 2, y: frame[1] + frame[3] / 2), with: touch)
+        waitFor("More flipped the switch and dispatched its press", cap: 5) { value.accessibleText == "off" && noted.accessibleText == "1" }
+    }
+
+    private func stops(in object: NSObject) -> [NSObject] {
+        if let view = object as? UIView, view.isHidden || view.accessibilityElementsHidden { return [] }
+        if object.isAccessibilityElement { return [object] }
+        let children = object.accessibilityElements ?? (object as? UIView)?.subviews ?? []
+        return children.compactMap { $0 as? NSObject }.flatMap { stops(in: $0) }
+    }
+
+    func testHostedReadoutsSpeakTheirLabelOnceAndKeepTheirControls() throws {
+        guard UIApplication.shared.connectedScenes.first is UIWindowScene else {
+            throw missing("scene", "UIKit lays out the bar in the app window")
+        }
+        let session = try session(), p = session.presenter
+        let nav = try XCTUnwrap(p.navigationHost.primaryNavigation)
+        let home = try XCTUnwrap(nav.topViewController)
+        let view = try XCTUnwrap(item("offline", on: home).customView)
+        let ready = try XCTUnwrap(item("sync-status", on: home).customView)
+        waitFor("both readouts are laid out in the bar") {
+            [view, ready].allSatisfy { $0.isDescendant(of: nav.navigationBar) && !$0.bounds.isEmpty }
+        }
+        nav.navigationBar.layoutIfNeeded()
+        let passive = stops(in: ready)
+        XCTAssertEqual(passive.map(\.accessibilityLabel), ["Ready"])
+        XCTAssertEqual(passive.map(\.accessibilityTraits), [.staticText])
+        let readout = stops(in: view)
+        XCTAssertEqual(readout.map(\.accessibilityLabel), ["Offline, retried 0", "Retry", "Details"])
+        let element = try XCTUnwrap(readout.first)
+        XCTAssertEqual(element.accessibilityTraits, .staticText)
+        XCTAssertEqual(element.accessibilityFrame, UIAccessibility.convertToScreenCoordinates(view.bounds, in: view))
+        XCTAssertTrue(readout.dropFirst().allSatisfy { $0.accessibilityTraits.contains(.button) })
+        p.press(try node("retry", in: p).id)
+        waitFor("the accessibility element's label follows the readout", cap: 5) { element.accessibilityLabel == "Offline, retried 1" }
+    }
+
+    func testAHostedReadoutAnnouncesAnUpdateOnce() throws {
+        guard UIApplication.shared.connectedScenes.first is UIWindowScene else {
+            throw missing("scene", "the readout announces from the bar in the app window")
+        }
+        let session = try session(), p = session.presenter
+        let nav = try XCTUnwrap(p.navigationHost.primaryNavigation)
+        let home = try XCTUnwrap(nav.topViewController)
+        let view = try XCTUnwrap(item("sync-status", on: home).customView)
+        waitFor("the readout is laid out in the bar") { view.isDescendant(of: nav.navigationBar) && view.window != nil && !view.bounds.isEmpty }
+        waitForActivation(session)
+
+        var announcements: [NSAttributedString] = []
+        let post = Presenter.postAnnouncement
+        Presenter.postAnnouncement = { announcements.append($0) }
+        defer { Presenter.postAnnouncement = post }
+        p.press(try node("retry", in: p).id)
+        waitFor("the readout displays the updated words", cap: 5) { self.stops(in: view).first?.accessibilityLabel == "Retrying" }
+        waitForMainQueue()
+        XCTAssertEqual(announcements.map(\.string), ["Retrying"])
+        XCTAssertEqual(announcements.first?.attribute(.accessibilitySpeechQueueAnnouncement, at: 0, effectiveRange: nil) as? Bool, true)
+        p.syncAccessibility()
+        XCTAssertEqual(announcements.count, 1)
+    }
+
     /// What a link item and a hosted item do (LLP 1141.004 D1, D3): a link
     /// is UIKit's item and follows its `href` under the agent's tap and under
     /// a tap on the item; in UIKit's overflow menu a hosted switch flips, its
@@ -533,12 +685,9 @@ final class BarHostedIOSTests: XCTestCase {
     func testALinkItemAndAHostedItemDoWhatTheElementDoes() throws {
         guard UIApplication.shared.connectedScenes.first is UIWindowScene else { throw missing("scene", "a switch sends its actions through the app, which a hosted test has") }
         let session = try session(), p = session.presenter
-        func node(_ testId: String) throws -> NodeView { try XCTUnwrap(p.views.values.first { $0.props["testId"] == testId }, testId) }
+        func node(_ testId: String) throws -> NodeView { try self.node(testId, in: p) }
         let nav = try XCTUnwrap(p.navigationHost.primaryNavigation)
         let home = try XCTUnwrap(nav.topViewController as? RouteController)
-        func item(_ testId: String, on c: UIViewController) throws -> UIBarButtonItem {
-            try XCTUnwrap((c.navigationItem.rightBarButtonItems ?? []).first { $0.accessibilityIdentifier == testId }, testId)
-        }
         let row = try item("live-row", on: home), offline = try item("offline", on: home)
         XCTAssertTrue(row.customView is HostedItemView && offline.customView is HostedItemView)
         // A row and a readout do nothing of their own: each is its name,

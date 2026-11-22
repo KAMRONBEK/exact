@@ -37,6 +37,7 @@ final class HostedItemView: UIView {
     /// margin is not kept (LLP 1141.004 D3).
     private(set) var size = CGSize.zero
     private var relay: MountRelay?
+    private var readout: UIAccessibilityElement?
 
     init(node: NodeView, parent: NodeView) {
         self.node = node
@@ -47,16 +48,66 @@ final class HostedItemView: UIView {
     }
     required init?(coder: NSCoder) { nil }
 
-    /// Follow the element's laid-out size, and its logical ancestors' `aria-hidden`
-    /// and `inert`, which UIKit does not see past the lift; whether the size changed.
+    /// Follow the element's laid-out size and accessibility. UIKit does not
+    /// see `aria-hidden` and `inert` on logical ancestors past the lift.
+    /// Returns whether the size changed.
     func refit() -> Bool {
         let hidden = node.inert || node.authoredLine.contains { $0.props["accessibilityElementsHidden"] == "true" }
         if accessibilityElementsHidden != hidden { accessibilityElementsHidden = hidden }
+        updateReadout(hidden: hidden)
         let laid = CGSize(width: max(0, node.frame.maxX), height: max(0, node.frame.maxY))
         guard laid != size else { return false }
         size = laid
         resize()
         return true
+    }
+
+    private func updateReadout(hidden: Bool) {
+        guard !hidden, !node.cssVisibilityHidden, node.props["accessibilityRole"] == "status" else {
+            readout = nil
+            return
+        }
+        let element = readout ?? UIAccessibilityElement(accessibilityContainer: self)
+        let label = node.accessibleName
+        if element.accessibilityLabel != label { element.accessibilityLabel = label }
+        if readout == nil {
+            element.accessibilityTraits = .staticText
+            element.accessibilityFrameInContainerSpace = bounds
+            readout = element
+        }
+    }
+
+    override var accessibilityElements: [Any]? {
+        get {
+            guard let readout else { return super.accessibilityElements }
+            return [readout as NSObject] + Self.readoutControls(in: stand)
+        }
+        set { super.accessibilityElements = newValue }
+    }
+
+    /// The readout speaks for its passive content. Its controls keep their
+    /// own stops, in the order their UIKit containers expose them.
+    private static func readoutControls(in object: NSObject) -> [NSObject] {
+        let view = object as? UIView
+        if let view, view.isHidden || view.alpha <= 0.01 || view.accessibilityElementsHidden { return [] }
+        if object.isAccessibilityElement {
+            let traits: UIAccessibilityTraits = [.button, .link, .adjustable, .toggleButton, .searchField]
+            let control = object is UIControl || object.accessibilityRespondsToUserInteraction
+                || !object.accessibilityTraits.intersection(traits).isEmpty
+            return control ? [object] : []
+        }
+        let children: [Any]
+        if let declared = object.accessibilityElements {
+            children = declared
+        } else {
+            let count = object.accessibilityElementCount()
+            if count > 0, count != NSNotFound {
+                children = (0..<count).compactMap { object.accessibilityElement(at: $0) }
+            } else {
+                children = NodeView.accessibilityOrder(view?.subviews ?? [])
+            }
+        }
+        return children.compactMap { $0 as? NSObject }.flatMap { readoutControls(in: $0) }
     }
 
     /// UIKit sizes a bar item's custom view by its frame where it has no
@@ -74,6 +125,7 @@ final class HostedItemView: UIView {
         super.layoutSubviews()
         let frame = CGRect(x: inset, y: (bounds.height - size.height) / 2, width: size.width, height: size.height)
         if stand.frame != frame { stand.frame = frame }
+        readout?.accessibilityFrameInContainerSpace = bounds
     }
 }
 
@@ -257,6 +309,7 @@ final class BarHosted: LiftedNodes {
     // MARK: LiftedNodes
 
     func parent(of view: UIView) -> NodeView? { (view.superview as? HostedStand)?.parent }
+    func heldApart(_ view: UIView) -> Bool { parent(of: view) != nil }
 
     func holds(_ node: NodeView, under parent: NodeView) -> Bool {
         guard let entry = hosted[node.id] else { return false }
@@ -284,10 +337,14 @@ final class BarHosted: LiftedNodes {
 
     /// After a batch: each item follows its element's laid-out size.
     func place() {
-        for (id, entry) in hosted {
-            name(id)
+        for entry in hosted.values {
             if entry.view.refit() { entry.route?.navigationController?.navigationBar.setNeedsLayout() }
         }
+    }
+
+    /// Read the switch state once the control host has applied the batch.
+    func refreshOverflow() {
+        for id in hosted.keys { name(id) }
     }
 
     func focusChildren(of view: UIView) -> [UIView] { view.subviews }
@@ -301,6 +358,7 @@ final class LiftedPair: LiftedNodes {
     let first: any LiftedNodes, second: any LiftedNodes
     init(_ first: any LiftedNodes, _ second: any LiftedNodes) { (self.first, self.second) = (first, second) }
     func parent(of view: UIView) -> NodeView? { first.parent(of: view) ?? second.parent(of: view) }
+    func heldApart(_ view: UIView) -> Bool { first.heldApart(view) || second.heldApart(view) }
     func holds(_ node: NodeView, under parent: NodeView) -> Bool { first.holds(node, under: parent) || second.holds(node, under: parent) }
     func children(_ parent: NodeView, _ ids: [UInt32], _ want: [NodeView]) {
         first.children(parent, ids, want)
