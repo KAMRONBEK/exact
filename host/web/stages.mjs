@@ -95,12 +95,14 @@ export class Unsplittable extends Error {}
 /** Each stage's functions (raw names) in `named`, a wasm that keeps its name
  * section: what its seam reaches and the core does not. Throws an `Error`,
  * which fails the build, when no function matches a seam or the call graph
- * shows the core calling one directly (LLP 1047.000 §9). Throws `Unsplittable`
- * when the call graph cannot be read, or cannot show that the seam is the one
- * way into the stage that the glue gates: the seam is exported or not in
- * exactly one table slot, or its pattern matches functions of two crates. */
+ * shows the core, a start function included, calling one directly (LLP
+ * 1047.000 §9). Throws `Unsplittable` when the call graph cannot be read, or
+ * cannot show that the seam is the one way into the stage that the glue gates:
+ * the seam is exported or not in exactly one table slot, its pattern matches
+ * functions of two crates, or the module has a start function, which runs at
+ * instantiation and may call through the table before any stage loads. */
 export function planStages(named, stages = STAGES) {
-  const { nodes, calls, callers } = callGraph(named), raw = [...nodes.keys()];
+  const { nodes, calls, callers, start } = callGraph(named), raw = [...nodes.keys()];
   const plain = run('c++filt', [], { input: raw.join('\n') }).stdout.split('\n');
   const demangled = new Map(raw.map((name, i) => [name, normalizeDemangled(plain[i] ?? name)]));
   const seams = new Map(stages.map(stage => [stage.name, raw.filter(name => stage.seam.test(name))]));
@@ -116,9 +118,12 @@ export function planStages(named, stages = STAGES) {
     return seen;
   };
   const core = reach(raw.filter(name => nodes.get(name).root && !all.has(name)), all);
+  const crates = new Map(stages.map(stage => [stage.name, new Set(seams.get(stage.name).map(entry => stage.seam.exec(entry)[1]))]));
   for (const stage of stages) {
     const seam = seams.get(stage.name);
     if (!seam.length) throw new Error(`stage ${stage.name}: no function matches its seam ${stage.seam}`);
+    // Which of two crates' matches is the seam is unknown, so a call to one is no evidence.
+    if (crates.get(stage.name).size > 1) continue;
     for (const entry of seam) {
       // A seam the core calls directly may be in no slot, once nothing takes its address, which would otherwise ship
       // the module whole.
@@ -126,10 +131,10 @@ export function planStages(named, stages = STAGES) {
       if (direct.length) throw new Error(`stage ${stage.name}: the core calls its seam ${demangled.get(entry)} directly from ${direct.slice(0, 3).map(c => demangled.get(c)).join(', ')}`);
     }
   }
+  if (start !== null) throw new Unsplittable(`${named} has a start function, which runs at instantiation and may call through the table into a stage before it loads`);
   return stages.map((stage) => {
-    const seam = seams.get(stage.name);
-    const crates = new Set(seam.map(entry => stage.seam.exec(entry)[1]));
-    if (crates.size > 1) throw new Unsplittable(`stage ${stage.name}: its seam ${stage.seam} matches functions of ${crates.size} crates, so another crate shares the SDK's path`);
+    const seam = seams.get(stage.name), { size } = crates.get(stage.name);
+    if (size > 1) throw new Unsplittable(`stage ${stage.name}: its seam ${stage.seam} matches functions of ${size} crates, so another crate shares the SDK's path`);
     for (const entry of seam) {
       // The glue gates a seam's one table slot. An export, or another slot (a function wasm-opt merged with the seam
       // once filled its own), is a way the core may call the stage before it loads.
@@ -141,16 +146,21 @@ export function planStages(named, stages = STAGES) {
 }
 
 /** Binaryen's call graph of the module at `named`: each function's node (exported, the table slots it fills, the
- * start function, which runs at instantiation, rooted as they are), and its calls each way. */
+ * start function rooted as they are), its calls each way, and the start function's name or null. */
 function callGraph(named) {
+  const start = startFunction(readFileSync(named));
   const graph = run('wasm-opt', [named, '--print-function-map', '--print-call-graph', ...FEATURES, '-o', devNull]);
   if (graph.status !== 0) throw new Error(`wasm-opt --print-call-graph failed: ${graph.stderr}`);
-  // The printer writes names unescaped, so the graph is read only when every function's name, as the function map
-  // printed first gives it, one `index:name` line each, holds no quote or line break.
-  const [map, dot] = graph.stdout.split(/^digraph call \{$/m);
-  const names = map.split('\n').slice(0, -1).map((line, i) => line.startsWith(`${i}:`) ? line.slice(`${i}:`.length) : null);
+  // The printer writes names unescaped, so the graph is read only when the function map printed first, one
+  // `index:name` line each, and the graph's nodes name the same distinct functions, none holding a quote: a line break
+  // in a name adds a map line and splits the name's node and edge lines, and one before a line that reads as the
+  // graph's header ends the map early.
+  const parts = graph.stdout.replaceAll('\r\n', '\n').split(/^digraph call \{$/m);
+  const names = parts[0].split('\n').slice(0, -1).map((line, i) => line.startsWith(`${i}:`) ? line.slice(`${i}:`.length) : null);
   const unreadable = () => new Unsplittable(`${named}: a function name holds a quote or a line break, which the call graph prints unescaped, so its calls cannot be read`);
-  if (names.some(name => name === null || name.includes('"'))) throw unreadable();
+  if (parts.length !== 2 || names.some(name => name === null || name.includes('"'))
+    || new Set(names).size !== names.length) throw unreadable();
+  const dot = parts[1];
   const nodes = new Map(), calls = new Map(), callers = new Map();
   // The graph's key is a subgraph of example nodes, which a function may share a name with ("B").
   let key = false;
@@ -173,11 +183,9 @@ function callGraph(named) {
       nodes.set(node[1], { ...seen, root: seen.exported || seen.slots > 0 });
     }
   }
-  // A line break the map's lines did not show splits the last name's node line.
-  if (names.some(name => !nodes.has(name))) throw unreadable();
-  const start = startFunction(readFileSync(named));
+  if (nodes.size !== names.length || names.some(name => !nodes.has(name))) throw unreadable();
   if (start !== null) nodes.get(names[start]).root = true;
-  return { nodes, calls, callers };
+  return { nodes, calls, callers, start: start === null ? null : names[start] };
 }
 
 /** The index of the start function of the module in `bytes`, from its start section (id 8), or null. */

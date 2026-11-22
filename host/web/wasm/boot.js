@@ -1,4 +1,4 @@
-import { host, loadAfterPaint, localAssetURL, agentMode, now, collections, followOffset, readOut, root, log, pageNative, loadPageNative, pieces, mutate, REPLACE_SETTLE_MS, waiting, encoder, writeIn, loadStage, focus, ask, presence, arrange, motion, views, retiredViews, followedScrolls, followScroll, pendingScrolls, lists, messageFrames, messageViews, controllers, forgettable, inflight, heldAsks, pageFacts, loadGpuIfNeeded, moduleCall, rustImports, dataImports, t0, agentKeepsStore, decoder, assetNamespace, documentsGlue, AGENT_ADMITTED, httpHelpers } from "../glue.js";
+import { host, loadAfterPaint, localAssetURL, agentMode, now, collections, followOffset, readOut, root, log, pageNative, loadPageNative, pieces, mutate, REPLACE_SETTLE_MS, waiting, encoder, writeIn, loadStage, stageLoaded, focus, ask, presence, arrange, motion, views, retiredViews, followedScrolls, followScroll, pendingScrolls, lists, messageFrames, messageViews, controllers, forgettable, inflight, heldAsks, pageFacts, loadGpuIfNeeded, moduleCall, rustImports, dataImports, t0, agentKeepsStore, decoder, assetNamespace, documentsGlue, AGENT_ADMITTED, httpHelpers } from "../glue.js";
 import { send, applyBatch } from "./commit.js";
 import { navigation, launchLocation, launchVisits, reportTime, reportPlace, preferences, updateCode, foldBits, appRootFontSize, releaseAssets, afterPaint, grantOrigins, modalLayers, inertAncestor, editMenu } from "../navigation.js";
 import { setInputReady } from "./input.js";
@@ -55,7 +55,7 @@ function stopModule(error) {
   host.textflow = null;
   root.dataset.error = String(error);
   const unloaded = error instanceof StageNotLoaded
-    ? "; a call into a stage waits for the stage to load (glue.js `loadStage`, LLP 1047.000 §9): the stack names the caller that did not, and a development build, which is whole, shows the page without the split"
+    ? "; every call into a stage waits for it to load (glue.js `loadStage`, LLP 1047.000 §9): the stack names the caller that entered it before it loaded, and a development build, which is whole, shows the page without the split"
     : "";
   console.error(`exact: app.wasm trapped, and the page no longer calls it${unloaded}:`, error);
   globalThis.exact.onTrap?.(error);
@@ -725,7 +725,14 @@ export async function main() {
         views,
         retiredViews,
         agentMode,
-        pick: el => loadStage("inspection").then(() => ask({ op: "showPicker", view: Number(el.dataset.view) })),
+        pick: el => {
+          const view = Number(el.dataset.view), at = host.incarnation, hold = () => ask({ op: "showPicker", view });
+          if (stageLoaded("inspection")) return hold();
+          // The hold is for this input only if it is still the live one once the stage has loaded.
+          loadStage("inspection").then(() => {
+            if (host.incarnation === at && views.get(view) === el && !retiredViews.has(el)) hold();
+          }).catch(console.error);
+        },
         ready: () => host.inputReady,
         inertAncestor,
         editMenu,
