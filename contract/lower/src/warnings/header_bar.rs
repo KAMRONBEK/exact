@@ -192,6 +192,34 @@ fn title_row(row: Visit<'_>) -> bool {
     heading
 }
 
+/// One of the bar's places (the heading passed, the subtitle, the search
+/// field, the tablist) at a point of the walk, over every way the header's
+/// `if`s and `match`es can go: free in all, taken in all, or taken in some.
+/// What an element is because of a place (a second search field, a text
+/// after the subtitle) is said only when it holds in all: it holds whenever
+/// the element shows.
+#[derive(Clone, Copy, Default, PartialEq)]
+enum Place {
+    #[default]
+    Free,
+    Maybe,
+    Taken,
+}
+
+impl Place {
+    /// After a choice: taken in every arm, free in every arm, or neither.
+    fn join(arms: impl IntoIterator<Item = Place>) -> Place {
+        let arms: Vec<Place> = arms.into_iter().collect();
+        if arms.iter().all(|p| *p == Place::Taken) {
+            Place::Taken
+        } else if arms.iter().all(|p| *p == Place::Free) {
+            Place::Free
+        } else {
+            Place::Maybe
+        }
+    }
+}
+
 /// What the walk of one header has seen.
 #[derive(Default)]
 struct Bar<'a> {
@@ -202,11 +230,14 @@ struct Bar<'a> {
     /// headings counted may not be all.
     doubt: bool,
     /// The heading has been passed, in document order.
-    passed: bool,
-    subtitle: bool,
+    passed: Place,
+    subtitle: Place,
+    /// The subtitle when it is a line of glyphs, which segments displace
+    /// into an item of its own.
+    line: Option<Span>,
     avatar: bool,
-    search: bool,
-    tablist: bool,
+    search: Place,
+    tablist: Place,
     tap: bool,
     /// A bar item, a readout, a search field or a tablist: what a header
     /// with no heading needs to be the bar.
@@ -287,15 +318,12 @@ fn check_header(header: Visit<'_>, content: &[Visit<'_>], out: &mut Vec<LowerErr
         && !bar.avatar
         && bar.unplaced.is_empty()
         && bar.hosted.is_empty();
-    if bar.headings != 1 && !untitled {
-        // A heading in each arm of a choice, and none outside it: one heading
-        // whichever arm shows, so what the bar leaves out is still named.
-        if bar.headings == 0
-            && !bar.arm_headings.is_empty()
-            && bar.arm_headings.iter().all(|h| *h == 1)
-        {
-            left_out(&bar, header, out);
-        }
+    // A heading in each arm of a choice, and none outside it: one heading
+    // whichever arm shows.
+    let armed = bar.headings == 0
+        && !bar.arm_headings.is_empty()
+        && bar.arm_headings.iter().all(|h| *h == 1);
+    if bar.headings != 1 && !untitled && !armed {
         if !bar.doubt {
             out.push(LowerError {
                 id: "lower-header-no-bar",
@@ -315,15 +343,21 @@ fn check_header(header: Visit<'_>, content: &[Visit<'_>], out: &mut Vec<LowerErr
         }
         return;
     }
-    if let Some(title) = bar.title {
+    if let (1, Some(title)) = (bar.headings, bar.title) {
         title::title_twice(title, content, out);
+    }
+    // Beside a tablist's segments the title has no room for a line of
+    // glyphs: it is an item of its own (`HeaderShape.presented`).
+    if let (Place::Taken, Some(span)) = (bar.tablist, bar.line) {
+        let what = "this line of glyphs (segments take the title)".to_string();
+        bar.hosted.push((span, what));
     }
     left_out(&bar, header, out);
     for (span, what) in bar.unplaced {
         out.push(LowerError {
             id: "lower-header-unplaced",
             message: format!(
-                "{what} in this route's `header` is not shown on iOS: the navigation bar there shows each element outside the box around the heading as an item, drawn as written, but of that box only the title (the heading, the symbol images beside it in its own row, the text after it, an avatar before it); it has one place for a search field and one for a tablist, and a button that presses nothing is no item. Move it out of the heading's box, so it is an item of its own, or below the `header`, into the route's content; make it a button that presses, or, if it is a status that nothing presses (a \"● Live\" beside the title), give it `role=\"status\"`; or, for a header the bar cannot hold (a chat's avatar beside the name), say `navigationBar=\"none\"` on the route's element and draw the row yourself (docs/recipes/chat-header.md; docs/contract-for-agents.md, \"Tabs and stacks\")"
+                "{what} in this route's `header` is not shown on iOS: the navigation bar there shows each element outside the box around the heading as an item, drawn as written, but of that box only the title (the heading, the symbol images beside it in its own row, the text after it, an avatar before it); it has one place for a search field and one for a tablist, and a button that presses nothing is no item. Move it out of the heading's box, so it is an item of its own, or below the `header`, into the route's content; make it a button that presses, or, if it is a status that nothing presses (a \"● Live\" beside the title), give it `role=\"status\"`; or, for a header the bar cannot hold, say `navigationBar=\"none\"` on the route's element and draw the row yourself (docs/recipes/chat-header.md; docs/contract-for-agents.md, \"Tabs and stacks\")"
             ),
             span,
         });
@@ -363,13 +397,12 @@ fn walk_region<'a>(region: Structure<'a>, start: (bool, bool, bool), bar: &mut B
 }
 
 impl<'a> Bar<'a> {
-    /// A choice's arms, each read alone from the places taken before it:
-    /// what each hides or hosts is named, and nothing in one counts against
-    /// another. After it, a place any arm took (the heading passed, the
-    /// subtitle, the search field, the tablist) is taken, as it is in that
-    /// arm's header.
+    /// A choice's arms, each read alone from the places as they stand
+    /// before it: what each hides or hosts is named, and nothing in one
+    /// counts against another. After it, each place is `Place::join` of the
+    /// arms'.
     fn arms(&mut self, choice: Visit<'a>, state: (bool, bool, bool)) {
-        let mut after = (self.passed, self.subtitle, self.search, self.tablist);
+        let mut ends = Vec::new();
         for arm in choice.regions() {
             let mut one = Bar {
                 passed: self.passed,
@@ -384,12 +417,11 @@ impl<'a> Bar<'a> {
             self.unplaced.extend(one.unplaced);
             self.arm_headings.push(one.headings);
             self.arm_headings.extend(one.arm_headings);
-            after.0 |= one.passed;
-            after.1 |= one.subtitle;
-            after.2 |= one.search;
-            after.3 |= one.tablist;
+            ends.push([one.passed, one.subtitle, one.search, one.tablist]);
         }
-        (self.passed, self.subtitle, self.search, self.tablist) = after;
+        let join = |i: usize| Place::join(ends.iter().map(|e| e[i]));
+        (self.passed, self.subtitle, self.search, self.tablist) =
+            (join(0), join(1), join(2), join(3));
     }
 }
 
@@ -400,30 +432,34 @@ impl<'a> Bar<'a> {
     fn visit(&mut self, node: Visit<'a>, glyphs: bool, title: bool, kept: bool) -> bool {
         let bar = self;
         let span = node.span();
-        // What its author keeps stays in the page. Outside the heading's box
-        // the bar shows the rest as an item; inside, the title shows only its
-        // own parts.
-        let mut hide = |what: String| match (kept, title) {
-            (true, _) => {}
-            (false, true) => bar.unplaced.push((span, what)),
-            (false, false) => bar.hosted.push((span, what)),
+        // Outside the heading's box the bar shows it as an item; inside, the
+        // title shows only its own parts.
+        let mut hide = |what: String| match title {
+            true => bar.unplaced.push((span, what)),
+            false => bar.hosted.push((span, what)),
         };
-        match part(node) {
+        let part = part(node);
+        // What its author keeps takes no place of the bar's; only the
+        // heading in it is looked for.
+        if kept && !matches!(part, Part::Heading | Part::Doubt | Part::Hidden) {
+            return holds_heading(node);
+        }
+        match part {
             Part::Doubt => bar.doubt = true,
             Part::Hidden => {}
             Part::Heading => {
                 bar.headings += 1;
                 bar.title = Some(node);
-                bar.passed = true;
+                bar.passed = Place::Taken;
             }
-            Part::Search if !bar.search => (bar.search, bar.placed) = (true, true),
-            Part::Tablist if !bar.tablist => (bar.tablist, bar.placed) = (true, true),
-            Part::Search => bar
+            Part::Search if bar.search == Place::Taken => bar
                 .unplaced
                 .push((span, "a second `input type=\"search\"`".into())),
-            Part::Tablist => bar
+            Part::Tablist if bar.tablist == Place::Taken => bar
                 .unplaced
                 .push((span, "a second `role=\"tablist\"`".into())),
+            Part::Search => (bar.search, bar.placed) = (Place::Taken, true),
+            Part::Tablist => (bar.tablist, bar.placed) = (Place::Taken, true),
             // A pressable box around the heading is the title, tapped.
             Part::Pressable if !bar.tap && has_press(node) && holds_heading(node) => {
                 bar.tap = true;
@@ -439,17 +475,33 @@ impl<'a> Bar<'a> {
             Part::Status if holds_heading(node) => return true,
             Part::Status => {
                 bar.placed = true;
-                if !kept {
-                    let what = "this readout (`role=\"status\"`)".to_string();
-                    bar.readouts.push((span, what));
-                }
+                let what = "this readout (`role=\"status\"`)".to_string();
+                bar.readouts.push((span, what));
             }
-            Part::Text if kept => {}
-            Part::Text if bar.passed && !bar.subtitle => bar.subtitle = true,
-            Part::Text if bar.passed => hide("this text, after the subtitle,".into()),
-            Part::Text => hide("this text, before the heading,".into()),
-            Part::Box if bar.passed && !bar.subtitle && glyph_line(node) => bar.subtitle = true,
-            Part::Box if !bar.passed && !bar.avatar && filled(node) && !holds_heading(node) => {
+            // The first text after the heading is the subtitle; one whose
+            // place depends on how a choice goes is given the benefit.
+            Part::Text => match (bar.passed, bar.subtitle) {
+                (Place::Taken, Place::Taken) => hide("this text, after the subtitle,".into()),
+                (Place::Free, _) => hide("this text, before the heading,".into()),
+                (Place::Taken, _) => bar.subtitle = Place::Taken,
+                (Place::Maybe, _) => bar.subtitle = Place::join([bar.subtitle, Place::Taken]),
+            },
+            Part::Box
+                if bar.passed == Place::Taken
+                    && bar.subtitle != Place::Taken
+                    && glyph_line(node) =>
+            {
+                if bar.subtitle == Place::Free && !title {
+                    bar.line = Some(span);
+                }
+                bar.subtitle = Place::Taken;
+            }
+            Part::Box
+                if bar.passed != Place::Taken
+                    && !bar.avatar
+                    && filled(node)
+                    && !holds_heading(node) =>
+            {
                 bar.avatar = true;
             }
             Part::Box if holds_placed(node) => return true,
@@ -549,10 +601,10 @@ fn mac_button(button: Visit<'_>) -> bool {
     all(button, &mut pictures) && pictures <= 1
 }
 
-/// Whether the Mac's toolbar shows a tablist as its segments
+/// Whether the Mac's toolbar may show a tablist as its segments
 /// (`HeaderMac.titleTabs`): two or more tabs, each a `button role="tab"` that
-/// presses and shows its words alone. Tabs the compiler cannot count (an
-/// `if`, a `for`, a use) are given the benefit.
+/// presses and shows a title alone. Tabs or titles the compiler cannot see
+/// (an `if`, a `for`, a use, a computed text) are given the benefit.
 fn mac_tabs(list: Visit<'_>) -> bool {
     let mut tabs = 0;
     for k in list.children() {
@@ -564,10 +616,7 @@ fn mac_tabs(list: Visit<'_>) -> bool {
         let Some(("button", _, attrs)) = k.element() else {
             return false;
         };
-        let words = k
-            .children()
-            .all(|t| matches!(t.element(), Some(("text", _, _))));
-        if literal(attrs, "role") != Some("tab") || !has(attrs, "press") || !words {
+        if literal(attrs, "role") != Some("tab") || !has(attrs, "press") || !mac_title(k) {
             return false;
         }
         tabs += 1;
@@ -575,46 +624,90 @@ fn mac_tabs(list: Visit<'_>) -> bool {
     tabs >= 2
 }
 
+/// Whether a tab shows a title alone: texts and nothing else, one of them
+/// words (an `aria-label` is no title).
+fn mac_title(tab: Visit<'_>) -> bool {
+    let mut words = false;
+    for t in tab.children() {
+        match (part(t), t.element()) {
+            (Part::Hidden, _) => {}
+            (Part::Doubt, _) => words = true,
+            (_, Some(("text", positional, _))) => {
+                words |= !matches!(positional.first(), Some(Expr::Str(s, _)) if s.is_empty());
+            }
+            _ => return false,
+        }
+    }
+    words
+}
+
 /// The first part of `header` the Mac's toolbar has no place for, and why, as
 /// `HeaderMac.read` decides (LLP 1115.002 D2): it walks boxes, takes the
 /// heading, the first text after it as the window's subtitle, the buttons
-/// whose face an item shows, the readouts it draws, one search field and a
-/// tablist of titles; anything else keeps the whole header in the page. Each
-/// arm of a choice is read alone, as if taken, from the places taken before
-/// it.
+/// whose face an item shows, the readouts it draws, one search field of its
+/// own and one tablist of titles; anything else keeps the whole header in
+/// the page. Each arm of a choice is read alone from the places as they
+/// stand before it, and what a part is because of a place (a second search
+/// field, a text after the subtitle) is said only when it holds however the
+/// choices go (`Place`).
 fn mac_refusal(header: Visit<'_>) -> Option<(Span, &'static str)> {
+    // The heading passed, the subtitle, the search field, the tablist.
+    const PASSED: usize = 0;
+    const SUBTITLE: usize = 1;
+    const SEARCH: usize = 2;
+    const TABLIST: usize = 3;
     fn walk<'a>(
         nodes: impl Iterator<Item = Visit<'a>>,
-        passed: &mut bool,
-        subtitle: &mut bool,
+        at: &mut [Place; 4],
     ) -> Option<(Span, &'static str)> {
         for k in nodes {
             let what = match part(k) {
                 _ if k.is_choice() => {
-                    let mut after = (*passed, *subtitle);
+                    let mut ends = Vec::new();
                     for arm in k.regions() {
-                        let (mut p, mut s) = (*passed, *subtitle);
-                        if let Some(found) = walk(arm.roots(), &mut p, &mut s) {
+                        let mut one = *at;
+                        if let Some(found) = walk(arm.roots(), &mut one) {
                             return Some(found);
                         }
-                        (after.0, after.1) = (after.0 || p, after.1 || s);
+                        ends.push(one);
                     }
-                    (*passed, *subtitle) = after;
+                    for (i, place) in at.iter_mut().enumerate() {
+                        *place = Place::join(ends.iter().map(|e| e[i]));
+                    }
                     continue;
                 }
+                Part::Hidden | Part::Doubt => continue,
+                Part::Search if opted_out(k) => "a search field the app draws (`appearance=\"none\"`)",
+                Part::Search if at[SEARCH] == Place::Taken => "a second search field",
+                Part::Tablist if at[TABLIST] == Place::Taken => "a second tablist",
                 Part::Tablist if !mac_tabs(k) => {
                     "a tablist that is not two or more tabs each showing a title alone"
                 }
-                Part::Hidden | Part::Doubt | Part::Search | Part::Tablist => continue,
+                Part::Search => {
+                    at[SEARCH] = Place::Taken;
+                    continue;
+                }
+                Part::Tablist => {
+                    at[TABLIST] = Place::Taken;
+                    continue;
+                }
                 Part::Heading => {
-                    *passed = true;
+                    at[PASSED] = Place::Taken;
                     continue;
                 }
-                Part::Text if *passed && !*subtitle => {
-                    *subtitle = true;
-                    continue;
-                }
-                Part::Text => "a text that is neither its heading nor the one after it",
+                Part::Text => match (at[PASSED], at[SUBTITLE]) {
+                    (Place::Taken, Place::Taken) | (Place::Free, _) => {
+                        "a text that is neither its heading nor the one after it"
+                    }
+                    (Place::Taken, _) => {
+                        at[SUBTITLE] = Place::Taken;
+                        continue;
+                    }
+                    (Place::Maybe, subtitle) => {
+                        at[SUBTITLE] = Place::join([subtitle, Place::Taken]);
+                        continue;
+                    }
+                },
                 Part::Status if mac_draws(k) => continue,
                 Part::Status => "a readout holding more than words, symbols and dots",
                 Part::Pressable if has_press(k) && holds_heading(k) => "a pressable title",
@@ -623,7 +716,7 @@ fn mac_refusal(header: Visit<'_>) -> Option<(Span, &'static str)> {
                 Part::Pressable => {
                     "a button whose face holds more than words, symbols, dots and one picture"
                 }
-                Part::Box => match walk(k.children(), passed, subtitle) {
+                Part::Box => match walk(k.children(), at) {
                     Some(found) => return Some(found),
                     None => continue,
                 },
@@ -633,7 +726,7 @@ fn mac_refusal(header: Visit<'_>) -> Option<(Span, &'static str)> {
         }
         None
     }
-    walk(header.children(), &mut false, &mut false)
+    walk(header.children(), &mut [Place::Free; 4])
 }
 
 /// `header-item-left-out` (LLP 1141.004 D5), information, for the targets

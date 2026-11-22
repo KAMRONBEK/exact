@@ -2,7 +2,9 @@
 // BarHostedIOSTests): link items, which follow their `href`; a row of a
 // label and a switch, a readout that holds a Retry button, a command and the
 // dialog it opens, and a switch that hears `press`, each hosted, whose
-// entries in UIKit's overflow menu are what the element itself does.
+// entries in UIKit's overflow menu are what the element itself does; on
+// History, a native button whose words' colour is its item's tint, and a
+// filled button of one text, UIKit's own item.
 routes nav
   home "/"
     history "/history"
@@ -60,6 +62,10 @@ component BarHosted
             if e.name == "history"
               link href="/history/about" aria-label="About" testId="about-link"
                 image "symbol:info" width=20 height=20
+              button buttonStyle="glass" press=note testId="stop"
+                text "Stop" color="-exact-system-red"
+              button press=note background-color="-exact-fill" testId="note-button"
+                text "Note"
           text (live ? "on" : "off") testId="live"
           text `${retried}` testId="retried"
           text (alerts ? "on" : "off") testId="alerts"

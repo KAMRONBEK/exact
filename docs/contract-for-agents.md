@@ -4242,13 +4242,14 @@ main navigationKey=`${top(nav).id}` navigationBack="close" navigate=follow displ
   `buttonStyle="glass"` on a header button gives that item a capsule of its own
   (`sharesBackground = false`).
 - A header `button` (or `link`) whose own children are one symbol, one plain text, or a
-  symbol beside a plain text (no box around them; a text with no span, link, Markdown or
-  `press`, that writes nothing but its `color`, with no font, opacity or filter on it or
-  the button) is UIKit's own bar item: a symbol is its image and a text its title, in the bar's
+  symbol beside a plain text (no box around them; a text with no span, link, Markdown,
+  `press` or `backgroundMaterial`, that writes nothing but its `color`, with no font,
+  opacity or filter on it or the button; beside a symbol, which the item shows alone, not
+  even a `color`) is UIKit's own bar item: a symbol is its image and a text its title, in the bar's
   type, the platform's, and the text's `color` the item's tint; with both, the symbol is the image and the text its spoken name,
   as a hand-built bar's item has them. The button's own fill, border and padding give way
   to the bar's glass. On a native button a `font-size` or `font-weight` sets that title's
-  font, and its glass fits the words (`buttonStyle="glass" font-size=12` is a small
+  font, a `color` on its symbol or text the item's tint, and its glass fits the words (`buttonStyle="glass" font-size=12` is a small
   "● Clock" chip); a text in a font of your own on a button the compiler draws as a box
   is hosted instead. A button whose one child is a filled box
   holding one text, one symbol or one picture (an avatar, a badge) is UIKit's item too,
@@ -4290,7 +4291,9 @@ main navigationKey=`${top(nav).id}` navigationBack="close" navigate=follow displ
     at most one picture, readouts of words, symbols and dots, one search field and a
     tablist of two or more tabs that each show a title alone. Anything else (a spinner, a
     picture, a second text, a pressable title, a button holding a spinner, a tablist of
-    one tab) sends the whole header to the page. Android's bar also leaves out the title's
+    one tab, a second search field) sends the whole header to the page. Where an `if` or
+    a `match` decides which text is the subtitle or which search field is the second,
+    the compiler gives it the benefit and says nothing. Android's bar also leaves out the title's
     own parts: the subtitle, the avatar and the tap on the title. For the targets your
     app ships, the compiler names each hosted element and readout Android or tvOS leaves
     out, and the first part the Mac has no place for, once a header
