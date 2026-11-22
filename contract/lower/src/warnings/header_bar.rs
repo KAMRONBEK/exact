@@ -219,8 +219,9 @@ struct Bar<'a> {
     /// an item of its own (LLP 1141.004 D1): with no heading, it keeps the
     /// header in the page.
     hosted: Vec<(Span, String)>,
-    /// The readouts (`role="status"`), bar items on iOS and the Mac.
-    readouts: Vec<(Span, String)>,
+    /// The readouts (`role="status"`), bar items on iOS, and whether the
+    /// Mac's toolbar draws each (`mac_draws`).
+    readouts: Vec<(Span, String, bool)>,
 }
 
 /// A route's `header` that is not the bar, in `lower-header-no-bar`'s words (LLP 1115.000 D5.2).
@@ -325,6 +326,11 @@ fn walk<'a>(parent: Visit<'a>, bar: &mut Bar<'a>) {
     let start = (title_row(parent), false);
     for _ in parent.regions()[0].walk_regions_with(start, |node, &(glyphs, title)| {
         let descend = bar.visit(node, glyphs, title);
+        // An `if` or a `match`: each arm is read where the choice stands, as
+        // what it shows when taken.
+        if node.is_choice() {
+            return [Some((glyphs, title)), Some((glyphs, title))];
+        }
         [
             descend.then(|| (title_row(node), title || holds_heading(node))),
             None,
@@ -337,10 +343,15 @@ impl<'a> Bar<'a> {
     fn visit(&mut self, node: Visit<'a>, glyphs: bool, title: bool) -> bool {
         let bar = self;
         let span = node.span();
+        // What its author keeps in the page (`appearance="none"`) is no item.
+        let kept = node
+            .element()
+            .is_some_and(|(_, _, a)| literal(a, "appearance") == Some("none"));
         // Outside the heading's box the bar shows it as an item; inside, the
         // title shows only its own parts.
         let mut hide = |what: String| match title {
             true => bar.unplaced.push((span, what)),
+            false if kept => {}
             false => bar.hosted.push((span, what)),
         };
         match part(node) {
@@ -374,8 +385,10 @@ impl<'a> Bar<'a> {
             Part::Status if holds_heading(node) => return true,
             Part::Status => {
                 bar.placed = true;
-                bar.readouts
-                    .push((span, "this readout (`role=\"status\"`)".into()));
+                if !kept {
+                    let what = "this readout (`role=\"status\"`)".to_string();
+                    bar.readouts.push((span, what, mac_draws(node)));
+                }
             }
             Part::Text if bar.passed && !bar.subtitle => bar.subtitle = true,
             Part::Text if bar.passed => hide("this text, after the subtitle,".into()),
@@ -423,7 +436,8 @@ fn opens_named(node: Visit<'_>) -> bool {
 /// beside it, and a popover action `hide` closes, in any case. A computed
 /// command is given the benefit.
 fn opens(attrs: &[Attr]) -> bool {
-    if has(attrs, "commandfor") {
+    // An empty `commandfor` names nothing, and the `popovertarget` decides.
+    if has(attrs, "commandfor") && literal(attrs, "commandfor") != Some("") {
         return computed(attrs, "command")
             || literal(attrs, "command").is_some_and(|c| {
                 ["show-modal", "show-popover", "toggle-popover"]
@@ -440,11 +454,26 @@ fn has_press(node: Visit<'_>) -> bool {
         .is_some_and(|(_, _, attrs)| has(attrs, "press"))
 }
 
+/// Whether the Mac's toolbar draws a readout (`MacBarFace`): its words, its
+/// symbols and its dots, in boxes; anything else (a spinner, a picture, a
+/// control) sends the whole header to the page. A part the compiler cannot
+/// see is given the benefit.
+fn mac_draws(readout: Visit<'_>) -> bool {
+    readout.children().all(|k| match part(k) {
+        Part::Text | Part::Hidden | Part::Doubt => true,
+        Part::Box => mac_draws(k),
+        Part::Other => symbol(k),
+        _ => false,
+    })
+}
+
 /// `header-item-left-out` (LLP 1141.004 D5), information: for the targets
 /// the app ships whose bar has no place for an element iOS hosts, each such
 /// element. Android's top app bar and tvOS's bar leave it out, a readout
-/// too; the Mac's toolbar has no place for one other than a readout, so
-/// there the whole header is drawn in the page.
+/// too; the Mac's toolbar draws a readout of words, symbols and dots, and has
+/// no place for any other such element, so there the whole header is drawn
+/// in the page. A button whose face iOS hosts is an action on every target,
+/// and none of this.
 fn left_out(bar: &Bar<'_>, out: &mut Vec<LowerError>) {
     let targets = crate::icons::shipped();
     let drops: Vec<String> = (targets.iter())
@@ -455,11 +484,12 @@ fn left_out(bar: &Bar<'_>, out: &mut Vec<LowerError>) {
         .iter()
         .find(|t| t.name == "macos")
         .map(|t| t.described());
-    let mut items: Vec<_> = (bar.hosted.iter().map(|h| (h, false)))
-        .chain(bar.readouts.iter().map(|r| (r, true)))
+    let mut items: Vec<(&Span, &String, bool)> = (bar.hosted.iter().map(|(s, w)| (s, w, false)))
+        .chain(bar.readouts.iter().map(|(s, w, mac)| (s, w, *mac)))
         .collect();
-    items.sort_by_key(|((span, _), _)| (span.line, span.col));
-    for ((span, what), readout) in items {
+    items.sort_by_key(|(span, _, _)| (span.line, span.col));
+    // `drawn`: the Mac's toolbar draws it, a readout of words, symbols and dots.
+    for (span, what, drawn) in items {
         let mut says = Vec::new();
         if !drops.is_empty() {
             says.push(format!(
@@ -467,7 +497,7 @@ fn left_out(bar: &Bar<'_>, out: &mut Vec<LowerError>) {
                 drops.join(" and ")
             ));
         }
-        if let Some(mac) = mac.as_ref().filter(|_| !readout) {
+        if let Some(mac) = mac.as_ref().filter(|_| !drawn) {
             says.push(format!("on {mac} the toolbar has no place for it, so the whole header is drawn in the page as written"));
         }
         if says.is_empty() {

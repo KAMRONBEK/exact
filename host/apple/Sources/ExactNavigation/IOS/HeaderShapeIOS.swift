@@ -161,10 +161,11 @@ struct HeaderShape: Equatable {
         /// Whether `node` or a node in it presses: a button, a control (a
         /// `progress` only shows), a field, a link or a `press`.
         static func presses(_ node: NodeView) -> Bool {
-            // What `visibility` hides presses nothing a person sees.
-            !node.cssVisibilityHidden && (node.isButton || node.actsAsButton || node.handlers.contains("press") || node.kind == "input"
-                || (node.kind == "control" && node.props["type"] != "progress")
-                || node.props["href"] != nil || shown(node).contains(where: presses))
+            // What `visibility` hides presses nothing a person sees; a child it
+            // shows (`visibility: visible`) still may.
+            (!node.cssVisibilityHidden && (node.isButton || node.actsAsButton || node.handlers.contains("press") || node.kind == "input"
+                || (node.kind == "control" && node.props["type"] != "progress") || node.props["href"] != nil))
+                || shown(node).contains(where: presses)
         }
         /// `node`'s children that show (none `display: none`).
         static func shown(_ node: NodeView) -> [NodeView] {
@@ -183,33 +184,29 @@ struct HeaderShape: Equatable {
             guard button.kind == "button" else { return false }
             return badge(button) || plain(button)
         }
-        /// What UIKit's own item shows whole: one symbol (its image), one text
-        /// in the bar's type (its title), or a symbol beside a text (the image,
-        /// named by the text), in boxes that paint nothing. The button's own
-        /// box is the bar's glass.
+        /// What UIKit's own item shows whole: one symbol (its image), one plain
+        /// text (its title), or a symbol beside a text (the image, named by the
+        /// text), each the button's own child. A plain text is one run in the
+        /// bar's type: no span, link, press or picture inline, no `href` or
+        /// handler of its own, no font of the author's. The button's own box is
+        /// the bar's glass; a box between it and its parts is no plain face.
         static func plain(_ button: NodeView) -> Bool {
+            guard !layered(button) else { return false }
+            let parts = shown(button)
+            guard (1...2).contains(parts.count) else { return false }
             var texts = 0, symbols = 0
-            func count(_ node: NodeView) -> Bool {
-                guard !layered(node) else { return false }
-                for child in shown(node) {
-                    guard !child.cssVisibilityHidden else { return false }
-                    if child.isParagraph {
-                        guard !child.inlineText.contains(where: { $0.props["inlineBox"] != nil || $0.props["href"] != nil }),
-                              !["font_family", "font_size", "font_weight", "font_style"].contains(where: child.wrote) else { return false }
-                        texts += 1
-                    } else if child.kind == "image", child.faceSymbol != nil {
-                        symbols += 1
-                    } else if child.kind == "view", child.channels("background_color") == nil, child.style["box_shadow"] == nil,
-                              child.style["background_image"] == nil, child.number("border_width") == 0,
-                              !["top", "right", "bottom", "left"].contains(where: { child.number("border_width_" + $0) > 0 }) {
-                        if !count(child) { return false }
-                    } else {
-                        return false
-                    }
-                }
-                return true
+            for part in parts {
+                guard !part.cssVisibilityHidden, part.handlers.isEmpty else { return false }
+                if plainText(part) { texts += 1 }
+                else if part.kind == "image", part.faceSymbol != nil { symbols += 1 }
+                else { return false }
             }
-            return count(button) && texts <= 1 && symbols <= 1 && texts + symbols >= 1
+            return texts <= 1 && symbols <= 1
+        }
+        /// One run of words in the bar's type, which acts as nothing of its own.
+        static func plainText(_ node: NodeView) -> Bool {
+            node.isParagraph && node.inlineText.isEmpty && node.handlers.isEmpty && (node.props["href"] ?? "").isEmpty
+                && !["font_family", "font_size", "font_weight", "font_style"].contains(where: node.wrote)
         }
         /// The badge of §9.6, and only it: one filled box, no border, shadow
         /// or picture fill, holding one text (no picture or link inline), one
@@ -222,7 +219,9 @@ struct HeaderShape: Equatable {
                   !["top", "right", "bottom", "left"].contains(where: { box.number("border_width_" + $0) > 0 }) else { return false }
             let parts = shown(box)
             guard parts.count == 1, let part = parts.first, !part.cssVisibilityHidden else { return false }
-            if part.isParagraph { return !part.inlineText.contains { $0.props["inlineBox"] != nil || $0.props["href"] != nil } }
+            guard part.handlers.isEmpty else { return false }
+            // A badge draws its text at its own size (§9.6), a font of the author's or not.
+            if part.isParagraph { return part.inlineText.isEmpty && (part.props["href"] ?? "").isEmpty }
             return part.kind == "image" && (part.faceSymbol != nil || part.imageSource != nil)
         }
         /// Whether `node` draws a child as a layer with no view (`FlatLeavesIOS`).

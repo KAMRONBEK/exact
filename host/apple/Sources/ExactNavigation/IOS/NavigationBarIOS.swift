@@ -487,7 +487,7 @@ extension NavigationHost {
         guard shown.contains(where: { c in
             c.barPresses.contains { $0.id == node.id } || c.lifted.map { node === $0 || node.isDescendant(of: $0) } == true
         }) else { return nil }
-        guard !node.disabled, before(nil), !node.disabled, !node.inert, presenter.views[node.id] === node else { return ["error": "bar item #\(id) is unavailable"] }
+        guard !node.disabled, !node.inert, before(nil), !node.disabled, !node.inert, presenter.views[node.id] === node else { return ["error": "bar item #\(id) is unavailable"] }
         // An item whose button only opens a menu is UIKit's pull-down, which
         // no public API opens: under the agent's painted popovers it opens
         // painted (`agentOpen(barItem:)`); under UIKit's menus a real touch opens it.
@@ -1341,10 +1341,11 @@ extension NavigationHost {
     }
 
     private func barItemMade(_ i: HeaderShape.Item, _ c: RouteController) -> UIBarButtonItem {
-        presenter.views[i.id]?.rejectNativeActiveProperties(on: "UIBarButtonItem", supporting: i.supportsActiveColor ? ["press_color"] : [])
+        // A hosted item draws its element as written, its `:active` look too.
         #if os(iOS)
         if i.hosted { c.barItemsMade[i.id] = nil; return barHosted.item(i, in: c) }
         #endif
+        presenter.views[i.id]?.rejectNativeActiveProperties(on: "UIBarButtonItem", supporting: i.supportsActiveColor ? ["press_color"] : [])
         // A menu reads its rows through the button's view: a new view, a new menu.
         let button = i.menu ? presenter.views[i.id] : nil
         if let made = c.barItemsMade[i.id], made.item == i, button?.incarnation == made.menuFrom {

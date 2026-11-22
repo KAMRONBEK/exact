@@ -466,12 +466,16 @@ snapshot. The backend’s clock stays its own.
    buttons** (or a search field, a `tablist`). A button of one symbol, one text or both
    is UIKit's own bar item. Anything else in it (a spinner and its words, a picture, a
    pressed row, a button with a dot beside its label) is a hosted item on its side of the heading, drawn as written, with no glass unless
-   something in it presses; inside a box around the heading, only the title shows. A
-   hosted item is left out by Android's top app bar and tvOS's bar, and makes the Mac
-   draw the header in the page (the compiler's `header-item-left-out` names each for the
-   targets you ship): what must show everywhere goes below the `header`. It gets at most
-   a third of the bar's width, and in UIKit's "⋯" menu only its own action. Desktop Linux
-   and the web draw the header as written. A control fixed under the bar goes with an
+   something in it presses; inside a box around the heading, only the title shows. An
+   element the bar has no object for (a spinner, a picture, a text, a readout) is left out
+   by Android's top app bar and tvOS's bar, and makes the Mac draw the header in the page
+   unless it is a readout of words, symbols and dots (the compiler's
+   `header-item-left-out` names each for the targets you ship): what must show
+   everywhere goes below the `header`. A hosted item's automatic size is at most a third
+   of the bar's width and 44 points high, a trailing or bottom margin is not kept, it
+   takes the page's type and colour (write the `font-size` and `color` you want), and in
+   UIKit's "⋯" menu it is only its own action. Desktop Linux and the web draw the header
+   as written. A control fixed under the bar goes with an
    inline title (`h2`); one that may scroll away, in the list's first section.
 3. **`width="100%"` with padding overflows**, as in CSS: drop the width; a `flex=1` field
    takes `min-width=0`.

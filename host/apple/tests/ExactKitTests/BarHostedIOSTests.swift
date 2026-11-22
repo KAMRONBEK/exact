@@ -320,11 +320,16 @@ final class BarHostedIOSTests: XCTestCase {
         let plain = route([press(4), ["op": "create", "id": 5, "kind": "image", "props": ["imageSource": "symbol:sf/arrow.clockwise", "symbolName": "arrow.clockwise"]], text(6, "Retry"),
                            press(7), text(8, "Retry"), text(9, "later"),
                            press(10), text(11, "Mono", style: ["font_family": 3, "written": ["font_family"]]),
-                           press(12), ["op": "create", "id": 13, "kind": "view", "style": dot], text(14, "Live")],
-                          kids: [4, 7, 10, 12], more: [["op": "children", "id": 4, "ids": [5, 6]], ["op": "children", "id": 7, "ids": [8, 9]],
-                                                       ["op": "children", "id": 10, "ids": [11]], ["op": "children", "id": 12, "ids": [13, 14]]])
+                           press(12), ["op": "create", "id": 13, "kind": "view", "style": dot], text(14, "Live"),
+                           press(15), ["op": "create", "id": 16, "kind": "view"], text(17, "Live"),
+                           press(18), text(19, "History", ["href": "/history"])],
+                          kids: [4, 7, 10, 12, 15, 18], more: [["op": "children", "id": 4, "ids": [5, 6]], ["op": "children", "id": 7, "ids": [8, 9]],
+                                                               ["op": "children", "id": 10, "ids": [11]], ["op": "children", "id": 12, "ids": [13, 14]],
+                                                               ["op": "children", "id": 15, "ids": [16]], ["op": "children", "id": 16, "ids": [17]],
+                                                               ["op": "children", "id": 18, "ids": [19]]])
         let plainShape = try bar(plain)
-        XCTAssertEqual(plainShape.trailing.map(\.hosted), [false, true, true, true])
+        // A box around the words, or words that link of their own, are drawn as written.
+        XCTAssertEqual(plainShape.trailing.map(\.hosted), [false, true, true, true, true, true])
         XCTAssertEqual(plainShape.trailing.first?.symbol, "arrow.clockwise")
         XCTAssertEqual(plainShape.trailing.first?.title, "Retry", "spoken by the item")
         // A pressed row `visibility` hides is drawn as written, hidden; a box

@@ -217,8 +217,10 @@ fn a_header_of_buttons_alone_is_the_bar_and_one_with_a_text_is_named() {
 /// the targets, in source order; information, not a problem.
 #[test]
 fn a_header_element_a_targets_bar_has_no_place_for_is_named() {
-    let view = "routes nav\n  home \"/\"\ncomponent App\n  view\n    main navigationKey=`${top(nav).id}` width=\"100%\" height=\"100%\"\n      for e in stack(nav) key=e.id\n        column navigationKey=`${e.id}` position=\"absolute\" inset=0\n          header display=\"flex\"\n            text \"Car\" role=\"heading\" aria-level=1\n            row role=\"status\" aria-label=\"Updating\"\n              progress\n            progress\n          text \"body\"\n";
-    let said = |name: &str, targets: &str| -> Vec<String> {
+    let app = |header: &str| {
+        format!("routes nav\n  home \"/\"\ncomponent App\n  state n = 0\n  action go\n    n = n + 1\n  view\n    main navigationKey=`${{top(nav).id}}` width=\"100%\" height=\"100%\"\n      for e in stack(nav) key=e.id\n        column navigationKey=`${{e.id}}` position=\"absolute\" inset=0\n          header display=\"flex\"\n            text \"Car\" role=\"heading\" aria-level=1\n{header}          text \"body\"\n")
+    };
+    let said = |name: &str, targets: &str, view: &str| -> Vec<String> {
         let dir =
             crate::scratch::Scratch::new(format!("exact2-left-out-{name}-{}", std::process::id()));
         std::fs::write(dir.join("app.json"), format!("{{\"app\": {{\"id\": \"dev.test.bar\", \"name\": \"Bar\"}}, \"host\": {{{targets}}}}}")).unwrap();
@@ -231,26 +233,41 @@ fn a_header_element_a_targets_bar_has_no_place_for_is_named() {
             .map(|w| w.message.clone())
             .collect()
     };
+    let all = "\"ios\": {}, \"android\": {}, \"macos\": {}";
+    // A readout of words the Mac draws, and a spinner it has no place for.
+    let words = app("            row role=\"status\" aria-label=\"Live\"\n              text \"Live\"\n            progress\n");
     assert_eq!(
-        said("apple", "\"ios\": {}, \"web\": {}"),
+        said("apple", "\"ios\": {}, \"web\": {}", &words),
         Vec::<String>::new(),
         "iOS hosts both; the web draws them"
     );
-    let all = said("all", "\"ios\": {}, \"android\": {}, \"macos\": {}");
-    assert_eq!(all.len(), 2, "{all:?}");
+    let both = said("all", all, &words);
+    assert_eq!(both.len(), 2, "{both:?}");
     assert!(
-        all[0].starts_with("this readout")
-            && all[0].contains("android")
-            && !all[0].contains("macos"),
+        both[0].starts_with("this readout")
+            && both[0].contains("android")
+            && !both[0].contains("macos"),
         "{}",
-        all[0]
+        both[0]
     );
     assert!(
-        all[1].starts_with("this `progress`")
-            && all[1].contains("android")
-            && all[1].contains("whole header is drawn in the page"),
+        both[1].starts_with("this `progress`")
+            && both[1].contains("android")
+            && both[1].contains("whole header is drawn in the page"),
         "{}",
-        all[1]
+        both[1]
+    );
+    // Inside an `if`, as the guide's spinner is, a readout holding a spinner
+    // sends the Mac's header to the page; a button whose face iOS hosts is an
+    // action everywhere; what its author keeps in the page is no item.
+    let more = app("            if true\n              row role=\"status\" aria-label=\"Updating\"\n                progress\n            button press=go aria-label=\"Live\"\n              column width=6 height=6 background-color=\"#0a0\"\n              text \"Live\"\n            progress appearance=\"none\"\n");
+    let said_more = said("more", all, &more);
+    assert_eq!(said_more.len(), 1, "{said_more:?}");
+    assert!(
+        said_more[0].starts_with("this readout")
+            && said_more[0].contains("whole header is drawn in the page"),
+        "{}",
+        said_more[0]
     );
     assert!(contract_lower::warning_rank::information(
         "header-item-left-out"
