@@ -3,8 +3,8 @@
 //! a button in a button, and a dialog's role on a box; and a heading's
 //! level with no heading (LLP 1115.000 D12.5), and a bar with only one tab.
 
-use super::{computed, has, literal, BOXES};
-use crate::controls::guarded;
+use super::{computed, guards_in, has, literal, BOXES};
+use crate::controls::{guarded, without_ascriptions};
 use crate::LowerError;
 use contract_checking::{Structure, View, Visit};
 use contract_syntax::{Attr, Expr, Span, StyleDecl, VisitSpans};
@@ -177,18 +177,20 @@ pub(super) fn keys(
     })
 }
 
-/// An `aria-label` or `aria-labelledby` counts as a name if it is a non-blank
-/// literal, a computed expression, or an empty string its enclosing `if` rules out.
+/// A computed name or non-blank literal counts, as does an empty literal
+/// its enclosing `if` rules out.
+fn has_words(value: &Expr, guards: &[&Expr]) -> bool {
+    !matches!(without_ascriptions(value), Expr::Str(v, _) if v.trim().is_empty())
+        || guarded(value, guards.iter().copied())
+}
+
 fn named(attrs: &[Attr], guards: &[&Expr]) -> bool {
     ["aria-label", "aria-labelledby"].iter().any(|name| {
         attrs
             .iter()
             .rev()
             .find(|a| a.name == *name)
-            .is_some_and(|a| {
-                !matches!(&a.value, Expr::Str(v, _) if v.trim().is_empty())
-                    || guarded(&a.value, guards.iter().copied())
-            })
+            .is_some_and(|a| has_words(&a.value, guards))
     })
 }
 
@@ -206,46 +208,42 @@ enum Says {
 /// The most any of `nodes` says. An `if`, `for` or `match` says what its
 /// most telling arm does; a use or a slot, and an element this walk does
 /// not know, are given the benefit of the doubt.
-fn says(regions: [Structure<'_>; 2], in_svg: bool) -> Says {
+fn says<'a>(regions: [Structure<'a>; 2], guards: &[&'a Expr]) -> Says {
     let mut answer = Says::Nothing;
     for region in regions {
-        for (node, svg, entering) in region.events(in_svg, |node, svg| match node.element() {
-            Some((tag, positional, attrs)) => {
-                if named(attrs, &[]) {
-                    return None;
-                }
-                match tag {
-                    "text" | "tspan"
-                        if positional.first().is_none_or(
-                            |e| matches!(e, Expr::Str(v, _) if v.trim().is_empty()),
-                        ) =>
-                    {
-                        Some(*svg)
+        for (node, (svg, guards)) in
+            region.walk_regions_with((false, guards.to_vec()), |node, (svg, guards)| {
+                if let Some((tag, positional, attrs)) = node.element() {
+                    if named(attrs, guards) {
+                        return [None, None];
                     }
-                    "svg" => Some(true),
-                    t if BOXES.contains(&t) || *svg => (tag != "image").then_some(*svg),
-                    _ => None,
+                    let svg = match tag {
+                        "text" | "tspan"
+                            if positional.first().is_none_or(|e| !has_words(e, guards)) =>
+                        {
+                            *svg
+                        }
+                        "svg" => true,
+                        t if t != "image" && (BOXES.contains(&t) || *svg) => *svg,
+                        _ => return [None, None],
+                    };
+                    return [Some((svg, guards.clone())), None];
                 }
-            }
-            None => Some(*svg),
-        }) {
-            if !entering {
-                continue;
-            }
+                node.bindings()
+                    .map(|bindings| Some((*svg, guards_in(guards, bindings))))
+            })
+        {
             let contribution = if let Some((tag, positional, attrs)) = node.element() {
-                if named(attrs, &[]) {
+                if named(attrs, &guards) {
                     Says::Words
                 } else {
                     match tag {
                         "text" | "tspan" => match positional.first() {
-                            Some(Expr::Str(v, _)) if v.trim().is_empty() => Says::Nothing,
-                            Some(_) => Says::Words,
-                            None => Says::Nothing,
+                            Some(e) if has_words(e, &guards) => Says::Words,
+                            _ => Says::Nothing,
                         },
                         "image" => match attrs.iter().rev().find(|a| a.name == "alt") {
-                            Some(a) if !matches!(&a.value, Expr::Str(v, _) if v.trim().is_empty()) => {
-                                Says::Words
-                            }
+                            Some(a) if has_words(&a.value, &guards) => Says::Words,
                             _ => Says::Unnamed,
                         },
                         "svg" => Says::Unnamed,
@@ -306,7 +304,7 @@ fn unlabelled_button(
     if named(attrs, guards) || hidden {
         return None;
     }
-    let message = match says(node.regions(), false) {
+    let message = match says(node.regions(), guards) {
         Says::Words => return None,
         Says::Unnamed => {
             "this `button` shows only an image with no name: a screen reader on the web reads it as just \"button\", and VoiceOver on iOS by the symbol's generic name (\"add\", \"love\"). Name it: `aria-label=\"Add\"` on the button, beside its `image \"symbol:…\"` (docs/recipes/symbols.md)"

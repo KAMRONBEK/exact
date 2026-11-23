@@ -5,7 +5,7 @@
 
 use crate::tags::Tag;
 use crate::{err, LowerError, Lowerer};
-use contract_syntax::{Expr, Span};
+use contract_syntax::{Binds, Expr, Span};
 use exact_kernel::{NodeType, PropId, StyleId};
 use exact_plan::{BindingKind, BindingsRow, Value};
 
@@ -695,7 +695,7 @@ fn may_be_empty(e: &Expr) -> bool {
     may_be_empty_unless(e, false)
 }
 
-fn without_ascriptions(mut e: &Expr) -> &Expr {
+pub(crate) fn without_ascriptions(mut e: &Expr) -> &Expr {
     while let Expr::Typed(inner, _, _) = e {
         e = inner;
     }
@@ -724,6 +724,16 @@ pub(crate) fn guarded<'e>(value: &Expr, mut guards: impl Iterator<Item = &'e Exp
     guards.any(|e| without_ascriptions(e) == value) && !may_be_empty_unless(value, true)
 }
 
+/// An inlined operand can keep its spelling and span under a shadowing binding.
+pub(crate) fn guard_survives(guard: &Expr, bindings: Binds<'_>) -> bool {
+    if bindings.is_empty() {
+        return true;
+    }
+    let mut reads = Vec::new();
+    crate::disabled_look::free_reads(guard, &mut Vec::new(), &mut reads);
+    !reads.iter().any(|name| bindings.contains(name))
+}
+
 fn may_be_empty_unless(e: &Expr, empty_ruled_out: bool) -> bool {
     match e {
         Expr::Str(s, _) => s.trim().is_empty() && !(s.is_empty() && empty_ruled_out),
@@ -734,24 +744,6 @@ fn may_be_empty_unless(e: &Expr, empty_ruled_out: bool) -> bool {
         Expr::Typed(x, _, _) | Expr::Let { body: x, .. } => may_be_empty_unless(x, empty_ruled_out),
         // A guard exemption requires proof for every remaining arm.
         _ => empty_ruled_out,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use contract_syntax::BinOp;
-
-    #[test]
-    fn only_the_empty_string_produces_a_label_guard() {
-        let span = Span::default();
-        let label = Expr::Ident("label".into(), span);
-        let none = Expr::None(span);
-        let empty = Expr::Str(String::new(), span);
-        let unequal = |a, b| Expr::Binary(BinOp::Ne, Box::new(a), Box::new(b), span);
-        assert_eq!(ruled_out(&unequal(label.clone(), empty)), [&label]);
-        assert!(ruled_out(&unequal(label.clone(), none.clone())).is_empty());
-        assert!(ruled_out(&unequal(none, label)).is_empty());
     }
 }
 
@@ -787,6 +779,25 @@ impl Lowerer<'_> {
         self.guards.extend(ruled_out(cond).into_iter().cloned());
         let lowered = lower(self);
         self.guards.truncate(held);
+        lowered
+    }
+
+    pub(crate) fn under_bindings<T>(
+        &mut self,
+        bindings: Binds<'_>,
+        lower: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        if self.guards.is_empty() || bindings.is_empty() {
+            return lower(self);
+        }
+        let held = std::mem::take(&mut self.guards);
+        self.guards = held
+            .iter()
+            .filter(|guard| guard_survives(guard, bindings))
+            .cloned()
+            .collect();
+        let lowered = lower(self);
+        self.guards = held;
         lowered
     }
 
@@ -1320,4 +1331,22 @@ pub(crate) fn check_zero_size(
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use contract_syntax::BinOp;
+
+    #[test]
+    fn only_the_empty_string_produces_a_label_guard() {
+        let span = Span::default();
+        let label = Expr::Ident("label".into(), span);
+        let none = Expr::None(span);
+        let empty = Expr::Str(String::new(), span);
+        let unequal = |a, b| Expr::Binary(BinOp::Ne, Box::new(a), Box::new(b), span);
+        assert_eq!(ruled_out(&unequal(label.clone(), empty)), [&label]);
+        assert!(ruled_out(&unequal(label.clone(), none.clone())).is_empty());
+        assert!(ruled_out(&unequal(none, label)).is_empty());
+    }
 }

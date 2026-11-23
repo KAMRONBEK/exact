@@ -452,6 +452,59 @@ fn an_unlabelled_inline_warns_once_in_either_order() {
 }
 
 #[test]
+fn a_label_guard_does_not_follow_a_shadowed_binding() {
+    for nested in [
+        "for n in [0] key=n\n            Item(n=n, omitted=\"hidden\", go=go)",
+        "match some(0)\n            case some(n)\n              Item(n=n, omitted=\"hidden\", go=go)\n            case none\n              text \"None\"",
+    ] {
+        let src = format!(
+            r#"component App
+  state busy = false
+  action go
+    busy = !busy
+  view
+    column
+      for n in [1] key=n
+        Item(n=n, omitted="", go=go)
+          {nested}
+component Item
+  props
+    n: number
+    omitted: string
+    go: action
+  slot
+  derive label = n == 1 ? "Add" : ""
+  view
+    if label != omitted
+      button appearance="auto" press=go aria-label=label
+        image "symbol:add"
+      children
+"#
+        );
+        assert_label_refused(&src);
+    }
+}
+
+#[test]
+fn a_label_guard_reaches_the_button_name_in_its_children() {
+    for child in [
+        "svg viewBox=\"0 0 10 10\" width=10 height=10 aria-label=label\n      circle cx=5 cy=5 r=4",
+        "image \"symbol:add\" alt=label",
+        "text label",
+    ] {
+        for labels in [["\"\"", "\"Add\""], ["\"Add\"", "\"\""]] {
+            let src = item(
+                &format!("if label != \"\"\n  button appearance=\"none\" press=go\n    {child}"),
+                &labels,
+            );
+            let (result, warnings) = contract::compile_warned(&src);
+            result.unwrap_or_else(|e| panic!("{src}\n{e}"));
+            assert!(warnings.is_empty(), "{src}\n{warnings:?}");
+        }
+    }
+}
+
+#[test]
 fn a_label_guard_follows_a_forwarded_enum_prop() {
     let src = r#"component App
   state busy = false
@@ -479,6 +532,26 @@ component Face
     let (result, warnings) = contract::compile_warned(src);
     result.unwrap_or_else(|e| panic!("{e}"));
     assert!(warnings.is_empty(), "{warnings:?}");
+
+    let else_arm = src
+        .replace(
+            "      Face(label=label, go=go)",
+            "      text \"Add\"\n    else\n      Face(label=label, go=go)",
+        )
+        .replace("appearance=\"auto\"", "appearance=\"none\"");
+    assert_unlabelled_warning(&else_arm);
+}
+
+#[test]
+fn a_label_guard_does_not_exempt_a_separate_empty_literal() {
+    assert_label_refused(&guarded_item("label != \"\"", "\"\"", &["\"\""]));
+}
+
+#[test]
+fn a_separate_empty_label_warns_under_a_guard() {
+    let src = guarded_item("label != \"\"", "\"\"", &["\"\""])
+        .replace("appearance=\"auto\"", "appearance=\"none\"");
+    assert_unlabelled_warning(&src);
 }
 
 #[test]

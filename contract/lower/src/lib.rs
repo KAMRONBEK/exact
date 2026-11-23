@@ -1090,12 +1090,14 @@ impl<'a> Lowerer<'a> {
                     sites.region(*tag);
                 }
                 self.arm_scopes.insert((*tag, 0), (arms[0], inner.clone()));
-                self.nodes(body, None, Some(arms[0]), &inner, locals, parent_tag)
+                self.under_bindings(n.scoped_child_lists()[0].1, |l| {
+                    l.nodes(body, None, Some(arms[0]), &inner, locals, parent_tag)
+                })
             }
             Node::Match {
                 tag,
                 subject,
-                some,
+                some: (name, body),
                 none,
                 ..
             } => {
@@ -1107,18 +1109,12 @@ impl<'a> Lowerer<'a> {
                 if let Some(sites) = &mut self.sites {
                     sites.region(*tag);
                 }
-                let mut some_scope = scope.clone();
-                some_scope.push_some_of(&some.0, subject_ty);
-                self.arm_scopes
-                    .insert((*tag, 0), (arms[0], some_scope.clone()));
-                self.nodes(
-                    &some.1,
-                    None,
-                    Some(arms[0]),
-                    &some_scope,
-                    locals,
-                    parent_tag,
-                )?;
+                let mut inner = scope.clone();
+                inner.push_some_of(name, subject_ty);
+                self.arm_scopes.insert((*tag, 0), (arms[0], inner.clone()));
+                self.under_bindings(n.scoped_child_lists()[0].1, |l| {
+                    l.nodes(body, None, Some(arms[0]), &inner, locals, parent_tag)
+                })?;
                 let mut none_scope = scope.clone();
                 none_scope.push_none();
                 self.arm_scopes

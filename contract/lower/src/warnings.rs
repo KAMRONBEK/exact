@@ -7,11 +7,12 @@
 //! Each check names what it can establish from the expanded root, as lowering reads it.
 //! Unexpanded uses and slots, and computed roles and types, stay unknown.
 
+use crate::controls::{guard_survives, ruled_out};
 use crate::tags::AttrTarget;
 use crate::LowerError;
 use contract_checking::{Checking, Structure, Visit};
 use contract_syntax::{
-    Attr, BinOp, Binding, Expr, FnDecl, Span, Stmt, StyleDecl, TemplatePart, UnOp,
+    Attr, BinOp, Binding, Binds, Expr, FnDecl, Span, Stmt, StyleDecl, TemplatePart, UnOp,
 };
 use contract_types::Checked;
 use exact_kernel::StyleId;
@@ -96,6 +97,38 @@ pub fn warnings(checked: &Checked<'_>, selection: &WarningSelection) -> Vec<Lowe
 
 pub(crate) use text_styles::{TextStyle, TextStyles};
 
+fn guards_in<'a>(guards: &[&'a Expr], bindings: Binds<'_>) -> Vec<&'a Expr> {
+    guards
+        .iter()
+        .copied()
+        .filter(|guard| guard_survives(guard, bindings))
+        .collect()
+}
+
+type WarningContext<'a> = (bool, Option<&'a str>, Vec<&'a Expr>);
+
+fn warning_regions<'a>(
+    node: Visit<'a>,
+    (in_root, back, guards): &WarningContext<'a>,
+) -> [Option<WarningContext<'a>>; 2] {
+    let (in_root, mut back) = (*in_root, *back);
+    if let Some((_, _, attrs)) = node.element() {
+        let keyed = has(attrs, "navigationKey");
+        if keyed && !in_root {
+            back = literal(attrs, "navigationBack").filter(|name| !name.is_empty());
+        }
+        let inner = (in_root || keyed, back, guards.clone());
+        return [Some(inner), None];
+    }
+    let [then_bindings, else_bindings] = node.bindings();
+    let mut then = guards_in(guards, then_bindings);
+    then.extend(node.condition().into_iter().flat_map(ruled_out));
+    [
+        Some((in_root, back, then)),
+        Some((in_root, back, guards_in(guards, else_bindings))),
+    ]
+}
+
 pub(crate) fn with_text_styles(
     checked: &Checked<'_>,
     lowered: &TextStyles,
@@ -112,28 +145,9 @@ pub(crate) fn with_text_styles(
     crate::menu_rows::notes(&checked_view, &mut out);
     crate::symbols::tints(&root.view, checked.file, lowered, &mut out);
     let start = (false, None, Vec::new());
-    let visits =
-        (checked_view.structure()).walk_regions_with(start, |node, (in_root, back, guards)| {
-            let (in_root, mut back) = (*in_root, *back);
-            if let Some((_, _, attrs)) = node.element() {
-                let keyed = has(attrs, "navigationKey");
-                if keyed && !in_root {
-                    back = literal(attrs, "navigationBack").filter(|name| !name.is_empty());
-                }
-                let inner = (in_root || keyed, back, guards.clone());
-                return [Some(inner.clone()), Some(inner)];
-            }
-            let mut then = guards.clone();
-            then.extend(
-                node.condition()
-                    .into_iter()
-                    .flat_map(crate::controls::ruled_out),
-            );
-            [
-                Some((in_root, back, then)),
-                Some((in_root, back, guards.clone())),
-            ]
-        });
+    let visits = checked_view
+        .structure()
+        .walk_regions_with(start, warning_regions);
     let (mut seen, mut platform) = (BTreeSet::new(), Vec::new());
     let mut seen_buttons = BTreeSet::new();
     for (visit, (in_root, back, guards)) in visits {
@@ -1222,5 +1236,23 @@ fn one_scheme(
             ),
             span: first.span,
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_element_passes_warning_context_to_its_only_region() {
+        let file =
+            contract_syntax::parse("component App\n  view\n    column\n      text \"Add\"\n")
+                .unwrap();
+        let checked = contract_types::check(&file, |_| false).unwrap();
+        let checking = Checking::new(&checked);
+        let element = checking.expanded().structure().roots().next().unwrap();
+        let guard = Expr::Str(String::new(), Span::default());
+        let context = (true, Some("back"), vec![&guard]);
+        assert_eq!(warning_regions(element, &context), [Some(context), None]);
     }
 }
