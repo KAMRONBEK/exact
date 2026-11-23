@@ -4,6 +4,7 @@ use sha2::{Digest, Sha256};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
+use std::ffi::OsStr;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, Write};
 use std::path::{Component, Path, PathBuf};
@@ -1404,23 +1405,19 @@ pub(crate) fn prepare_apple_simulator_link_archives(
     out_dir: &Path,
     archives: &[LinkArchive],
 ) -> Result<Vec<PreparedLinkArchive>, String> {
-    prepare_apple_simulator_link_archives_with_lipo(
-        install,
-        target,
-        out_dir,
-        archives,
-        &apple_lipo(),
-    )
+    let llvm_bin = env::var_os("EXACT_APPLE_LLVM_BIN");
+    let lipo = apple_lipo_for(cfg!(target_os = "macos"), llvm_bin.as_deref());
+    prepare_apple_simulator_link_archives_with_lipo(install, target, out_dir, archives, &lipo)
 }
 
 /// Xcode's `lipo` on a Mac. Elsewhere LLVM's, from `EXACT_APPLE_LLVM_BIN` or
 /// `PATH`, as Exact's Apple toolchain finds it.
-fn apple_lipo() -> PathBuf {
-    if cfg!(target_os = "macos") {
+pub(crate) fn apple_lipo_for(is_macos: bool, llvm_bin: Option<&OsStr>) -> PathBuf {
+    if is_macos {
         return PathBuf::from("lipo");
     }
-    match env::var_os("EXACT_APPLE_LLVM_BIN").filter(|bin| !bin.is_empty()) {
-        Some(bin) => Path::new(&bin).join("llvm-lipo"),
+    match llvm_bin.filter(|bin| !bin.is_empty()) {
+        Some(bin) => Path::new(bin).join("llvm-lipo"),
         None => PathBuf::from("llvm-lipo"),
     }
 }
@@ -1923,19 +1920,19 @@ fn lipo_architectures(lipo: &Path, archive: &Path) -> Result<Vec<String>, String
 }
 
 fn lipo_launch_error(lipo: &Path, archive: &Path, error: io::Error) -> String {
+    let message = format!(
+        "cannot run `{}` for Apple Simulator archive {}",
+        lipo.display(),
+        archive.display()
+    );
     if error.kind() == io::ErrorKind::NotFound {
-        format!(
-            "cannot run `{}` for Apple Simulator archive {}; install Xcode command-line tools (run `xcode-select --install`), or off a Mac put LLVM's bin directory on PATH or in EXACT_APPLE_LLVM_BIN",
-            lipo.display(),
-            archive.display()
-        )
-    } else {
-        format!(
-            "cannot run `{}` for Apple Simulator archive {}: {error}",
-            lipo.display(),
-            archive.display()
-        )
+        match lipo.file_name().and_then(OsStr::to_str) {
+            Some("lipo") => return format!("{message}. Install Xcode command-line tools (run `xcode-select --install`)."),
+            Some("llvm-lipo") => return format!("{message}. Fix `EXACT_APPLE_LLVM_BIN` or unset it and put LLVM's bin directory on `PATH`."),
+            _ => {}
+        }
     }
+    format!("{message}: {error}")
 }
 
 struct DigestWriter<'a>(&'a mut Sha256);

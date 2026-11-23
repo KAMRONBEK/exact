@@ -1264,7 +1264,8 @@ refresh.
 
 `build_support.rs` inspects and thins Simulator archives with Xcode's `lipo` on a
 Mac, and elsewhere with `llvm-lipo` from `EXACT_APPLE_LLVM_BIN` or `PATH`, the
-tool exact2's `host/apple/toolchain.mjs` runs there. Replay on a refresh.
+tool exact2's `host/apple/toolchain.mjs` runs there. `build.rs` emits
+`cargo:rerun-if-env-changed=EXACT_APPLE_LLVM_BIN`. Replay on a refresh.
 
 ## Windows recursive removal
 

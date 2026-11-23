@@ -239,6 +239,15 @@ test('Linux setup names missing cross tools and uses the selected LLVM directory
   expect(appleCommand('lipo', ['-archs', 'App'], { env: { EXACT_APPLE_LLVM_BIN: llvm } }, 'linux')[0]).toBe(resolve(llvm, 'llvm-lipo'));
 }));
 
+test('Cargo build scripts see the same relative LLVM override as the Apple toolchain', () => fixture(({ root, env }) => {
+  const llvm = resolve(root, 'LLVM tools/bin');
+  const options = { cwd: resolve(root, 'workspace'), env: { ...env, EXACT_APPLE_LLVM_BIN: relative(process.cwd(), llvm) } };
+  const [lipo] = appleCommand('lipo', ['-archs', 'App'], options, 'linux');
+  const [, , cargo] = appleCommand('cargo', ['build', '--target', 'aarch64-apple-ios-sim'], options, 'linux');
+  expect(lipo).toBe(resolve(llvm, 'llvm-lipo'));
+  expect(cargo.env.EXACT_APPLE_LLVM_BIN).toBe(llvm);
+}));
+
 test.each([
   ['watchsimulator', 'WatchSimulator', 'arm64-apple-watchos-simulator', 'aarch64-apple-watchos-sim', '-simulator', 'watch simulator', 'watchossim'],
   ['watchos', 'WatchOS', 'arm64-apple-watchos', 'aarch64-apple-watchos', '', 'watchOS device', 'watchos'],

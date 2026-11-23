@@ -2,10 +2,8 @@
 #[path = "../build_support.rs"]
 mod build_support;
 
-#[cfg(all(unix, not(target_os = "macos")))]
-use build_support::prepare_apple_simulator_link_archives;
 use build_support::{
-    acquire_bundle, apple_simulator_arch, digest_file, download_options_from_env,
+    acquire_bundle, apple_lipo_for, apple_simulator_arch, digest_file, download_options_from_env,
     installer_command, parse_pin_sha256, pin_for_target,
     prepare_apple_simulator_link_archives_with_lipo, repository_install_root, rerun_paths,
     target_override_variable, verify_and_extract_archive, watched_inputs, BundlePin,
@@ -15,13 +13,14 @@ use flate2::write::GzEncoder;
 use flate2::Compression;
 use sha2::{Digest, Sha256};
 use std::env;
+use std::ffi::OsStr;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::path::Path;
 #[cfg(target_os = "macos")]
 use std::path::PathBuf;
-#[cfg(target_os = "macos")]
+#[cfg(unix)]
 use std::process::Command;
 use std::thread;
 
@@ -406,7 +405,6 @@ fn make_thin_archive(
     archive
 }
 
-#[cfg(unix)]
 fn test_install(root: &Path, archives: &[LinkArchive], authenticate: bool) -> EngineInstall {
     let authenticated_archive_digests = if authenticate {
         archives
@@ -508,9 +506,9 @@ fn checked_command(command: &mut Command, purpose: &str) -> std::process::Output
     output
 }
 
-#[cfg(all(unix, not(target_os = "macos")))]
+#[cfg(unix)]
 #[test]
-fn off_a_mac_the_simulator_closure_runs_llvm_lipo_from_the_llvm_bin_directory() {
+fn off_a_mac_llvm_lipo_uses_the_override_or_path() {
     use std::os::unix::fs::PermissionsExt;
 
     let temporary = tempfile::tempdir().expect("temporary directory");
@@ -531,20 +529,36 @@ fn off_a_mac_the_simulator_closure_runs_llvm_lipo_from_the_llvm_bin_directory() 
     .expect("fake llvm-lipo");
     fs::set_permissions(&lipo, fs::Permissions::from_mode(0o755)).expect("executable llvm-lipo");
 
-    let _llvm_bin = EnvGuard::set(
-        "EXACT_APPLE_LLVM_BIN",
-        llvm.to_str().expect("UTF-8 temporary path"),
-    );
-    let prepared = prepare_apple_simulator_link_archives(
+    let selected = apple_lipo_for(false, Some(llvm.as_os_str()));
+    assert_eq!(selected, lipo);
+    let prepared = prepare_apple_simulator_link_archives_with_lipo(
         &install,
         "aarch64-apple-ios-sim",
         &temporary.path().join("out"),
         std::slice::from_ref(&archive),
+        &selected,
     )
     .expect("inspect with llvm-lipo");
     assert_eq!(
         fs::read(&prepared[0].linked).expect("staged archive"),
         b"thin-arm64"
+    );
+
+    for llvm_bin in [None, Some(OsStr::new(""))] {
+        let selected = apple_lipo_for(false, llvm_bin);
+        assert_eq!(selected, Path::new("llvm-lipo"));
+        let output = Command::new(selected)
+            .arg("-archs")
+            .arg(&archive.source)
+            .env("PATH", &llvm)
+            .output()
+            .expect("find llvm-lipo on PATH");
+        assert!(output.status.success(), "{output:?}");
+        assert_eq!(output.stdout, b"arm64\n");
+    }
+    assert_eq!(
+        apple_lipo_for(true, Some(llvm.as_os_str())),
+        Path::new("lipo")
     );
 }
 
@@ -656,40 +670,46 @@ fn simulator_thinning_refuses_an_unauthenticated_input_before_lipo() {
 }
 
 #[test]
-fn missing_lipo_names_xcode_command_line_tools() {
+fn missing_lipo_names_the_attempted_tool_and_its_remedy() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let source = temporary.path().join("libhermesvm_a.a");
     fs::write(&source, b"archive").expect("archive");
-    let digest = digest_file(&source).expect("archive digest");
-    let install = EngineInstall {
-        root: temporary.path().to_path_buf(),
-        include_dir: temporary.path().join("include"),
-        lib_root: temporary.path().to_path_buf(),
-        vm_archive: source.clone(),
-        lean_vm_archive: None,
-        icu_i18n_archive: None,
-        icu_uc_archive: None,
-        icu_data_archive: None,
-        icu_full_data_archive: None,
-        icu_en_data_archive: None,
-        icu_en_filter: None,
-        icu_trimmed_filter: None,
-        hermesc: temporary.path().join("hermesc"),
-        authenticated_archive_digests: [(source.clone(), digest)].into_iter().collect(),
-    };
-    let error = prepare_apple_simulator_link_archives_with_lipo(
-        &install,
-        "aarch64-apple-ios-sim",
-        &temporary.path().join("out"),
-        &[LinkArchive {
-            library: "hermesvm_a".to_owned(),
-            source,
-        }],
-        &temporary.path().join("missing-lipo"),
-    )
-    .expect_err("missing lipo must fail clearly");
-    assert!(error.contains("Xcode command-line tools"), "{error}");
-    assert!(error.contains("xcode-select --install"), "{error}");
+    let archives = [LinkArchive {
+        library: "hermesvm_a".to_owned(),
+        source,
+    }];
+    let install = test_install(temporary.path(), &archives, true);
+    for (tool, remedy) in [
+        (
+            "llvm-lipo",
+            "Fix `EXACT_APPLE_LLVM_BIN` or unset it and put LLVM's bin directory on `PATH`.",
+        ),
+        (
+            "lipo",
+            "Install Xcode command-line tools (run `xcode-select --install`).",
+        ),
+    ] {
+        let lipo = temporary.path().join("missing-tools").join(tool);
+        let error = prepare_apple_simulator_link_archives_with_lipo(
+            &install,
+            "aarch64-apple-ios-sim",
+            &temporary.path().join("out"),
+            &archives,
+            &lipo,
+        )
+        .expect_err("missing lipo must fail clearly");
+        assert!(
+            error.starts_with(&format!("cannot run `{}`", lipo.display())),
+            "{error}"
+        );
+        assert!(error.ends_with(remedy), "{error}");
+        assert_eq!(error.contains("xcode-select"), tool == "lipo", "{error}");
+        assert_eq!(
+            error.contains("EXACT_APPLE_LLVM_BIN"),
+            tool == "llvm-lipo",
+            "{error}"
+        );
+    }
 }
 
 #[test]

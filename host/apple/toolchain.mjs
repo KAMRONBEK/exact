@@ -104,6 +104,8 @@ function cargoEnvironment(args, options, env) {
   const apple = targets.filter(target => /^(aarch64|x86_64)-apple-(ios(-sim)?|watchos(-sim)?|darwin)$/.test(target ?? ''));
   if (!apple.length) return options;
   const environment = { ...env };
+  // Cargo runs build scripts from their package directories.
+  if (env.EXACT_APPLE_LLVM_BIN) environment.EXACT_APPLE_LLVM_BIN = resolve(env.EXACT_APPLE_LLVM_BIN);
   let selectedSdk;
   for (const target of apple) {
     const mac = target.endsWith('-darwin'), watch = /-watchos(-sim)?$/.test(target), sim = target.endsWith('-sim') || target === 'x86_64-apple-ios';
