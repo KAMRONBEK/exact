@@ -541,7 +541,7 @@ export function settingChanges(record, env = process.env, app = null, { launch =
 /** `env`'s value for `name` in a process started with it. Windows reads a name without regard to case, and of
  * entries that differ only in case the child gets the first in sort order, which is the one Node's `child_process`
  * passes (https://nodejs.org/api/child_process.html#child_processspawncommand-args-options, `options.env`). */
-const childValue = (env, name, windows) => windows ? env[Object.keys(env).filter(key => key.toUpperCase() === name.toUpperCase()).sort()[0]] : env[name];
+export const childValue = (env, name, windows) => windows ? env[Object.keys(env).filter(key => key.toUpperCase() === name.toUpperCase()).sort()[0]] : env[name];
 
 /** `settingChanges` for the build in `dist`, from what its `.exact-build.json` says it inlined (`env`). */
 export function changedSettings(dist, env = process.env, app = null) {

@@ -32,7 +32,7 @@ import { compilerError, compilerWarnings, warningLines, depInfoInputs, newerThan
 import { CONFIG_JSON, DECLARATIONS, moduleGraph } from './module-graph.mjs';
 import { bakeOutput, bakeTarget, claimLive, developmentBuildEnv, executableName, resolveApp, shaderWatchRoots } from './app.mjs';
 import { bakeTool, linkedBakeDir } from './linked-plan.mjs';
-import { launchNames } from '../js/bake/src/__exact_env.mjs';
+import { childValue, launchNames } from '../js/bake/src/__exact_env.mjs';
 import { simulatorLaunch } from '../host/apple/devices.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -191,14 +191,16 @@ export function logged(command, args, log, { cwd, env, append = false, say = nul
     });
   });
 }
-/** The environment a drive's build of `app` runs with: `env` without each name app.json marks `"launch": true`
- * (LLP 1153.002 D1) that `env` gives and `launch`, the environment the drive starts the app with, gives too. That value
- * is the launch's, not the build's (`settingChanges` with `launch`); a build that took it would bake it, and its
- * receipt and the reuse cache would keep it, as the build's value. A value Bun loaded from `.env` (EXACT_BUN_LOADED)
- * is the app's and stays. */
-export function driveBuildEnv(app, env = process.env, launch = env) {
-  const loaded = new Set((env.EXACT_BUN_LOADED ?? '').split(',').filter(Boolean)), marked = launchNames(app.manifest?.env);
-  return Object.fromEntries(Object.entries(env).filter(([name]) => !marked.has(name) || launch[name] === undefined || loaded.has(name)));
+/** Drop shell values the launch supplies for settings marked `"launch": true` (LLP 1153.002 D1).
+ * Keep values that `EXACT_BUN_LOADED` records as loaded by Bun from its `.env` files. */
+export function driveBuildEnv(app, env = process.env, launch = env, { windows = false } = {}) {
+  const fold = windows ? name => name.toUpperCase() : name => name;
+  const loaded = new Set((childValue(env, 'EXACT_BUN_LOADED', windows) ?? '').split(',').filter(Boolean).map(fold));
+  const marked = new Set([...launchNames(app.manifest?.env)].map(fold));
+  return Object.fromEntries(Object.entries(env).filter(([name]) => {
+    const key = fold(name);
+    return !marked.has(key) || loaded.has(key) || childValue(launch, name, windows) === undefined;
+  }));
 }
 /** The environment a drive on `host` starts the app with: a simulator's (`simulatorLaunch`), else this process's. */
 const driveLaunch = host => host === 'ios' ? simulatorLaunch() : process.env;
@@ -300,10 +302,9 @@ export function moduleRefusal(built, baked) {
 
 /** The bake tool baking `app` into the new directory `out`, for a drive on `host`. */
 async function bakePlan(app, out, log, host) {
-  const tooled = bakeTool.options(), options = { ...tooled, env: driveBuildEnv(app, tooled.env, driveLaunch(host)) };
-  const tool = await logged(bakeTool.command, bakeTool.args, log, options);
+  const options = bakeTool.options(), tool = await logged(bakeTool.command, bakeTool.args, log, options);
   if (tool.code) return { ...tool, tool: true };
-  return logged(bakeTool.built, [app.dir, '--out', out], log, { ...options, append: true });
+  return logged(bakeTool.built, [app.dir, '--out', out], log, { ...options, env: driveBuildEnv(app, options.env, driveLaunch(host)), append: true });
 }
 
 /** Bakes the plan of `state`'s plan-only edit and keeps it beside the build:
@@ -459,7 +460,8 @@ export async function windowsBuildFirst(app, { say = line => console.error(line)
   if (changed && !changed.length) return 0;
   const log = resolve(app.dir, '.exact', 'windows-build.log');
   say(`building for Windows: ${changed ? `the build is older than its sources (${named(app, changed)} changed)` : 'there is no build yet'}; its log: ${shown(log)}`);
-  const { code, output } = await logged(process.execPath, [resolve(ROOT, 'host/windows/build.mjs'), app.name], log, { env: { ...driveBuildEnv(app), EXACT_APP_DIR: app.dir }, say });
+  const env = driveBuildEnv(app, process.env, process.env, { windows: true });
+  const { code, output } = await logged(process.execPath, [resolve(ROOT, 'host/windows/build.mjs'), app.name], log, { env: { ...env, EXACT_APP_DIR: app.dir }, say });
   if (code) say(failureSummary(output, { host: 'windows', code, log: shown(log) }));
   else for (const line of warningLines(app.dir, 'windows', compilerWarnings(output))) say(line);
   return code;
@@ -489,8 +491,10 @@ export async function prebuild(app, args, { timeout = 30_000, say = line => cons
   const sources = prebuildSources(app);
   const out = openSync(log, 'w');
   const build = [resolve(ROOT, 'host/apple/build.mjs'), ...built];
+  // Device launches use phoneLaunch. tvOS receipts have no simulator launch environment.
+  const env = host === 'tvos' || args.includes('--device') ? process.env : driveBuildEnv(app, process.env, driveLaunch(host));
   const child = spawn('/bin/sh', ['-c', '"$0" "$@"; built=$?; "$0" "$TOOL" --tool "$built"; exit $built', process.execPath, ...build],
-    { detached: true, stdio: ['ignore', out, out], env: { ...process.env, TOOL: fileURLToPath(import.meta.url), EXACT_PREBUILD_RECORD: record, EXACT_PREBUILD_LOG: log, EXACT_PREBUILD_ID: id } });
+    { detached: true, stdio: ['ignore', out, out], env: { ...env, TOOL: fileURLToPath(import.meta.url), EXACT_PREBUILD_RECORD: record, EXACT_PREBUILD_LOG: log, EXACT_PREBUILD_ID: id } });
   publish(record, { id, args: built, sources, started: new Date().toLocaleTimeString('en-GB'), pid: child.pid });
   closeSync(out);
   let ended = null;
