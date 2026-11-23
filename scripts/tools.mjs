@@ -388,15 +388,27 @@ function committedInputs(root, inputs) {
   if (dirty) throw new Error(`tools keep keeps committed sources only:\n${dirty}`);
 }
 
+function dirtyPaths(root) {
+  const entries = gitAt(root, 'status', '--porcelain', '--untracked-files=normal', '-z').split('\0');
+  const paths = [];
+  for (let i = 0; entries[i]; i++) {
+    const entry = entries[i];
+    paths.push(entry.slice(3));
+    if (/[RC]/.test(entry.slice(0, 2))) paths.push(entries[++i]);
+  }
+  return paths;
+}
+
 export async function keep(triple = hostTriple(), { root = ROOT, env = process.env, build = buildProducts, readMetadata = recordMetadata } = {}) {
+  const override = Object.keys(env).find(name => /^(RUSTFLAGS|CARGO_(ENCODED_RUSTFLAGS|BUILD_RUSTFLAGS|TARGET_.+_RUSTFLAGS|PROFILE_.*|BUILD_DEP_INFO_BASEDIR))$/.test(name));
+  if (override) throw new Error(`tools keep refuses while ${override} is set`);
   const commit = gitAt(root, 'rev-parse', 'HEAD');
+  const initiallyDirty = dirtyPaths(root);
   const { metadata, dirs } = readMetadata(root, env);
   const recipe = triple === hostTriple() ? HELPER_RECIPE : CROSS_RECIPE;
   committedInputs(root, [...WORKSPACE_INPUTS, ...recipe, ...LEAF_RECIPE, ...dirs]);
   const { products, files } = await build(triple);
-  if (gitAt(root, 'rev-parse', 'HEAD') !== commit) throw new Error('HEAD changed while building the tool set. No set was kept.');
   const inputs = [...new Set([...Object.values(products).flatMap(product => product.inputs), ...metadata.inputs])];
-  committedInputs(root, [...WORKSPACE_INPUTS, ...inputs]);
   const workspace = sha(JSON.stringify(workspaceManifest(root)));
   for (const product of Object.values(products)) {
     product.closure = lockClosure(root, product.crate);
@@ -407,6 +419,14 @@ export async function keep(triple = hostTriple(), { root = ROOT, env = process.e
   const hashed = files => files.map(file => [file, hashes.get(file)]);
   for (const product of Object.values(products)) product.inputs = hashed(product.inputs);
   metadata.inputs = hashed(metadata.inputs);
+  if (gitAt(root, 'rev-parse', 'HEAD') !== commit) throw new Error('HEAD changed while building the tool set. No set was kept.');
+  committedInputs(root, [...WORKSPACE_INPUTS, ...inputs]);
+  const inputPaths = inputs.map(file => resolve(root, file));
+  const dirty = initiallyDirty.find(file => {
+    const path = resolve(root, file);
+    return inputPaths.some(input => within(path, input) || within(input, path));
+  });
+  if (dirty) throw new Error(`tools keep keeps committed sources only: ${dirty} was dirty before the build`);
   const manifest = { version: 1, triple, commit, source: 'built', verifiedBuild: true, built: Date.now(), products, metadata };
   const id = sha(JSON.stringify(Object.entries(products).map(([name, product]) => [name, product.inputs, product.closure, product.workspace]))).slice(0, 24);
   const dir = cacheDir(env, triple), entry = resolve(dir, id), making = `${entry}.${process.pid}`;
@@ -672,7 +692,7 @@ async function recordCommit(origin, stream, base, commit, id, newer) {
 function gitAt(tree, ...args) {
   const r = spawnSync('git', ['-C', tree, ...args], { encoding: 'utf8', maxBuffer: 32 << 20 });
   if (r.status !== 0) throw new Error(`git ${args[0]}: ${r.error?.message ?? r.stderr.trim()}`);
-  return r.stdout.trim();
+  return args.includes('-z') ? r.stdout : r.stdout.trim();
 }
 
 function cleanRevision(tree) {

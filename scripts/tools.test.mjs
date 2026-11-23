@@ -335,10 +335,9 @@ test.skipIf(process.platform === 'win32')('builtContract passes over a set with 
   } finally { m.done(); }
 });
 
-test('keep verifies committed tool inputs before and after building', async () => {
+function keepFixture() {
   const m = machine([], { rust: false });
   const root = resolve(m.env.HOME, 'checkout'), file = 'sources/input.rs', product = 'contract';
-  mkdirSync(resolve(root, 'sources'), { recursive: true });
   const git = (...args) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   const commit = message => {
     git('add', '--all');
@@ -346,12 +345,30 @@ test('keep verifies committed tool inputs before and after building', async () =
     return git('rev-parse', 'HEAD');
   };
   const artifact = resolve(m.env.HOME, product);
+  const run = ({ duringBuild, inputs = ['sources'], env = {}, beforeDigest } = {}) => keep(hostTriple(), {
+    root, env: { ...m.env, ...env }, readMetadata: () => ({ dirs: ['sources'], metadata: { inputs: [] } }),
+    build() {
+      copyFileSync(process.platform === 'win32' ? process.execPath : '/usr/bin/true', artifact);
+      duringBuild?.();
+      const output = { file: product, get crate() { beforeDigest?.(); return product; }, inputs };
+      return { products: { [product]: output }, files: new Map([[product, artifact]]) };
+    },
+  });
   try {
+    mkdirSync(resolve(root, 'sources'), { recursive: true });
     git('init', '-q');
     writeFileSync(resolve(root, 'Cargo.toml'), '[workspace]\n');
     writeFileSync(resolve(root, 'Cargo.lock'), '[[package]]\nname = "contract"\nversion = "0.1.0"\n');
     writeFileSync(resolve(root, '.gitignore'), '.DS_Store\nignored-link\n');
     writeFileSync(resolve(root, file), 'first');
+    return { ...m, root, file, product, git, commit, run };
+  } catch (error) { m.done(); throw error; }
+}
+
+test('keep verifies committed tool inputs before and after building', async () => {
+  const m = keepFixture();
+  const { root, file, product, git, commit, run } = m;
+  try {
     mkdirSync(resolve(root, 'apps/unrelated'), { recursive: true });
     const app = resolve(root, 'apps/unrelated/app.contract');
     writeFileSync(app, 'first');
@@ -359,14 +376,6 @@ test('keep verifies committed tool inputs before and after building', async () =
     writeFileSync(app, 'other');
     const second = commit('second');
     git('checkout', '-q', '--detach', first);
-    const run = (duringBuild = () => {}, inputs = ['sources']) => keep(hostTriple(), {
-      root, env: m.env, readMetadata: () => ({ dirs: ['sources'], metadata: { inputs: [] } }),
-      build() {
-        copyFileSync(process.platform === 'win32' ? process.execPath : '/usr/bin/true', artifact);
-        duringBuild();
-        return { products: { [product]: { file: product, crate: 'contract', inputs } }, files: new Map([[product, artifact]]) };
-      },
-    });
     const prior = await run();
     assert.equal(prior.manifest.verifiedBuild, true);
     assert.equal(JSON.parse(readFileSync(resolve(prior.dir, 'manifest.json'), 'utf8')).verifiedBuild, true);
@@ -375,7 +384,7 @@ test('keep verifies committed tool inputs before and after building', async () =
     const withIgnored = await run();
     assert.deepEqual(withIgnored.manifest.products[product].inputs, [['sources', digest(resolve(root, 'sources'))]]);
     writeFileSync(resolve(root, file), 'dirty before the build');
-    await assert.rejects(run(() => git('restore', file)), /keeps committed sources only:[\s\S]*sources\/input\.rs/);
+    await assert.rejects(run({ duringBuild: () => git('restore', file) }), /keeps committed sources only:[\s\S]*sources\/input\.rs/);
     assert.equal(readFileSync(resolve(root, file), 'utf8'), 'dirty before the build');
     git('restore', file);
     mkdirSync(resolve(root, 'ud'));
@@ -385,11 +394,12 @@ test('keep verifies committed tool inputs before and after building', async () =
     assert.equal((await run()).dir, withIgnored.dir);
     git('restore', 'apps/unrelated/app.contract');
     rmSync(resolve(root, 'ud'), { recursive: true });
-    await assert.rejects(run(() => git('checkout', '-q', '--detach', second)), /HEAD changed while building the tool set\. No set was kept\./);
+    await assert.rejects(run({ duringBuild: () => git('checkout', '-q', '--detach', second) }), /HEAD changed while building the tool set\. No set was kept\./);
     assert.equal(git('status', '--porcelain'), '');
     const untracked = 'sources/untracked.rs';
     git('config', 'status.showUntrackedFiles', 'no');
-    await assert.rejects(run(() => writeFileSync(resolve(root, untracked), 'untracked'), [untracked]), /keeps committed sources only:[\s\S]*sources\/untracked\.rs/);
+    await assert.rejects(run({ duringBuild: () => writeFileSync(resolve(root, untracked), 'untracked'), inputs: [untracked] }),
+      /keeps committed sources only:[\s\S]*sources\/untracked\.rs/);
     rmSync(resolve(root, untracked));
     if (process.platform !== 'win32') {
       symlinkSync('ignored-link', resolve(root, 'apps/unrelated/ignored-link'));
@@ -397,6 +407,57 @@ test('keep verifies committed tool inputs before and after building', async () =
     }
     assert.deepEqual(readdirSync(m.cache).sort(), [basename(prior.dir), basename(withIgnored.dir)].sort());
   } finally { m.done(); }
+});
+
+test.each([
+  ['CARGO_PROFILE_HOST_DEV_OVERFLOW_CHECKS', 'true'],
+  ['RUSTFLAGS', '-Cdebug-assertions=on'],
+  ['CARGO_ENCODED_RUSTFLAGS', ''],
+  ['CARGO_BUILD_RUSTFLAGS', '-Cdebug-assertions=on'],
+  ['CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS', '-Cdebug-assertions=on'],
+  ['CARGO_BUILD_DEP_INFO_BASEDIR', 'sources'],
+])('keep refuses the build override %s before building', async (name, value) => {
+  const { cache, commit, run, done } = keepFixture();
+  try {
+    commit('first');
+    let built = false;
+    await assert.rejects(run({ env: { [name]: value }, duringBuild: () => { built = true; } }), new RegExp(name));
+    assert.equal(built, false);
+    assert.throws(() => readdirSync(cache), { code: 'ENOENT' });
+  } finally { done(); }
+});
+
+test('keep rejects a restored input that was dirty outside the pre-build scope', async () => {
+  const { root, cache, git, commit, run, done } = keepFixture();
+  try {
+    const file = 'docs/contract grammar.md';
+    mkdirSync(resolve(root, 'docs'));
+    writeFileSync(resolve(root, file), 'first');
+    commit('first');
+    writeFileSync(resolve(root, file), 'dirty before the build');
+    await assert.rejects(run({ inputs: [file], duringBuild: () => git('restore', file) }), /docs\/contract grammar\.md was dirty before the build/);
+    assert.equal(readFileSync(resolve(root, file), 'utf8'), 'first');
+
+    const untracked = resolve(root, 'untracked');
+    mkdirSync(untracked);
+    writeFileSync(resolve(untracked, 'input.rs'), 'untracked before the build');
+    await assert.rejects(run({ inputs: ['untracked/input.rs'], duringBuild: () => rmSync(untracked, { recursive: true }) }),
+      /untracked\/ was dirty before the build/);
+    assert.equal(git('status', '--porcelain'), '');
+    assert.throws(() => readdirSync(cache), { code: 'ENOENT' });
+  } finally { done(); }
+});
+
+test('keep checks Git status after reading the inputs for their digests', async () => {
+  const { root, file, cache, commit, run, done } = keepFixture();
+  try {
+    commit('first');
+    // The crate is read to compute the lockfile closure just before hashing the input files.
+    const beforeDigest = () => writeFileSync(resolve(root, file), 'edited after the build');
+    await assert.rejects(run({ inputs: [file], beforeDigest }), /keeps committed sources only:[\s\S]*sources\/input\.rs/);
+    assert.equal(readFileSync(resolve(root, file), 'utf8'), 'edited after the build');
+    assert.throws(() => readdirSync(cache), { code: 'ENOENT' });
+  } finally { done(); }
 });
 
 test('keep takes the native executable and dep-info despite an inherited cross target', () => {
