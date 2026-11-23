@@ -10,6 +10,7 @@ import { createHash } from 'node:crypto';
 import { decodeProfile, xcodeRefusal } from './devices.mjs';
 import { appleCrossReport, CROSS_IOS_ROWS, distributionToolchain, ensureWatchSDK, installWatchSDK } from './sdk.mjs';
 import { iosTestRuns } from './xctest.mjs';
+import { appleCargo } from '../../scripts/cargo-check.mjs';
 
 test.skipIf(process.platform !== 'darwin')('certificate signing names its identity, bounds keychain waits and explains failures', () => {
   const dir = mkdtempSync(resolve(tmpdir(), 'exact-signing-'));
@@ -229,23 +230,33 @@ test('SDK discovery uses installed metadata and preserves paths containing space
 
 test('Linux setup names missing cross tools and uses the selected LLVM directory', () => fixture(({ env }) => {
   const calls = [], llvm = '/selected LLVM/bin';
+  const lipo = `${llvm}/llvm-lipo`;
   const rows = appleCrossReport({ ...env, EXACT_APPLE_LLVM_BIN: llvm }, (command, args) => {
     calls.push(command); return spawnSync('/usr/bin/false', args, { encoding: 'utf8' });
   });
   expect(rows.map(row => row.name)).toEqual(CROSS_IOS_ROWS);
   expect(rows.every(row => !row.ok && row.fix)).toBe(true);
   expect(rows[0].have).toContain('no iphoneos compiler configuration');
-  expect(calls).toContain(resolve(llvm, 'llvm-lipo'));
-  expect(appleCommand('lipo', ['-archs', 'App'], { env: { EXACT_APPLE_LLVM_BIN: llvm } }, 'linux')[0]).toBe(resolve(llvm, 'llvm-lipo'));
+  expect(calls).toContain(lipo);
+  expect(appleCommand('lipo', ['-archs', 'App'], { env: { EXACT_APPLE_LLVM_BIN: llvm } }, 'linux')[0]).toBe(lipo);
 }));
 
-test('Cargo build scripts see the same relative LLVM override as the Apple toolchain', () => fixture(({ root, env }) => {
-  const llvm = resolve(root, 'LLVM tools/bin');
-  const options = { cwd: resolve(root, 'workspace'), env: { ...env, EXACT_APPLE_LLVM_BIN: relative(process.cwd(), llvm) } };
-  const [lipo] = appleCommand('lipo', ['-archs', 'App'], options, 'linux');
+test('Cargo build scripts receive the absolute LLVM override unchanged', () => fixture(({ root, env }) => {
+  const llvm = `${resolve(root, 'LLVM tools/bin')}/`;
+  const options = { cwd: resolve(root, 'workspace'), env: { ...env, EXACT_APPLE_LLVM_BIN: llvm } };
   const [, , cargo] = appleCommand('cargo', ['build', '--target', 'aarch64-apple-ios-sim'], options, 'linux');
-  expect(lipo).toBe(resolve(llvm, 'llvm-lipo'));
   expect(cargo.env.EXACT_APPLE_LLVM_BIN).toBe(llvm);
+}));
+
+test('Linux Apple tools reject a relative LLVM override before launching processes', () => fixture(({ root, env }) => {
+  const bin = 'LLVM tools/bin';
+  const options = { cwd: resolve(root, '.exact/shells'), env: { ...env, EXACT_APPLE_LLVM_BIN: bin }, stdio: ['ignore', 'pipe', 'inherit'] };
+  const args = ['build', '--target', 'aarch64-apple-ios-sim'];
+  const error = `EXACT_APPLE_LLVM_BIN must be an absolute path. Set it to ${resolve(bin)}.`;
+  expect(() => appleCargo('cargo', args, options, 'linux')).toThrow(error);
+  expect(() => appleCommand('cargo', args, options, 'linux')).toThrow(error);
+  expect(() => appleCommand('lipo', ['-archs', 'App'], options, 'linux')).toThrow(error);
+  expect(() => appleCrossReport(options.env, () => { throw new Error('unexpected tool launch'); })).toThrow(error);
 }));
 
 test.each([

@@ -506,19 +506,52 @@ fn checked_command(command: &mut Command, purpose: &str) -> std::process::Output
     output
 }
 
-#[cfg(unix)]
+#[test]
+fn apple_lipo_selection_depends_on_host_and_override() {
+    let llvm = Path::new("llvm").join("bin");
+    assert_eq!(
+        apple_lipo_for(false, Some(llvm.as_os_str())),
+        llvm.join("llvm-lipo")
+    );
+    for llvm_bin in [None, Some(OsStr::new(""))] {
+        assert_eq!(apple_lipo_for(false, llvm_bin), Path::new("llvm-lipo"));
+    }
+    assert_eq!(
+        apple_lipo_for(true, Some(llvm.as_os_str())),
+        Path::new("lipo")
+    );
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
 #[test]
 fn off_a_mac_llvm_lipo_uses_the_override_or_path() {
     use std::os::unix::fs::PermissionsExt;
 
+    const CHILD: &str = "HERMES_TEST_SIMULATOR_LIPO_CHILD";
     let temporary = tempfile::tempdir().expect("temporary directory");
-    let source = temporary.path().join("libtiny.a");
-    fs::write(&source, b"thin-arm64").expect("archive");
-    let archive = LinkArchive {
-        library: "tiny".to_owned(),
-        source,
-    };
-    let install = test_install(temporary.path(), std::slice::from_ref(&archive), true);
+    if env::var_os(CHILD).is_some() {
+        let source = temporary.path().join("libtiny.a");
+        fs::write(&source, b"thin-arm64").expect("archive");
+        let archives = [LinkArchive {
+            library: "tiny".to_owned(),
+            source,
+        }];
+        let install = test_install(temporary.path(), &archives, true);
+        let prepared = build_support::prepare_apple_simulator_link_archives(
+            &install,
+            "aarch64-apple-ios-sim",
+            &temporary.path().join("out"),
+            &archives,
+        )
+        .expect("stage the Simulator archive with llvm-lipo");
+        assert_ne!(prepared[0].linked, archives[0].source);
+        assert_eq!(
+            fs::read(&prepared[0].linked).expect("staged archive"),
+            b"thin-arm64"
+        );
+        return;
+    }
+
     let llvm = temporary.path().join("llvm");
     fs::create_dir(&llvm).expect("LLVM bin directory");
     let lipo = llvm.join("llvm-lipo");
@@ -529,37 +562,27 @@ fn off_a_mac_llvm_lipo_uses_the_override_or_path() {
     .expect("fake llvm-lipo");
     fs::set_permissions(&lipo, fs::Permissions::from_mode(0o755)).expect("executable llvm-lipo");
 
-    let selected = apple_lipo_for(false, Some(llvm.as_os_str()));
-    assert_eq!(selected, lipo);
-    let prepared = prepare_apple_simulator_link_archives_with_lipo(
-        &install,
-        "aarch64-apple-ios-sim",
-        &temporary.path().join("out"),
-        std::slice::from_ref(&archive),
-        &selected,
-    )
-    .expect("inspect with llvm-lipo");
-    assert_eq!(
-        fs::read(&prepared[0].linked).expect("staged archive"),
-        b"thin-arm64"
-    );
-
-    for llvm_bin in [None, Some(OsStr::new(""))] {
-        let selected = apple_lipo_for(false, llvm_bin);
-        assert_eq!(selected, Path::new("llvm-lipo"));
-        let output = Command::new(selected)
-            .arg("-archs")
-            .arg(&archive.source)
-            .env("PATH", &llvm)
-            .output()
-            .expect("find llvm-lipo on PATH");
-        assert!(output.status.success(), "{output:?}");
-        assert_eq!(output.stdout, b"arm64\n");
+    let mut child = Command::new(env::current_exe().expect("test executable"));
+    child
+        .args(["--exact", "off_a_mac_llvm_lipo_uses_the_override_or_path"])
+        .env(CHILD, "1");
+    for (lookup, path, bin) in [
+        ("override", temporary.path(), Some(llvm.as_path())),
+        ("PATH", llvm.as_path(), None),
+    ] {
+        child.env("PATH", path);
+        if let Some(bin) = bin {
+            child.env("EXACT_APPLE_LLVM_BIN", bin);
+        } else {
+            child.env_remove("EXACT_APPLE_LLVM_BIN");
+        }
+        let output = child.output().expect("run isolated archive test");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success() && stdout.contains("1 passed"),
+            "{lookup}: {output:?}"
+        );
     }
-    assert_eq!(
-        apple_lipo_for(true, Some(llvm.as_os_str())),
-        Path::new("lipo")
-    );
 }
 
 #[cfg(unix)]
@@ -709,6 +732,51 @@ fn missing_lipo_names_the_attempted_tool_and_its_remedy() {
             tool == "llvm-lipo",
             "{error}"
         );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn simulator_lipo_failures_name_the_executable() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let source = temporary.path().join("libtiny.a");
+    fs::write(&source, b"archive").expect("archive");
+    let archives = [LinkArchive {
+        library: "tiny".to_owned(),
+        source,
+    }];
+    let install = test_install(temporary.path(), &archives, true);
+    for (flag, successful_probe) in [
+        ("-archs", ""),
+        (
+            "-thin arm64",
+            "if [ \"$1\" = -archs ]; then printf 'arm64 x86_64\\n'; exit 0; fi\n",
+        ),
+    ] {
+        let lipo = temporary.path().join(flag).join("llvm-lipo");
+        fs::create_dir(lipo.parent().unwrap()).expect("LLVM bin directory");
+        fs::write(
+            &lipo,
+            format!("#!/bin/sh\n{successful_probe}printf 'bad archive\\n' >&2\nexit 1\n"),
+        )
+        .expect("fake llvm-lipo");
+        fs::set_permissions(&lipo, fs::Permissions::from_mode(0o755))
+            .expect("executable llvm-lipo");
+        let error = prepare_apple_simulator_link_archives_with_lipo(
+            &install,
+            "aarch64-apple-ios-sim",
+            &temporary.path().join("out"),
+            &archives,
+            &lipo,
+        )
+        .expect_err("llvm-lipo rejects the archive");
+        assert!(
+            error.starts_with(&format!("{} {flag} failed", lipo.display())),
+            "{error}"
+        );
+        assert!(error.ends_with("bad archive"), "{error}");
     }
 }
 

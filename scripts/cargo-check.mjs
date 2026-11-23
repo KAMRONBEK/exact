@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
-import { spawn, spawnSync } from '../host/apple/toolchain.mjs';
+import { appleLlvmBin, spawn, spawnSync } from '../host/apple/toolchain.mjs';
 import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { OFFLINE_MISSING, withHostDeployment } from './filesystem.mjs';
@@ -478,12 +478,14 @@ export function targetRustflags(target, flags, { cwd = process.cwd(), env = proc
 
 /** Make Apple's deployment environment part of every target unit's Cargo hash. Add to each existing flags source
  * so Cargo keeps choosing and merging flags itself; introducing a target table would hide `build.rustflags`. */
-export function appleCargo(command, arguments_, options = {}) {
+export function appleCargo(command, arguments_, options = {}, platform = process.platform) {
   const targets = arguments_.filter((value, index) => arguments_[index - 1] === '--target' || value.startsWith('--target='));
   const apple = command === 'cargo' && (targets.some(value => value.includes('-apple-')) ||
-    !targets.length && process.platform === 'darwin' && ['build', 'rustc', 'check', 'test', 'clippy'].includes(arguments_[0]));
+    !targets.length && platform === 'darwin' && ['build', 'rustc', 'check', 'test', 'clippy'].includes(arguments_[0]));
   if (!apple) return [command, arguments_, options];
   const environment = { ...(options.env ?? process.env) };
+  // The diagnostics relay changes to the Cargo workspace before invoking the toolchain.
+  if (platform === 'linux') appleLlvmBin(environment);
   // LIBSQLITE3_FLAGS is global to a Cargo invocation. Recompute it for each
   // destination, including a nested Mac bake after an iOS compile.
   const sqliteFlags = ['-DSQLITE_ENABLE_LOCKING_STYLE=0', '-Dfstatfs=exact_sqlite_fstatfs'];

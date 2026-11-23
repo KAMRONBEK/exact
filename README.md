@@ -571,7 +571,7 @@ You can compile, package, and sign iOS bundles from Linux or WSL 2 (Ubuntu 24.04
    APPIMAGE_EXTRACT_AND_RUN=1 xtool sdk install --slim /path/to/Xcode_27.1.xip
    ```
    *(Omit `--slim` if you need watchOS simulator companions. In WSL 2, keep the checkout and SDK inside Ubuntu's Linux filesystem.)*
-3. Add LLVM's `bin` directory, Swift, and `rcodesign` to `PATH` (plus `zip` for IPAs), and set `EXACT_APPLE_LLVM_BIN` (e.g. `/usr/lib/llvm-23/bin`).
+3. Add LLVM's `bin` directory, Swift, and `rcodesign` to `PATH` (plus `zip` for IPAs), and set `EXACT_APPLE_LLVM_BIN` to the absolute path of LLVM's `bin` directory (e.g. `/usr/lib/llvm-23/bin`).
 4. Run `bun scripts/exact.mjs setup` to install the iOS Rust targets, then build:
    ```sh
    bun host/apple/build.mjs --ios --no-install hello-apple

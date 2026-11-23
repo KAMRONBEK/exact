@@ -1581,7 +1581,8 @@ pub(crate) fn prepare_apple_simulator_link_archives_with_lipo(
                 .map_err(|error| lipo_launch_error(lipo, &staged, error))?;
             if !output.status.success() {
                 return Err(format!(
-                    "lipo -thin {arch} failed for verified snapshot of {} with {}: {}",
+                    "{} -thin {arch} failed for verified snapshot of {} with {}: {}",
+                    lipo.display(),
                     inspected.snapshot.archive.source.display(),
                     output.status,
                     String::from_utf8_lossy(&output.stderr).trim()
@@ -1900,7 +1901,8 @@ fn lipo_architectures(lipo: &Path, archive: &Path) -> Result<Vec<String>, String
         .map_err(|error| lipo_launch_error(lipo, archive, error))?;
     if !output.status.success() {
         return Err(format!(
-            "lipo -archs failed for {} with {}: {}",
+            "{} -archs failed for {} with {}: {}",
+            lipo.display(),
             archive.display(),
             output.status,
             String::from_utf8_lossy(&output.stderr).trim()
