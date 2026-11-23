@@ -3,7 +3,7 @@ import { spawn as systemSpawn, spawnSync as systemSpawnSync } from 'node:child_p
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { homedir, tmpdir } from 'node:os';
-import { basename, dirname, isAbsolute, resolve } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { plistCommand } from './plist.mjs';
 import { windowsMetalCommand } from './metal.mjs';
@@ -24,12 +24,6 @@ export const swiftOptimizationKey = (env = process.env, args = process.argv) => 
 /** The watch app's deployment target: arm64 runs from watchOS 26, and the watch app is built for arm64 alone (LLP 1126.002 D7). */
 export const WATCH_MINIMUM_OS = '26.0';
 const SDK_KEYS = { iphoneos: 'arm64-apple-ios', iphonesimulator: 'arm64-apple-ios-simulator', macosx: 'arm64-apple-macosx', watchos: 'arm64-apple-watchos', watchsimulator: 'arm64-apple-watchos-simulator' };
-
-export function appleLlvmBin(env) {
-  const bin = env.EXACT_APPLE_LLVM_BIN;
-  if (bin && !isAbsolute(bin)) throw new Error(`host/apple: EXACT_APPLE_LLVM_BIN must be an absolute path. Set it to ${resolve(bin)}.`);
-  return bin;
-}
 
 export function crossSdk(name, env = process.env) {
   if (!Object.hasOwn(SDK_KEYS, name)) throw new Error(`host/apple: no cross SDK mapping for ${name}`);
@@ -109,7 +103,6 @@ function cargoEnvironment(args, options, env) {
   const targets = buildArgs.flatMap((arg, index) => arg === '--target' ? [buildArgs[index + 1]] : arg.startsWith('--target=') ? [arg.slice(9)] : []);
   const apple = targets.filter(target => /^(aarch64|x86_64)-apple-(ios(-sim)?|watchos(-sim)?|darwin)$/.test(target ?? ''));
   if (!apple.length) return options;
-  appleLlvmBin(env);
   const environment = { ...env };
   let selectedSdk;
   for (const target of apple) {
@@ -253,10 +246,7 @@ export function appleCommand(command, args, { macDevelopmentSign, ...options } =
   if (command === 'assetutil' && args[0] === '--info' && args.length === 2) return [process.execPath, [fileURLToPath(new URL('./car.mjs', import.meta.url)), ...args], options];
   if (command === 'sips') return [process.execPath, [fileURLToPath(new URL('./image.mjs', import.meta.url)), ...args], options];
   const llvm = { dsymutil: 'dsymutil', lipo: 'llvm-lipo', otool: 'llvm-otool', nm: 'llvm-nm', size: 'llvm-size', strip: 'llvm-strip', install_name_tool: 'llvm-install-name-tool' };
-  if (Object.hasOwn(llvm, command)) {
-    const bin = appleLlvmBin(env);
-    command = bin ? `${bin}/${llvm[command]}` : llvm[command];
-  }
+  if (Object.hasOwn(llvm, command)) command = env.EXACT_APPLE_LLVM_BIN ? resolve(env.EXACT_APPLE_LLVM_BIN, llvm[command]) : llvm[command];
   return [command, args, options];
 }
 

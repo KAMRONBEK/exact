@@ -1262,11 +1262,14 @@ refresh.
 
 ## Local patch 52, `llvm-lipo` off a Mac
 
-`build_support.rs` inspects and thins Simulator archives with Xcode's `lipo` on a
-Mac, and elsewhere with `llvm-lipo` from `EXACT_APPLE_LLVM_BIN` or `PATH`, the
-tool exact2's `host/apple/toolchain.mjs` runs there. `build.rs` emits
-`cargo:rerun-if-env-changed=EXACT_APPLE_LLVM_BIN` for Simulator builds linking
-Hermes off a Mac. Replay on a refresh.
+`build_support.rs` selects Xcode's `lipo` on a Mac and `llvm-lipo` off a Mac to
+inspect and thin Apple Simulator archives. Off a Mac it looks in
+`EXACT_APPLE_LLVM_BIN` when set and nonempty, otherwise on `PATH`. Launch errors
+name the executable path tried and give the remedy for the missing tool. Failed
+`-archs` and `-thin` commands name the executable that ran. `build.rs` emits
+`cargo:rerun-if-env-changed=EXACT_APPLE_LLVM_BIN` only when linking Hermes for a
+Simulator off a Mac. `tests/build_support.rs` covers tool selection, archive staging
+off a Mac, and the launch and command errors. Replay on a refresh.
 
 ## Windows recursive removal
 
