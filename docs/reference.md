@@ -87,11 +87,10 @@ Windows shell with `deploy.store.windows` set to `"0"` omits the downloader when
 all image, media, poster and frame sources in its plan are local literals or
 the plan has none. Computed sources, development shells and signed updates
 keep the downloader.
-A hand-written shell uses the same selection with
-`exact_windows::run_with_services::<AppData, ADMIT_AGENT>(name, window, PLAN, COMPAT, composed, SERVICES)`.
-The TypeScript bake supplies both constants. For Rust, the build reads
-`compat.admits_agent()` and composes `compat.windows_image_services(&baked)`
-with `compat.windows_data_executor()`. The heavy-list app shows the
+A hand-written shell gets the same selection by writing
+`compat.windows_shell(&baked, &manifest)` from its build script and calling
+`exact_windows::run_baked::<AppData, ADMIT_AGENT>(name, window(), PLAN, COMPAT, composed, SERVICES)`.
+The TypeScript bake writes the same constants. The heavy-list app shows the
 [build step](../bench/heavy-list/exact-heavylist/windows/build.rs) and the
 [entry point](../bench/heavy-list/exact-heavylist/windows/src/main.rs).
 A Windows login item started with `--login hidden` paints its offscreen launch
@@ -1824,6 +1823,13 @@ the JavaScript dependencies and browser. `--check` uses the local cache. Setup c
 from a tools origin when the checkout pins its producer key. Native builds, games, Rust data or
 GPU crates, custom web build scripts and Rust page renderers require Rust.
 
+The tools origin is a public bucket that `bun scripts/tools.mjs publish --watch` keeps from
+the producer's Mac, which holds the signing key. A checkout reads it at the public https URL
+that `scripts/tools.mjs` pins with the producer's public key; `EXACT_TOOLS_ORIGIN` names a
+mirror of it. Until both are pinned, nothing is downloaded, and a machine without Rust uses a
+set `bun scripts/tools.mjs keep` built. The origin keeps each commit's lookup for 90 days; an
+older checkout finds a set only among the newest, and only if its inputs are that set's.
+
 For a source build, the scoped setup installs the pinned stable and nightly Rust, the nightly's `rust-src`,
 `llvm-tools`, clippy and `wasm32-unknown-unknown` target, its standard-library dependencies,
 wasm-bindgen, Binaryen, Exact's `node_modules`, Playwright's Chromium and headless shell,
@@ -2289,13 +2295,16 @@ deploy policy, never the web root or the association files, which list the app a
 `uninstall`, `release` and `appstore`, `share`, and the Windows build take no variant. URL schemes, the
 sign-in callback and the app's own document types are shared by both installs.
 
+A brand that ships as its own store app is another app, not a variant: one directory and manifest per brand,
+sharing its screens and data code through workspace packages ([one app under several brands](recipes/white-label.md)).
+
 ## Controls (Control Center, the Lock Screen, the Action button)
 
 A control is a button the system draws outside the app; a press runs one of
-the app's tools or opens one of its locations (LLP 1126.004). No host draws
-one yet: the build checks the rows and records what each binary would offer,
-and a native host's press entry runs a control's tool, but no Apple, Android,
-Mac or watch build contains the control itself.
+the app's tools or opens one of its locations (LLP 1126.004). iOS and iPadOS
+18 and later draw them: the build puts each offered control in the app's
+WidgetKit extension, where the person adds it to Control Center, the Lock
+Screen or the Action button. Android, the Mac and the watch do not yet.
 
 Declare each in `app.json`:
 
@@ -2322,9 +2331,11 @@ Declare each in `app.json`:
   `always` on a locked one too (LLP 1133.023 D10).
 
 The compiler walks the tool's action, the actions it calls, both arms of
-every branch and the `then` of every mutation it sends, and records what it
-can reach: Live Activity starts, updates and ends, microphone, camera and
-screen capture, a recorder, and a capture restart. A tool that can reach any
+every branch, the `then` of every mutation it sends, the resources it
+refreshes, and the actions of the tasks and sequences whose gate or key reads
+a slot it assigns, and records what it can reach: Live Activity starts,
+updates and ends, microphone, camera and screen capture, speech recognition
+on the microphone, a recorder, and a capture restart. A tool that can reach any
 capture may not have an `intents.tools` face (`intents-capture-face`).
 
 Each native binary's bake decides every control's placement, in this order,
@@ -2334,23 +2345,37 @@ web has no binary and its id does not move.
 
 1. A host other than iOS and iPadOS (the Mac, Android, the watch, tvOS,
    visionOS, Linux, Windows): omitted, `control-host`.
-2. A `url`: offered from iOS 18.
-3. A tool that is known to start camera or screen capture: omitted,
+2. A build that packages no control extension: omitted, `control-metadata`.
+   The Apple build on Linux is one, since only Xcode extracts a control's App
+   Intents metadata; so is `--extensions` without `controls`.
+3. A `url`: offered from iOS 18.
+4. A tool that is known to start camera, screen or speech capture: omitted,
    `control-capture`.
-4. A tool that may record audio (the microphone, or a recorder): its tool
+5. A tool that may record audio (the microphone, or a recorder): its tool
    must start a Live Activity that `live_activities` declares
    (`control-recording-activity`) and the app must grant
    `device.microphone-background` (`grant-needs`), or the bake fails; then
    omitted, `control-recording-unqualified`, until a locked iPhone has
    recorded through it.
-5. A tool whose reach starts, updates or ends a Live Activity: offered from
+6. A tool whose reach starts, updates or ends a Live Activity: offered from
    iOS 18, as a `LiveActivityIntent`.
-6. Any other tool: omitted, `control-process`.
+7. Any other tool: omitted, `control-process`.
+
+An offered control is a `ControlWidgetButton` in the widget extension, which
+an app with controls and no widgets or Live Activities also gets, linking no
+Exact runtime. Its WidgetKit kind is `<app id>.control.<kind>`. Its intent is
+compiled into both the app and the extension and is not discoverable, so
+Shortcuts and Siri do not list it. A URL control's intent opens the app and
+navigates there; on a cold launch the location is the launch location. A tool
+control's intent runs in the app's process, which iOS launches in the
+background if it is not running, and presses the control there; the
+extension's copy refuses without running anything.
 
 A press enters only through a host's native entry, `Runner::press_control`,
 with the compiled control's kind and digest; on Apple, the tool door's
-`exact_tool` export takes it as op `press`. It is for tool controls (a host
-opens a URL control itself). The runner runs the tool as the person's action
+`exact_tool` export takes it as op `press`, and the app's generated intent
+calls `ExactTools.press`. It is for tool controls (a host opens a URL control
+itself). The runner runs the tool as the person's action
 (origin `action`), refused `unavailable` when the installed control's
 digest is not the plan's, and `busy` while the same control's press waits or
 runs. Its authority ends when its caller cancels it, when it ends, or 10
@@ -2358,11 +2383,12 @@ seconds after it starts running; work it started runs on without it. The
 agent's `call` cannot press: it enters as `tool` whatever `--door` names.
 
 `state.controls` lists each control with its `tool` or `url`, its `digest`
-and this host's `placement`, which is `absent` on every host until its build
-places the control:
+and this binary's `placement`, as its bake recorded it: `{"offered": [{"from":
+"18.0", "intent": "tool"}]}` or `{"omitted": "control-host", "why": …}`. The
+web, which compiles no control, says `absent`:
 
 ```
-bun scripts/agent.mjs web --app <app> "state controls"
+bun scripts/agent.mjs ios --app <app> "state controls"
 ```
 
 ## Apple bundle metadata
@@ -2630,6 +2656,21 @@ runner directly, without guest DOM inspection or the carrier's drain; layout rea
 mounted host geometry. Each read is labelled passive. The frame ring ends before
 these observations, and their wall-clock bounds, clock mode, scheduling and substitutions
 are recorded. This path never seeks or settles the app.
+
+`bun scripts/agent.mjs macos --app <app> --attach [pid] tree state logs layout "screenshot now.png"`
+reads the development Mac app a person already has open, with its own window, store and wall
+clock (LLP 1012.000). Nothing is built or launched. The person chooses **Develop ▸ Enable Agent
+Attach** in the app, then **Allow** in the sheet the driver's first connection raises; the window
+shows **Agent Attached** while the driver is connected. **Detach Agent** ends the connection and
+closes the listener until it is enabled again; quitting the app or closing the window ends it too.
+Each new connection asks again. One driver attaches at a time, to one window: `--session <label>` names
+the window when several are open, and a PID chooses among several running copies.
+The connection only reads: `tree`, `state` (masked, as the tree shows a password field), `logs`,
+`layout`, `perf` and `screenshot` (the window server's picture of the window, which is not brought
+forward). The app refuses `clock` with `live-clock` and input with `input-not-granted`, and the
+driver refuses launch flags such as `--storage`, `--live` and `--url`. Only a Mac app that
+`host/apple/build.mjs` builds to run carries the listener; a release, archive or embedded build has
+none of it.
 
 ### Inspect work and native presentation
 
@@ -3037,7 +3078,8 @@ answers; `doc:/` handles do not need that store.
 Generated declarations export Ibex2's `Storage` and related types; Rust sources
 can use the same implementations through `ibex2::host`.
 
-Native hosts, including Apple, bundle the pinned SQLite (3.54.1). Apple's
+Native hosts, including Apple, bundle the pinned SQLite (3.54.1); the web's
+storage worker runs the same release's official WebAssembly build. Apple's
 minimum supported OS versions have older SQLite libraries than rusqlite
 requires (3.45.3), so linking the OS library can prevent the app from launching.
 Rust and TypeScript storage share the bundled provider. Swift code in the same
@@ -5959,7 +6001,9 @@ A namespace import reads the same constant: `import * as session` and
 The imported bindings follow the same literal grammar. Calls other than the
 array's `.join`, computed arrays, package bindings (including re-exports
 from packages), and dependencies on launch-marked settings are refused with a
-source location. Imports resolve through Rolldown, to the file the bundle runs.
+source location. An `app.ts` that is `export * from` a package exports its
+own `grants`, which the star does not override. Imports resolve through
+Rolldown, to the file the bundle runs.
 Re-exports follow ECMAScript export resolution: a loop through star exports
 keeps searching, ambiguous bindings are refused, and a star never exports
 `default`. A cycle through constant initializers is refused. `app.ts` declares

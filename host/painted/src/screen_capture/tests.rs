@@ -647,7 +647,7 @@ fn image_and_canvas_share_the_capture_allocation_only_while_the_file_matches() {
                 )
                 .unwrap();
             }
-            // The same length, so only the bytes tell it from the original.
+            // The same length: its new modification time tells it apart.
             "corrupted" => {
                 let mut bytes = std::fs::read(&disk).unwrap();
                 let data = bytes.windows(4).position(|w| w == b"IDAT").unwrap() + 64;
@@ -702,4 +702,74 @@ fn image_and_canvas_share_the_capture_allocation_only_while_the_file_matches() {
         let later = named(&p, "later");
         assert!(!p.images().bitmaps.contains_key(&later));
     }
+}
+
+#[test]
+fn a_captures_pixels_reach_its_readers_in_the_turn_that_asks() {
+    use crate::presenter::{PainterChoice, Presenter};
+    let plan = crate::test_plan(
+        r#"component App
+  state path = ""
+  action selectFile(value: string)
+    path = value
+  view
+    column
+      input testId="path" value=path input=selectFile width=96 height=20
+      image path width=512 height=512
+      canvas surface=selected(path) width=32 height=32
+"#,
+    );
+    let directory = format!("app:/tmp/exact-asked-test-{}", std::process::id());
+    let roots = crate::picker::roots();
+    let _files = Files(roots[2].join(directory.strip_prefix("app:/tmp/").unwrap()));
+    let (mut p, error) = Presenter::boot_with(
+        &plan,
+        StillCanvas,
+        (600., 600.),
+        1.,
+        roots[2].clone(),
+        PainterChoice::Cpu,
+    )
+    .unwrap();
+    assert!(error.is_none(), "{error:?}");
+    p.serve_packages(vec![crate::package::Entry::of::<SyntheticScreen>(
+        "screen-capture",
+    )]);
+    let handler = p.host().runner().native_slot().handler().unwrap();
+    let (sent, received) = std::sync::mpsc::channel();
+    handler(json!({"extension":"screen-capture", "send":"captureScreens", "args":{"directory":directory}}).to_string().into_bytes(),
+        exact_runner::Reply::new(move |outcome| sent.send(outcome).unwrap()));
+    p.run_commands(StillCanvas::default);
+    let exact_runner::Outcome::Response(response) = received
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .unwrap()
+    else {
+        panic!("no capture reply")
+    };
+    let answer: Json = serde_json::from_slice(&response.body).unwrap();
+    let path = answer["captures"][0]["path"].as_str().unwrap().to_owned();
+    let original = answer["captures"][0]["screen"]["allocation"]
+        .as_u64()
+        .unwrap() as usize;
+    p.run_commands(StillCanvas::default);
+    let kernel = p.host().kernel();
+    let field = kernel
+        .node_by_key(kernel.find_by_test_id("path")[0])
+        .unwrap()
+        .id;
+    p.type_text(field, &path).unwrap();
+    // No wait: nothing has read the file's header.
+    p.settle_pictures(std::time::Duration::ZERO);
+    let canvas = p
+        .host()
+        .cached_canvas_image(&path)
+        .expect("the canvas has the still");
+    assert_eq!(canvas.data().as_ptr() as usize, original);
+    let image = p
+        .images()
+        .bitmaps
+        .values()
+        .next()
+        .expect("the image has it");
+    assert_eq!(image.pixels().data().as_ptr() as usize, original);
 }

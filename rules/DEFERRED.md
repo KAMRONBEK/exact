@@ -2161,6 +2161,10 @@ highlight is (a shrink is feedback, not motion).
 **Tooling** — no Design Mode, no Guide system, no devtools UI, no blog/CMS. (The
 TUI host came off on 2026-10-06: §Surfaces.)
 
+Prebuilt tool sets (LLP 1174 §5) are published for macOS and Linux x86-64 only:
+sets for Windows and Linux arm64 are out until something runs them, and every
+native build needs Rust.
+
 **Admitted (Charlie, 2026-10-14; LLP 1122 §9 Q2 and LLP 1121 §9 Q3), development
 builds only:** the Forma protocol server (`forma/1`, LLP 1121 D13) and the design tool
 (LLP 1122). The tool is a web JS-target app, and every client edits through the protocol.
@@ -2203,6 +2207,20 @@ authored tests. Virtual time stays frozen while it waits on the wall clock for
 at most `<ms>`, and a miss names the last value it saw. It is for state that a
 stream reaches after its first message, which settlement does not wait for
 (LLP 1016.000 D5).
+
+**Admitted (Charlie, 2026-11-18; LLP 1012.000, expo/exact#689), local development
+builds only:** an agent attaches to the development app a person already has open, once
+that person enables attach in the app and allows each connection in the window, and reads
+that window: `tree`, masked `state`, `logs`, `layout`, `perf` and a capture of the window.
+This is Charlie's scoped reversal of LLP 1012 §8's deferral and of the 2026-11-13
+no-new-carrier ruling (`issues/closed/20261113-agent-cannot-attach-to-an-app-on-real-time.md`),
+for an eligible app and window whose person opted in. An attached session keeps the app's
+wall clock: it never takes, seeks, settles or lands the clock, and its waits watch the wall
+clock (LLP 1012.000 D3). The frozen clock above holds for every drive the driver launches.
+Input needs a second grant the person gives in the window. A release, archive, embedded or
+tester build carries none of it. Charlie's waiver; no take is named. Still deferred:
+attaching to an arbitrary process, a sandboxed Mac app, a physical device, and any
+production attach.
 
 **An eleventh operation replaces one of the ten, same PR.** A new input is a form of
 `tap` or `type` (a wheel is a `tap`; so would a drag be); a new question is answered

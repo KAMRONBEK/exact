@@ -397,8 +397,8 @@ final class BarPress: NSObject {
                 _ = host.presenter.menus.openFromBar(node)
                 return
             }
-            // A dialog it shows modally, as its command says (`MenuHost.invoke`'s bar item).
-            if invocation.action == .showModal {
+            // A dialog it shows modally or closes, as its command says (`MenuHost.invoke`'s bar item).
+            if invocation.action == .showModal || invocation.action == .close {
                 if !node.disabled { host.presenter.press(id) }
                 return
             }
@@ -484,9 +484,14 @@ extension NavigationHost {
             guard let nav = c.navigationController, nav.topViewController === c, barShows(nav) else { return false }
             return c.viewIfLoaded?.window != nil
         }
+        #if os(iOS)
+        let dialogs = shownDialogBars
+        #else
+        let dialogs: [RouteController] = []
+        #endif
         guard shown.contains(where: { c in
             c.barPresses.contains { $0.id == node.id } || c.lifted.map { node === $0 || node.isDescendant(of: $0) } == true
-        }) else { return nil }
+        }) || dialogs.contains(where: { bar in bar.barPresses.contains { $0.id == node.id } }) else { return nil }
         guard !node.disabled, !node.inert, before(nil), !node.disabled, !node.inert, presenter.views[node.id] === node else { return ["error": "bar item #\(id) is unavailable"] }
         // An item whose button only opens a menu is UIKit's pull-down, which
         // no public API opens: under the agent's painted popovers it opens
@@ -505,10 +510,10 @@ extension NavigationHost {
             case nil: return ["error": "unsupported: bar item #\(id) opens its menu as UIKit's pull-down from the bar, which only a real touch opens: under --touch platform `tap` opens it and `tap <row>` picks a row (LLP 1021 D4)"]
             }
         }
-        // A button with no press of its own that shows a dialog modally, or
-        // a link that follows its `href`: as `BarPress` runs it.
-        let showsModal = presenter.invocation(of: node)?.action == .showModal
-        guard node.handlers.contains("press") || showsModal || node.defaultLink != nil, !node.disabled, !node.inert else { return ["error": "bar item #\(id) is disabled, inert or presses nothing"] }
+        // A button with no press of its own that shows a dialog modally or
+        // closes one, or a link that follows its `href`: as `BarPress` runs it.
+        let commands = presenter.invocation(of: node).map { $0.action == .showModal || $0.action == .close } == true
+        guard node.handlers.contains("press") || commands || node.defaultLink != nil, !node.disabled, !node.inert else { return ["error": "bar item #\(id) is disabled, inert or presses nothing"] }
         presenter.press(node.id)
         return ["tapped": id, "pressed": id, "delivery": "host-activation", "native": "bar-button-item"]
     }
@@ -549,6 +554,9 @@ extension NavigationHost {
         var seen = Set<ObjectIdentifier>()
         for nav in [primaryNavigation, split?.detail].compactMap({ $0 }) + presentedNavigations + tabStacks.values.compactMap({ $0 as? UINavigationController })
         where seen.insert(ObjectIdentifier(nav)).inserted { titleInk(nav) }
+        #if os(iOS)
+        for bar in dialogBars.values { if let nav = bar.navigationController { titleInk(nav) } }
+        #endif
         for c in controllers.values {
             c.titleView?.retheme()
             c.search?.ink()
@@ -1292,7 +1300,7 @@ extension NavigationHost {
     }
 
     /// UIKit's zero-width fixed space splits shared glass without authored metrics.
-    func barItems(_ items: [HeaderShape.Item], _ route: RouteController) -> [UIBarButtonItem] {
+    func barItems(_ items: [HeaderShape.Item], _ route: any BarItemStore) -> [UIBarButtonItem] {
         var result: [UIBarButtonItem] = []
         var previous: UInt32?
         for (index, item) in items.enumerated() {
@@ -1314,11 +1322,14 @@ extension NavigationHost {
     /// header, or a node the bar placed, that its author did not hide.
     func hiddenForBar(_ view: UIView) -> Bool {
         guard let node = view as? NodeView, node.style["display"]?.string != "none" else { return false }
+        #if os(iOS)
+        if dialogBars.values.contains(where: { $0.lifted === node }) { return true }
+        #endif
         return controllers.values.contains { $0.lifted === node || $0.scoped === node || $0.barNodes.contains { $0 === node } }
     }
 
     /// Each of `shape`'s items enabled as it says, on the item made for it; false when one has none.
-    private func enable(_ shape: HeaderShape, in c: RouteController) -> Bool {
+    func enable(_ shape: HeaderShape, in c: any BarItemStore) -> Bool {
         let items = shape.leading + shape.trailing
         guard items.allSatisfy({ $0.hosted || c.barItemsMade[$0.id] != nil }) else { return false }
         for i in items where !i.hosted {
@@ -1332,7 +1343,7 @@ extension NavigationHost {
         return true
     }
 
-    private func barItem(_ i: HeaderShape.Item, _ c: RouteController) -> UIBarButtonItem {
+    private func barItem(_ i: HeaderShape.Item, _ c: any BarItemStore) -> UIBarButtonItem {
         let item = barItemMade(i, c)
         #if EXACT_INSPECT
         c.itemNodes[ObjectIdentifier(item)] = i.id // (inspect mode's bar walk, InspectIOS.swift)
@@ -1340,10 +1351,10 @@ extension NavigationHost {
         return item
     }
 
-    private func barItemMade(_ i: HeaderShape.Item, _ c: RouteController) -> UIBarButtonItem {
+    private func barItemMade(_ i: HeaderShape.Item, _ c: any BarItemStore) -> UIBarButtonItem {
         // A hosted item draws its element as written, its `:active` look too.
         #if os(iOS)
-        if i.hosted { c.barItemsMade[i.id] = nil; return barHosted.item(i, in: c) }
+        if i.hosted, let c = c as? RouteController { c.barItemsMade[i.id] = nil; return barHosted.item(i, in: c) }
         #endif
         presenter.views[i.id]?.rejectNativeActiveProperties(on: "UIBarButtonItem", supporting: i.supportsActiveColor ? ["press_color"] : [])
         // A menu reads its rows through the button's view: a new view, a new menu.
@@ -1353,13 +1364,13 @@ extension NavigationHost {
             return made.bar
         }
         let dimmed = c.navigationController?.navigationBar.tintAdjustmentMode == .dimmed
-        let image = i.badge?.image(dimmed: dimmed) ?? i.symbol.flatMap { FaceSymbol.image($0, points: FaceSymbol.barItemPoints) }
+        let image = i.image(dimmed: dimmed)
         // The same control as last time, still a menu or not and still a
         // picture or words: its item is kept and changed, as a hand-built
         // bar's is, so the glass animates what changed (a heart filling).
         if let made = c.barItemsMade[i.id], made.item.menu == i.menu, (made.bar.image != nil) == (image != nil) {
             c.barPresses.append(made.press)
-            if let image, made.item.symbol != i.symbol || made.item.badge != i.badge {
+            if let image, !made.item.hasSameImage(as: i) {
                 if #available(iOS 17.0, tvOS 17.0, *), image.isSymbolImage {
                     made.bar.setSymbolImage(image, contentTransition: .replace)
                 } else { made.bar.image = image }
@@ -1402,7 +1413,7 @@ extension NavigationHost {
         else { item.accessibilityTraits.remove(.notEnabled) }
         // The authored `color` of a plain item's face; a prominent item's
         // tint is its fill, which `color` is not.
-        let plain = !i.prominent && i.badge == nil
+        let plain = !i.prominent && !i.hasPaintedFace
         item.tintColor = !plain ? nil : i.followsTint ? presenter.views[i.id]?.ownAccent ?? SystemColor.tint(1) : i.tint.map { tint in UIColor { TextEngine.color(tint[$0.userInterfaceStyle == .dark ? 1 : 0]) } }
         // UIKit's font where none is written, also once a kept item's author removes theirs.
         let font = image == nil ? i.font : nil

@@ -300,13 +300,16 @@ fn faces(
     Ok(())
 }
 
-/// Whether the root component's outermost node hears `navigate`.
+/// Whether the root component's outermost node hears `navigate`: an
+/// `iframe`'s is its guest's, which cannot open the app's own location.
 fn navigation_root(file: &File) -> bool {
     let Some(root) = file.components.first() else {
         return false;
     };
     (root.view.iter()).any(|n| match n {
-        Node::Element { attrs, .. } => attrs.iter().any(|a| a.name == "navigate"),
+        Node::Element { tag, attrs, .. } if tag != "iframe" => {
+            attrs.iter().any(|a| a.name == "navigate")
+        }
         _ => false,
     })
 }

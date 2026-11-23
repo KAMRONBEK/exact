@@ -39,6 +39,7 @@ component App
   tool wipe destroys "Wipe." = wipe
   tool named writes "Named." = named
   tool optional writes "Optional." = optional
+  tool quoted writes "Start a quoted activity." = quoted
   action capture
     send activity = startActivity("recording", Rec(startedAt=0))
     send opened = getUserMedia(audio=true)
@@ -53,6 +54,8 @@ component App
       send activity = startActivity(`r${on}`, Rec(startedAt=1))
     else
       relay()
+  action quoted
+    send activity = startActivity(`recording`, Rec(startedAt=3))
   action relay
     send activity = updateActivity("a", Rec(startedAt=2))
   action film
@@ -81,6 +84,10 @@ component App
 struct App(PathBuf);
 impl App {
     fn new(name: &str) -> Self {
+        Self::with(name, SOURCE, &["media-capture", "recording"])
+    }
+
+    fn with(name: &str, source: &str, linked: &[&str]) -> Self {
         static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let path =
@@ -88,11 +95,11 @@ impl App {
         let _ = std::fs::remove_dir_all(&path);
         let packages = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages");
         std::fs::create_dir_all(path.join("node_modules/@exact")).unwrap();
-        for package in ["media-capture", "recording"] {
+        for package in linked {
             let to = packages.join(package).canonicalize().unwrap();
             symlink_dir(to, path.join("node_modules/@exact").join(package)).unwrap();
         }
-        std::fs::write(path.join("app.contract"), SOURCE).unwrap();
+        std::fs::write(path.join("app.contract"), source).unwrap();
         Self(path.canonicalize().unwrap())
     }
 
@@ -131,7 +138,7 @@ fn effects(plan: &exact_plan::Plan) -> Vec<(String, Json)> {
 fn the_walk_follows_branches_calls_and_thens_through_resolved_names() {
     let app = App::new("walk");
     let tools = [
-        "capture", "glance", "film", "maybe", "resume", "mute", "plain", "optional",
+        "capture", "glance", "film", "maybe", "resume", "mute", "plain", "optional", "quoted",
     ];
     let rows: Vec<Json> = tools.iter().map(|t| control(t, t)).collect();
     let plan = app
@@ -158,6 +165,12 @@ fn the_walk_follows_branches_calls_and_thens_through_resolved_names() {
         "both branches, and the call's body"
     );
     assert_eq!(glance["dynamicKind"], true);
+    assert_eq!(
+        of("quoted")["activityKinds"],
+        json!(["recording"]),
+        "a template without interpolation is its literal"
+    );
+    assert_eq!(of("quoted")["dynamicKind"], false);
     assert_eq!(glance["recorder"], false);
     assert_eq!(of("film")["camera"], "known");
     assert_eq!(of("film")["audio"], "none");
@@ -259,4 +272,91 @@ fn a_face_whose_tool_captures_is_pointed_at_controls() {
         assert!(errors.contains("intents-capture-face"), "{tool}: {errors}");
     }
     face("glance").unwrap_or_else(|e| panic!("an activity alone is no capture: {e}"));
+}
+
+const SPEECH: &str = r#"use startSpeechRecognition, SpeechRecognitionInfo from "@exact/speech-recognition"
+use requestScreenRecording, ScreenRecordingStatus from "@exact/screen-capture"
+
+component App
+  mutation heard as shape SpeechRecognitionInfo
+  mutation asked as shape ScreenRecordingStatus
+  tool listen writes "Listen." = listen
+  tool follow writes "Transcribe a track." = follow
+  tool ask writes "Ask to record the screen." = ask
+  action listen
+    send heard = startSpeechRecognition(microphone=true)
+  action follow
+    send heard = startSpeechRecognition(track="t")
+  action ask
+    send asked = requestScreenRecording()
+  view
+    text "App"
+"#;
+
+#[test]
+fn speech_and_a_permission_request_are_classified_by_what_they_open() {
+    let app = App::with("speech", SPEECH, &["speech-recognition", "screen-capture"]);
+    let rows: Vec<Json> = ["listen", "follow", "ask"]
+        .iter()
+        .map(|t| control(t, t))
+        .collect();
+    let plan = app
+        .compile(json!({ "controls": rows }))
+        .unwrap_or_else(|e| panic!("{e}"));
+    let all = effects(&plan);
+    let of = |kind: &str| &all.iter().find(|(k, _)| k == kind).unwrap().1;
+    assert_eq!(of("listen")["speech"], "known");
+    assert_eq!(of("listen")["audio"], "none", "speech is not a recording");
+    assert_eq!(
+        of("follow")["restart"],
+        true,
+        "recognising a track can reopen it"
+    );
+    assert!(
+        !contract::controls::captures(of("ask")),
+        "asking permission captures nothing"
+    );
+}
+
+const REACH: &str = r#"use getUserMedia, MediaStream from "@exact/media-capture"
+
+component App
+  state armed = false
+  derive ready = armed
+  mutation opened as shape MediaStream
+  tool bound writes "Film through a call." = bound
+  tool arm writes "Arm the camera." = arm
+  task listen when ready key=ready
+    change(open)
+  action shoot(on: bool)
+    send opened = getUserMedia(video=on, audio=false)
+  action bound
+    shoot(true)
+  action arm
+    armed = true
+  action open
+    send opened = getUserMedia(video=true, audio=false)
+  view
+    text "App"
+"#;
+
+#[test]
+fn a_bound_literal_and_an_armed_task_are_in_reach() {
+    let app = App::with("reach", REACH, &["media-capture"]);
+    let rows: Vec<Json> = ["bound", "arm"].iter().map(|t| control(t, t)).collect();
+    let plan = app
+        .compile(json!({ "controls": rows }))
+        .unwrap_or_else(|e| panic!("{e}"));
+    let all = effects(&plan);
+    let of = |kind: &str| &all.iter().find(|(k, _)| k == kind).unwrap().1;
+    assert_eq!(
+        of("bound")["camera"],
+        "known",
+        "the call's parameter is bound to true"
+    );
+    assert_eq!(
+        of("arm")["camera"],
+        "known",
+        "the task its slot arms opens the camera"
+    );
 }

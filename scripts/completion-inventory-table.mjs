@@ -583,7 +583,7 @@ export const classifications = [
       "Java_dev_exact_canvas_Native_imageBuffer Java_dev_exact_canvas_Native_pendingPictures"],
     ["painted:host/painted/src/canvas/jni_extensions.rs", "Java_dev_exact_canvas_Native_picture Java_dev_exact_canvas_Native_pictureChanged"],
     ["painted:host/painted/src/canvas/requests.rs", "CanvasHost::picture_answer CanvasHost::picture_changed"],
-    ["painted:host/painted/src/presenter/images.rs", "Presenter::deliver_image_loads Presenter::finish_boot_images Presenter::pictures_need_paint Presenter::poll_images Presenter::wait_images"],
+    ["painted:host/painted/src/presenter/images.rs", "Presenter::deliver_image_loads Presenter::finish_boot_images Presenter::pictures_need_paint Presenter::poll_images Presenter::settle_pictures Presenter::wait_images"],
     ["painted:host/painted/src/presenter/pictures.rs", "Presenter::bind_pictures Presenter::picture_answered Presenter::picture_changed"],
   ]),
   group("presence", ["one-shot"], "outstanding presence call and secret generation", "UI-owned",
@@ -869,7 +869,7 @@ export const classifications = [
       "background_priority baked baked_canvas_surfaces baked_grants console fast_cores fast_set Handle::send Handle::stop log redirect_stdio release_library_pages release_library_pages_after " +
       "release_module_pages_too section_begin section_end start trace"],
     ["painted:host/painted/src/app.rs",
-      "boot_presenter boot_presenter_with_metal boot_scanout_presenter boot_window_presenter Config::from_bake Config::from_bake_with_executor Config::from_bake_with_services Config::from_env Config::from_env_static Config::headless " +
+      "boot_presenter boot_presenter_with_metal boot_scanout_presenter boot_window_presenter Config::from_bake Config::from_env Config::from_env_static Config::headless " +
       "Config::initial_window_background Config::painter Config::use_updates Config::windowed Config::windowed_from_env incoming_location launch_argument launch_location " +
       "prepare_environment prepare_window_painter print_baked_receipt row_reuse_from_env run_headless Services::with_image_downloads Services::with_local_images show_material_look show_neutral_look"],
     ["painted:host/painted/src/canvas/codec.rs", "attach"],

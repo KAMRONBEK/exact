@@ -993,12 +993,15 @@ Lean print the same oracle answer; an `after` pair could see a resource change o
 step that commits nothing. A mutation's result slot is a state and may be named.
 
 `always` checks every printed configuration, including boot. `stays v` means that a
-previous observation equal to `v` must remain `v`. `after "action"` reads the value
-before an input and after its following `land`; the input must have only that
-successful handler commit, and its landing only `then` and `queue` commits. Other
-commits, including a commit omitted from the trace, make the pair counted only.
-`after clock` checks clock advances and landings not paired with inputs, over all
-their commits. `only writes` compares every root slot, including queue results.
+previous observation equal to `v` must remain `v`. The work due when an input
+arrives (a change action, a timer due exactly then, an armed `then` or queued send)
+runs before its handler; when it runs any commit, it is observed as a `due` step of
+its own, before the input. `after "action"` reads the value before an input and after
+its following `land`, so `old` is the configuration the handler met; the input must
+have only that successful handler commit, and its landing only `then` and `queue`
+commits. Other commits, including a commit omitted from the trace, make the pair
+counted only. `after clock` checks clock advances, `due` steps and landings not
+paired with inputs, over all their commits. `only writes` compares every root slot, including queue results.
 `never refuses` reads the action on each commit line; an action never run is
 reported as not exercised. Poisoned configurations are counted, not checked.
 Numbers use binary64 arithmetic and IEEE comparisons; other values compare by

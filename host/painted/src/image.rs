@@ -83,7 +83,7 @@ mod hardware;
 pub use hardware::hardware_pictures;
 #[cfg(target_os = "android")]
 pub(crate) use jpeg_decode::platform_decoder;
-use workers::{Backend, Prepared, SourceOwner};
+use workers::{Backend, Prepared, SourceOwner, Want};
 
 struct View {
     key: ViewKey,
@@ -754,6 +754,45 @@ impl Images {
                 // (One already asked for, grown to fill it: its waiting download moves up.)
                 self.backend.promote(source);
             }
+            // A capture's own pixels, still its file's, are taken as asked,
+            // before its header is read, unless much larger than the box
+            // (as a decode already shared is, `covering`).
+            let published = (view.visible && self.decode_enabled && view.request.is_none())
+                .then(|| self.backend.published(self.generation, &view.source))
+                .flatten()
+                .filter(|p| {
+                    let natural = p.key.pixels;
+                    let drawn = drawn_pixels(natural, view.desired, view.object_fit, scale);
+                    let area = u64::from(natural.width) * u64::from(natural.height);
+                    area as f64 <= f64::from(drawn.0 * drawn.1) * 2.5
+                });
+            if let Some(published) = published {
+                let demand = Demand {
+                    view: view.key,
+                    priority: Priority::Visible,
+                    ..published
+                };
+                if let Ok(request) = self.backend.session.request_cached(demand) {
+                    view.request = Some((request, published.key.pixels));
+                    view.requested_for = view.desired;
+                    view.requested_fit = view.object_fit;
+                    view.requested_rendering = view.rendering;
+                    view.requested_scale = scale;
+                    view.part = false;
+                    view.refusal = None;
+                    if let Some(lease) = self.backend.session.take_ready(request) {
+                        if let Some(bitmap) = lease.payload::<Arc<Bitmap>>() {
+                            self.bitmaps.insert(*id, bitmap.clone());
+                            let natural = bitmap.natural();
+                            reports.push((*id, Some((natural.0 as f32, natural.1 as f32))));
+                            view.lease = Some(lease);
+                            view.accepted = Some(request);
+                            view.displayed_source = view.source.clone();
+                            self.load_events.extend(view.settle(*id, None));
+                        }
+                    }
+                }
+            }
             if view.source_id.is_none() {
                 match self
                     .backend
@@ -1133,6 +1172,45 @@ impl Images {
     pub(crate) fn finish_boot(&mut self) {
         self.boot_visible_only = false;
     }
+    /// A picture asked for and still loading, which a window being shown
+    /// waits for: a canvas's, or a visible image's that shows nothing of its
+    /// source yet. Not a picture out of view, nor one that failed.
+    pub(crate) fn awaited(&self) -> bool {
+        !self.canvas_reads.is_empty()
+            || self.views.values().any(|v| {
+                v.visible
+                    && !v.errored
+                    && !v.source.is_empty()
+                    && v.symbol_size.is_none()
+                    && v.displayed_source != v.source
+                    && !self.package.serves(&v.source)
+                    && !matches!(v.refusal, Some(Refusal::DecodeFailed))
+                    && !matches!(
+                        v.source_id
+                            .as_ref()
+                            .and_then(|s| self.backend.prepared(s.id)),
+                        Some(Prepared::Failed(_))
+                    )
+            })
+    }
+    /// Poll until `done` holds or `timeout` passes, waiting on the workers
+    /// between polls.
+    pub(crate) fn wait_until(
+        &mut self,
+        timeout: Duration,
+        mut done: impl FnMut(&Self) -> bool,
+    ) -> Vec<Report> {
+        let start = Instant::now();
+        let mut seen = self.revision();
+        let mut reports = self.poll();
+        while !done(self) && start.elapsed() < timeout {
+            let left = timeout.saturating_sub(start.elapsed());
+            self.pause_wait(seen, left.min(Duration::from_millis(20)));
+            seen = self.revision();
+            reports.extend(self.poll());
+        }
+        reports
+    }
     /// Wait for available work until the deadline, without spinning on capacity.
     pub fn wait(&mut self, timeout: Duration) -> Vec<Report> {
         let start = Instant::now();
@@ -1254,7 +1332,16 @@ fn drawn_size(
     fit: exact_kernel::ObjectFit,
     scale: f32,
 ) -> (f32, f32) {
-    let natural = header.metadata.natural;
+    drawn_pixels(header.metadata.natural, desired, fit, scale)
+}
+
+/// The pixels a picture of `natural` size covers in a box of `desired`.
+fn drawn_pixels(
+    natural: PixelSize,
+    desired: (f32, f32),
+    fit: exact_kernel::ObjectFit,
+    scale: f32,
+) -> (f32, f32) {
     crate::paint::object_fit(
         (natural.width, natural.height),
         fit,

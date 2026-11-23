@@ -297,3 +297,37 @@ fn an_app_with_only_location_controls_lists_them() {
     assert_eq!(controls[0]["url"], "/", "{controls}");
     assert_eq!(controls[0]["placement"], "absent");
 }
+
+#[test]
+fn a_binary_presses_only_the_controls_its_bake_offered() {
+    let app = App::new("placed");
+    let mut r = boot(&app);
+    let (go, jot) = (digest(&r, "go"), digest(&r, "jot"));
+    let offered = serde_json::json!({ "offered": [{ "from": "18.0", "intent": "tool" }] });
+    let compat = serde_json::json!({ "inputs": { "controls": [
+        { "control": { "kind": "go" }, "placement": offered },
+        { "control": { "kind": "jot" }, "placement": { "omitted": "control-process" } },
+    ] } });
+    r.place_controls(&compat.to_string());
+    let rows = state(&r)["controls"].clone();
+    let row = |kind: &str| {
+        rows.as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["kind"] == kind)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(row("go")["placement"], offered);
+    assert_eq!(row("jot")["placement"]["omitted"], "control-process");
+    assert_eq!(
+        row("home")["placement"],
+        "absent",
+        "a kind the compat leaves out"
+    );
+    let err = r
+        .press_control("jot", &jot, CallHow::default())
+        .unwrap_err();
+    assert!(err.contains("not offered"), "{err}");
+    press(&mut r, "go", &go);
+}

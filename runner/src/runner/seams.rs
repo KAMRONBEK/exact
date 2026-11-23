@@ -485,13 +485,31 @@ impl<D: DataSource> Runner<D> {
         t.press_control(self, kind, digest, how)
     }
 
-    /// What this host's build offers of each control: an object from each
-    /// kind to the placement its bake derived (`bake/src/controls.rs`),
-    /// which `state.controls` reports. A kind it leaves out, and every
-    /// control of a host that never calls this, is `absent`.
-    pub fn place_controls(&mut self, placements: Json) {
-        let t = self.links_tools();
-        t.place_controls(self, placements)
+    /// What this host's build offers of each control, which `state.controls`
+    /// reports: each row's placement in `compat`, the binary's compat.json
+    /// (`inputs.controls`, which `bake/src/controls.rs` derives). A kind it
+    /// leaves out, and every control of a host that never calls this, is
+    /// `absent`.
+    pub fn place_controls(&mut self, compat: &str) {
+        let Ok(compat) = serde_json::from_str::<Json>(compat) else {
+            return;
+        };
+        let rows = compat["inputs"]["controls"]
+            .as_array()
+            .into_iter()
+            .flatten();
+        let placed: serde_json::Map<String, Json> = rows
+            .filter_map(|c| {
+                Some((
+                    c["control"]["kind"].as_str()?.to_owned(),
+                    c["placement"].clone(),
+                ))
+            })
+            .collect();
+        if !placed.is_empty() {
+            let t = self.links_tools();
+            t.place_controls(self, Json::Object(placed))
+        }
     }
 
     /// Whether invocation `id` is a control's press that no longer runs

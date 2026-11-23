@@ -6,7 +6,13 @@ use FixtureActivity, FixtureState from "./activities.contract"
 // bundle; its two entries exercise `push` and `frequent`, each drawing one
 // line in every placement (WP8's eight). On Android the departure is an
 // ongoing notification by its row's `android` mapping, and the alert, which
-// has none, is refused (LLP 1126 D13).
+// has none, is refused (LLP 1126 D13). Its two controls (app.json) are a
+// tool control whose tool starts a departure, which iOS runs in the app as a
+// Live Activity intent, and a URL control that opens the app at its root
+// (LLP 1126.004).
+routes nav
+  home "/"
+
 shape ActivityHandle
   id: string
 
@@ -24,12 +30,16 @@ shape Clock
   epochAtZero: number
 
 component ActivityFixture
+  derive current = top(nav)
   resource activities = exactActivities() as shape Activities
   resource clock = exactTime() as shape Clock
   mutation sent as shape ActivityHandle
   state count = 0
   derive live = activities.activities.filter(a => a.activityState == "active" or a.activityState == "stale")
   derive firstId = match first(live) { case some(a) => a.id, case none => "" }
+  tool startDeparture writes "Start a departure." = startDeparture
+  action follow(url: string)
+    nav = go(nav, url)
   action startDeparture
     let next = count + 1
     count = next
@@ -50,7 +60,7 @@ component ActivityFixture
     if firstId != ""
       send sent = endActivity(firstId, FixtureState(label="Arrived", detail=some("Have a good day"), short=none, at=none, done=some(1)), "default")
   view
-    column
+    main navigationKey=`${current.id}` navigate=follow
       text "Activity fixture"
       if activities.linked
         button press=startDeparture testId="start-departure"

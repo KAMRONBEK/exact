@@ -44,6 +44,21 @@
       }
     }
   ],
+  "controls": [
+    {
+      "kind": "depart",
+      "title": "Start a departure",
+      "symbol": "tram.fill",
+      "tool": "startDeparture",
+      "authentication": "always"
+    },
+    {
+      "kind": "open",
+      "title": "Activity fixture",
+      "symbol": "app",
+      "url": "/"
+    }
+  ],
   "host": {
     "ios": {
       "minimumOS": "17.0",

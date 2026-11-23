@@ -727,6 +727,7 @@
               "tool": {
                 "type": "string",
                 "minLength": 1,
+                "pattern": "^(?=.*\\S)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*(?![\\s\\S])",
                 "description": "A tool line's name: a press calls it with no arguments, passing none for each optional parameter. It needs no `intents.tools` face, may not destroy, and may take no required parameter."
               },
               "authentication": {
@@ -774,7 +775,7 @@
               },
               "url": {
                 "type": "string",
-                "pattern": "^/(?!/)",
+                "pattern": "^/(?!/)[^\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]*(?![\\s\\S])",
                 "description": "A location one of the navigation root's routes matches: a press opens the app there."
               }
             }

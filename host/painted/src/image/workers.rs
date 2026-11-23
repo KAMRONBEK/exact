@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 use std::io::{Cursor, Read, Seek, Write};
 #[cfg(unix)]
 use std::os::fd::{AsRawFd, RawFd};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock, Weak};
 #[cfg(test)]
 use std::time::Duration;
@@ -28,8 +29,9 @@ pub(super) struct SourceOwner {
     name: String,
     assets: Weak<Assets>,
     prepared: Mutex<Prepared>,
-    /// A package's pixels for this file, verified against it (`published`).
-    published: OnceLock<super::published::Verified>,
+    /// What its readers will ask for once its header is read: a worker that
+    /// reads it asks at once, with no turn of the presentation thread.
+    wants: Mutex<Vec<Want>>,
     /// A URL's download: the body a worker reads once it is settled.
     remote: Option<Arc<remote::Load>>,
     /// Its download failed in a way asking again may mend (`Failure::transient`):
@@ -58,11 +60,6 @@ impl SourceOwner {
     /// The asset name it was asked for.
     pub(super) fn name(&self) -> &str {
         &self.name
-    }
-
-    /// The image generation it was asked for in.
-    pub(super) fn generation(&self) -> u64 {
-        self.generation
     }
 
     /// A URL's body this host cannot decode: let go of its spool file (the
@@ -101,6 +98,17 @@ impl SourceOwner {
         );
         *self.message.lock().unwrap() = Some(message);
     }
+}
+/// A reader's ask, made by a worker once the header is read.
+pub(super) struct Want {
+    /// The reader is still there; cleared as it goes.
+    pub alive: Arc<AtomicBool>,
+    /// Its demand from the header, and whether a published picture of any
+    /// size serves it ([`Backend::request`]).
+    pub demand: Box<
+        dyn Fn(&Backend, png_decode::Header) -> Result<(exact_raster::Demand, bool), Refusal>
+            + Send,
+    >,
 }
 struct State {
     sources: BTreeMap<u64, Weak<SourceOwner>>,
@@ -250,7 +258,7 @@ impl Backend {
                     assets: Arc::downgrade(assets),
                     canvas: Default::default(),
                     prepared: Mutex::new(Prepared::Queued),
-                    published: OnceLock::new(),
+                    wants: Default::default(),
                     remote,
                     transient: Default::default(),
                     message: Default::default(),
@@ -349,7 +357,7 @@ impl Backend {
         let area = |p: exact_raster::PixelSize| u64::from(p.width) * u64::from(p.height);
         let published = source
             .as_ref()
-            .and_then(|s| s.published.get()?.current(s))
+            .and_then(|s| super::published::current(&self.published, s.generation, &s.name))
             .filter(|p| whole || area(p.key.pixels) <= area(demand.key.pixels) * 5 / 2);
         drop(source);
         let cached = published.and_then(|p| {
@@ -462,27 +470,62 @@ impl Backend {
                 Err(failure.refusal)
             }
             _ => open(source)
-                .and_then(|(mut input, bytes, modified)| {
-                    let header = png_decode::inspect(&mut input, bytes)?;
-                    let opened = modified.map(|modified| (bytes, modified));
-                    if let Some(verified) = super::published::verify(
-                        &self.published,
-                        source,
-                        (input, opened),
-                        header.metadata,
-                    ) {
-                        let _ = source.published.set(verified);
-                    }
-                    Ok(header)
-                })
+                .and_then(|(mut input, bytes)| png_decode::inspect(&mut input, bytes))
                 .inspect_err(|e| source.release(*e, self.downloads.as_deref())),
         };
-        *source.prepared.lock().unwrap() = match result {
-            Ok(header) => Prepared::Ready(header),
-            Err(e) => Prepared::Failed(e),
+        // Taken under the same lock a reader registers under: none is missed.
+        let wants = {
+            let mut prepared = source.prepared.lock().unwrap();
+            *prepared = match result {
+                Ok(header) => Prepared::Ready(header),
+                Err(e) => Prepared::Failed(e),
+            };
+            std::mem::take(&mut *source.wants.lock().unwrap())
         };
+        if let Ok(header) = result {
+            self.ask_wants(wants, header);
+        }
         self.notify();
         true
+    }
+    /// Ask for what readers registered (`want`), as each would on its next
+    /// turn. A reader that left meanwhile cancels what was asked.
+    fn ask_wants(&self, wants: Vec<Want>, header: png_decode::Header) {
+        for want in wants {
+            if !want.alive.load(Ordering::Acquire) {
+                continue;
+            }
+            let Ok((demand, whole)) = (want.demand)(self, header) else {
+                continue;
+            };
+            let Ok(id) = self.request(demand, whole) else {
+                continue;
+            };
+            // Gone after the check: its retirement may have preceded the ask.
+            if !want.alive.load(Ordering::Acquire) {
+                self.cancel(id);
+            }
+        }
+    }
+    /// What a reader of `source` will ask for once its header is read, while
+    /// `alive` holds (LLP 1178 D3: the decode starts at the header, not at
+    /// the reader's next turn). Asked again by the reader, it is the same
+    /// request.
+    /// Whether it was registered: not once the header has been read.
+    pub(super) fn want(&self, source: &SourceOwner, want: Want) -> bool {
+        let prepared = source.prepared.lock().unwrap();
+        if !matches!(*prepared, Prepared::Queued | Prepared::Reading) {
+            return false;
+        }
+        let mut wants = source.wants.lock().unwrap();
+        wants.retain(|w| w.alive.load(Ordering::Acquire) && !Arc::ptr_eq(&w.alive, &want.alive));
+        wants.push(want);
+        true
+    }
+    /// The cached pixels a package published for `name`, while its file is
+    /// the one written ([`super::published::current`]).
+    pub(super) fn published(&self, generation: u64, name: &str) -> Option<exact_raster::Demand> {
+        super::published::current(&self.published, generation, name)
     }
     fn decode(&self, permit: DecodePermit) {
         let key = permit.key();
@@ -509,7 +552,7 @@ impl Backend {
             if plan.cost != permit.cost() || header.metadata != permit.metadata() {
                 return Err(Refusal::ConflictingMetadata);
             }
-            let (mut input, bytes, _) = open(&source)?;
+            let (mut input, bytes) = open(&source)?;
             if bytes != header.metadata.encoded_bytes {
                 return Err(Refusal::ConflictingMetadata);
             }
@@ -615,9 +658,7 @@ impl Drop for Backend {
 
 trait Input: Read + Seek + Send {}
 impl<T: Read + Seek + Send> Input for T {}
-/// A source's input, its length, and, for a file, when it was last written.
-type Opened = (Box<dyn Input>, u64, Option<std::time::SystemTime>);
-fn open(source: &SourceOwner) -> Result<Opened, Refusal> {
+fn open(source: &SourceOwner) -> Result<(Box<dyn Input>, u64), Refusal> {
     if let Some(load) = &source.remote {
         let Some(Ok(body)) = load.outcome() else {
             return Err(Refusal::DecodeFailed);
@@ -626,7 +667,7 @@ fn open(source: &SourceOwner) -> Result<Opened, Refusal> {
         if file.metadata().map_err(|_| Refusal::DecodeFailed)?.len() != body.len {
             return Err(Refusal::DecodeFailed);
         }
-        return Ok((Box::new(file), body.len, None));
+        return Ok((Box::new(file), body.len));
     }
     let assets = source.assets.upgrade().ok_or(Refusal::Stale)?;
     match assets
@@ -638,7 +679,7 @@ fn open(source: &SourceOwner) -> Result<Opened, Refusal> {
             if len > exact_raster::MAX_ENCODED_BYTES {
                 return Err(Refusal::EncodedLimit);
             }
-            Ok((Box::new(Cursor::new(bytes)), len, None))
+            Ok((Box::new(Cursor::new(bytes)), len))
         }
         ImageInput::Path(path) => {
             bounded(crate::file::open_regular(&path).map_err(|_| Refusal::DecodeFailed)?)
@@ -648,7 +689,7 @@ fn open(source: &SourceOwner) -> Result<Opened, Refusal> {
 }
 
 /// A source's regular file, refused past the encoded bound.
-fn bounded(file: std::fs::File) -> Result<Opened, Refusal> {
+fn bounded(file: std::fs::File) -> Result<(Box<dyn Input>, u64), Refusal> {
     let metadata = file.metadata().map_err(|_| Refusal::DecodeFailed)?;
     if !metadata.is_file() {
         return Err(Refusal::DecodeFailed);
@@ -656,7 +697,7 @@ fn bounded(file: std::fs::File) -> Result<Opened, Refusal> {
     if metadata.len() > exact_raster::MAX_ENCODED_BYTES {
         return Err(Refusal::EncodedLimit);
     }
-    Ok((Box::new(file), metadata.len(), metadata.modified().ok()))
+    Ok((Box::new(file), metadata.len()))
 }
 
 struct Workers {

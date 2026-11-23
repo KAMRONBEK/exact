@@ -401,6 +401,10 @@ impl<D: DataSource> Tools<D> for LinkedTools {
                 "control `{kind}` opens a location, which its host opens"
             ));
         };
+        // A binary whose bake placed its controls presses only those it offers.
+        if (r.calls.placements.as_ref()).is_some_and(|p| p[kind]["offered"].is_null()) {
+            return Err(format!("control `{kind}` is not offered by this binary"));
+        }
         let tool = tool.0 as usize;
         let action = plan.action(plan.tools[tool].action);
         let args: serde_json::Map<String, Json> = (action.params.iter())

@@ -1385,6 +1385,7 @@ impl<D: DataSource> Presenter<D> {
         self.host.runner_mut().measure(on, true);
         // The live table is development's too (LLP 1121 stage 4).
         self.host.runner_mut().admit_live(Some(&self.compat));
+        self.host.runner_mut().place_controls(&self.compat);
         self.link_activities();
     }
 
