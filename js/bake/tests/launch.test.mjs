@@ -225,10 +225,22 @@ test('Windows treats a mixed-case setting that Bun loaded as a file value', asyn
   const { settingValues } = await import('../src/__exact_env.mjs');
   const dir = mkdtempSync(resolve(tmpdir(), 'exact-launch-windows-'));
   try {
-    writeFileSync(resolve(dir, '.env'), 'API_TOKEN=file-value\n');
-    const loaded = { Api_Token: 'bun-development-value', EXACT_BUN_LOADED: 'Api_Token' };
+    writeFileSync(resolve(dir, '.env'), 'Api_Token=file-value\n');
+    const loaded = { Api_Token: 'file-value', EXACT_BUN_LOADED: 'Api_Token' };
     expect(settingValues(dir, ['API_TOKEN'], loaded, { windows: true })).toEqual({ API_TOKEN: { value: 'file-value', source: '.env' } });
+    writeFileSync(resolve(dir, '.env.local'), 'aPi_ToKeN=local-value\n');
+    expect(settingValues(dir, ['API_TOKEN'], loaded, { windows: true })).toEqual({ API_TOKEN: { value: 'local-value', source: '.env.local' } });
     expect(settingValues(dir, ['API_TOKEN'], { Api_Token: 'shell-value' }, { windows: true })).toEqual({ API_TOKEN: { value: 'shell-value', source: 'environment' } });
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('Windows treats a missing setting as absent beside a variable named undefined', async () => {
+  const { declaredSettings, settingValues } = await import('../src/__exact_env.mjs');
+  const dir = mkdtempSync(resolve(tmpdir(), 'exact-launch-windows-'));
+  try {
+    writeFileSync(resolve(dir, 'app.json'), JSON.stringify({ env: ['API_URL', { name: 'UNDEFINED', launch: true }] }));
+    const shell = { undefined: 'launch-only', EXACT_LAUNCH_OMIT: 'UNDEFINED' };
+    expect(settingValues(dir, declaredSettings(dir), shell, { windows: true })).toEqual({ API_URL: null, UNDEFINED: null });
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

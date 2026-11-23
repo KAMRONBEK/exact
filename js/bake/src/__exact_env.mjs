@@ -123,13 +123,18 @@ export function noteBunLoaded() {
 /** Each of `names` with its value and source (`environment`, `variants.<name>`, `.env.local` or `.env`), or null
  * where none sets it. */
 export function settingValues(app, names, env = process.env, { windows = process.platform === 'win32' } = {}) {
-  const files = Object.fromEntries(ENV_FILES.map(file => [file, assignments(app, file)])), shell = settingEnvironment(env, windows), variant = variantEnv(app, env);
+  const files = ENV_FILES.map(file => [file, assignments(app, file)]);
+  const shell = settingEnvironment(env, windows), variant = variantEnv(app, env);
   return Object.fromEntries(names.map(name => {
     const value = shell(name);
     if (value !== undefined) return [name, { value, source: 'environment' }];
     if (variant && Object.hasOwn(variant.values, name)) return [name, { value: variant.values[name], source: `variants.${variant.name}` }];
-    const file = ENV_FILES.find(f => Object.hasOwn(files[f], name));
-    return [name, file ? { value: files[file][name], source: file } : null];
+    for (const [file, values] of files) {
+      if (!windows && !Object.hasOwn(values, name)) continue;
+      const value = childValue(values, name, windows);
+      if (value !== undefined) return [name, { value, source: file }];
+    }
+    return [name, null];
   }));
 }
 
@@ -551,7 +556,12 @@ export function settingChanges(record, env = process.env, app = null, { launch =
 /** `env`'s value for `name` in a process started with it. Windows reads a name without regard to case, and of
  * entries that differ only in case the child gets the first in sort order, which is the one Node's `child_process`
  * passes (https://nodejs.org/api/child_process.html#child_processspawncommand-args-options, `options.env`). */
-export const childValue = (env, name, windows) => windows ? env[Object.keys(env).filter(key => key.toUpperCase() === name.toUpperCase()).sort()[0]] : env[name];
+export function childValue(env, name, windows) {
+  if (!windows) return env[name];
+  const upper = name.toUpperCase();
+  const key = Object.keys(env).filter(key => key.toUpperCase() === upper).sort()[0];
+  return key === undefined ? undefined : env[key];
+}
 
 /** `settingChanges` for the build in `dist`, from what its `.exact-build.json` says it inlined (`env`). */
 export function changedSettings(dist, env = process.env, app = null) {

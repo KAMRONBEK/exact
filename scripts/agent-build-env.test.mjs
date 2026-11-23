@@ -34,9 +34,11 @@ test('a drive build keeps file and build settings and leaves shell launch settin
 test('Windows build omissions match manifest, launch and Bun-loaded names regardless of case', () => {
   const app = { manifest: { env: [launch('API_TOKEN'), launch('SESSION')] } };
   const env = { Api_Token: 'from-shell', Session: 'from-dotenv', exact_bun_loaded: 'sEsSiOn' };
-  const launched = { api_token: '', SESSION: 'from-dotenv' };
+  const launched = { api_token: 'from-launch', SESSION: 'from-dotenv' };
   assert.deepEqual(driveBuildEnv(app, env, launched, { windows: true }), { ...env, EXACT_LAUNCH_OMIT: 'API_TOKEN' });
   assert.deepEqual(driveBuildEnv(app, env, launched), env);
+  const empty = { ...env, Api_Token: '' };
+  assert.deepEqual(driveBuildEnv(app, empty, { ...launched, api_token: '' }, { windows: true }), empty);
 });
 
 // Keep the module mock in a separate Bun process so the other build tests use real children.
@@ -114,6 +116,23 @@ test('Windows drive rebuilds preserve the Cargo target and name mixed-case omiss
     assert.equal(calls[0].env.CARGO_TARGET_DIR, resolve(dir, 'target'));
     assert.equal(Object.entries(calls[0].env).find(([name]) => name.toUpperCase() === 'API_TOKEN')?.[1], 'windows-launch');
     assert.equal(calls[0].env.EXACT_LAUNCH_OMIT, 'API_TOKEN,CARGO_TARGET_DIR');
+  `);
+});
+
+test.each(['macos', 'windows'])('a %s drive rebuild keeps launch settings under production trust', platform => {
+  checkSpawns(['API_TOKEN'], `
+    const host = ${JSON.stringify(platform)};
+    process.env.API_TOKEN = 'from-shell';
+    process.env.EXACT_UPDATE_TRUST = 'production';
+    process.env.EXACT_LAUNCH_OMIT = 'API_TOKEN';
+    const result = host === 'windows' ? await windowsBuildFirst(app, quiet) : await buildFirst(host, app, quiet);
+    assert.equal(result, 0);
+    assert.equal(calls.length, 1);
+    const { args, env } = calls[0];
+    assert.equal(args[0], resolve(host === 'windows' ? 'host/windows/build.mjs' : 'host/apple/build.mjs'));
+    assert.equal(env.EXACT_UPDATE_TRUST, 'production');
+    assert.equal(env.API_TOKEN, 'from-shell');
+    assert.equal(env.EXACT_LAUNCH_OMIT, undefined);
   `);
 });
 

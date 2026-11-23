@@ -198,7 +198,7 @@ export function driveBuildEnv(app, env = process.env, launch = env, { windows = 
   const loaded = new Set((childValue(env, 'EXACT_BUN_LOADED', windows) ?? '').split(',').filter(Boolean).map(fold));
   const available = new Set(Object.keys(env).map(fold));
   const omit = [...launchNames(app.manifest?.env)].filter(name =>
-    available.has(fold(name)) && !loaded.has(fold(name)) && childValue(launch, name, windows) !== undefined);
+    available.has(fold(name)) && !loaded.has(fold(name)) && Boolean(childValue(launch, name, windows)));
   const { EXACT_LAUNCH_OMIT: _, ...build } = env;
   if (omit.length) build.EXACT_LAUNCH_OMIT = omit.sort().join(',');
   return build;
@@ -208,8 +208,13 @@ const driveLaunch = host => host === 'ios' ? simulatorLaunch() : process.env;
 
 /** host/apple/build.mjs with `args`, its output into `log`; its exit code and output. */
 // The bake's warnings whole (`bakeWarnings`): the drive says them in one line itself and lists each in its file.
-const appleBuild = (args, log, say, app) => logged(process.execPath, [resolve(ROOT, 'host/apple/build.mjs'), ...args], log,
-  { say, env: { ...driveBuildEnv(app, process.env, driveLaunch(args.includes('--ios') ? 'ios' : 'macos')), EXACT_WARNINGS_WHOLE: '1', ...(app.outside ? { EXACT_APP_DIR: app.dir } : {}) } });
+const appleBuild = (args, log, say, app) => {
+  const host = args.includes('--ios') ? 'ios' : 'macos';
+  const launch = process.env.EXACT_UPDATE_TRUST === 'production' ? {} : driveLaunch(host);
+  const env = driveBuildEnv(app, process.env, launch);
+  return logged(process.execPath, [resolve(ROOT, 'host/apple/build.mjs'), ...args], log,
+    { say, env: { ...env, EXACT_WARNINGS_WHOLE: '1', ...(app.outside ? { EXACT_APP_DIR: app.dir } : {}) } });
+};
 
 // ---------------------------------------------------------------- a plan-only edit (LLP 1116.003)
 
@@ -461,7 +466,8 @@ export async function windowsBuildFirst(app, { say = line => console.error(line)
   if (changed && !changed.length) return 0;
   const log = resolve(app.dir, '.exact', 'windows-build.log');
   say(`building for Windows: ${changed ? `the build is older than its sources (${named(app, changed)} changed)` : 'there is no build yet'}; its log: ${shown(log)}`);
-  const env = driveBuildEnv(app, process.env, process.env, { windows: true });
+  const launch = process.env.EXACT_UPDATE_TRUST === 'production' ? {} : process.env;
+  const env = driveBuildEnv(app, process.env, launch, { windows: true });
   const { code, output } = await logged(process.execPath, [resolve(ROOT, 'host/windows/build.mjs'), app.name], log, { env: { ...env, EXACT_APP_DIR: app.dir }, say });
   if (code) say(failureSummary(output, { host: 'windows', code, log: shown(log) }));
   else for (const line of warningLines(app.dir, 'windows', compilerWarnings(output))) say(line);
