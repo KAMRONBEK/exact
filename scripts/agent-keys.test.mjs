@@ -34,7 +34,10 @@ test('a press point before drag is refused with the drag from a point and the he
   expect(() => tapWords(['Sky off', 'at', '5', '6', 'drag', '7', '8'])).toThrow('`tap "Sky off" drag 7 8 from 5 6`');
   expect(() => tapWords(['drag', 'at', '5', '6', 'drag', '7', '8'])).toThrow('`tap drag drag 7 8 from 5 6`');
   expect(() => tapWords(['at', 'down', 'at', '5', '6', 'drag', '7', '8'])).toThrow('`tap at down at 5 6`');
-  expect(() => tapWords(['stage', 'down', 'drag', '7', '8', 'from', '5', '6'])).toThrow('`tap stage drag 7 8 from 5 6`');
+  expect(() => tapWords(['stage', 'down', 'drag', '7', '8', 'from', '5', '6'])).toThrow('`tap stage drag 7 8 from 5 6`; a held contact is `tap stage down at 5 6`');
+  expect(() => tapWords(['stage', 'at', '5', '6', 'drag', '7', '8', 'hold', '500', 'during', "'state", 'list', 'from', "2'"])).toThrow("`tap stage drag 7 8 from 5 6 hold 500 during 'state list from 2'`");
+  expect(() => tapWords(['stage', 'at', '5', '6', 'drag', 'to', '"Sky', 'off"'])).toThrow('`tap stage drag to "Sky off" from 5 6`');
+  expect(() => tapWords(['', 'at', '5', '6', 'drag', '7', '8'])).toThrow('`tap "" drag 7 8 from 5 6`');
   expect(tapWords(['stage', 'at', '50', '400'])).toEqual(['stage', { at: [50, 400] }]);
   expect(tapWords(['stage', 'down', 'at', '55', '430'])).toEqual(['stage', { down: true, at: [55, 430] }]);
   expect(tapWords(['move', '220', '430', 'over', '200'], true)).toEqual([null, { phase: 'move', x: 220, y: 430, ms: 200 }]);
