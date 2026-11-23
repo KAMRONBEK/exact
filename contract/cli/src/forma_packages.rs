@@ -317,7 +317,7 @@ fn in_package(dir: &std::path::Path, file: &std::path::Path) -> Result<Option<St
             let name = e.file_name();
             let path = e.path();
             if kind.is_symlink() {
-                if let Some(root) = linked(&path).filter(|_| modules) {
+                if let Some(root) = modules.then(|| linked(&path)).flatten() {
                     return Ok(Some(root));
                 }
             } else if kind.is_dir() && !matches!(name.to_str(), Some(".git" | "target" | ".exact"))
