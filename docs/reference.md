@@ -2391,6 +2391,22 @@ web, which compiles no control, says `absent`:
 bun scripts/agent.mjs ios --app <app> "state controls"
 ```
 
+A qualification build (LLP 1126.004 §6d) offers on iOS what items 5 and 7
+omit only for want of a device run, so the device run can be made:
+`EXACT_QUALIFY_CONTROLS=1 bun host/apple/build.mjs <app> --ios --device --run`.
+Such a placement carries the omission it lifts, `{"offered": [{"from":
+"26.0", "intent": "tool"}], "qualifying": "control-process"}`, so its
+compatibility id is never an ordinary build's; a bake with production trust
+(`--release`, `--archive`, a deploy) refuses the variable. A plain tool's
+intent then asks to run in the app (`supportedModes = .background` from 26,
+`allowedExecutionTargets = .main` from 27); a recording tool's
+(`"intent": "recording"`) is an `AudioRecordingIntent` and a
+`LiveActivityIntent`, and while its press runs, the tool and the `then`s of
+its sends may call `getUserMedia` for audio alone and `startMediaRecorder`
+with the app not in front. A press never asks for the microphone: with its
+permission not yet granted, `getUserMedia` fails `NotAllowedError`.
+Recorder's `record` control is the device run's subject.
+
 ## Apple bundle metadata
 
 Exact writes Info.plist keys and entitlements from grants, named manifest fields,
@@ -3078,7 +3094,8 @@ answers; `doc:/` handles do not need that store.
 Generated declarations export Ibex2's `Storage` and related types; Rust sources
 can use the same implementations through `ibex2::host`.
 
-Native hosts, including Apple, bundle the pinned SQLite (3.54.1). Apple's
+Native hosts, including Apple, bundle the pinned SQLite (3.54.1); the web's
+storage worker runs the same release's official WebAssembly build. Apple's
 minimum supported OS versions have older SQLite libraries than rusqlite
 requires (3.45.3), so linking the OS library can prevent the app from launching.
 Rust and TypeScript storage share the bundled provider. Swift code in the same
