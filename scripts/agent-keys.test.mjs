@@ -24,6 +24,15 @@ test('tap midi is a MIDI input\'s message, its bytes two hex digits each; a test
   expect(clockSlices({ bpm: 125, ms: 110 })).toEqual([{ to: 50, ticks: [20, 40] }, { to: 100, ticks: [60, 80, 100] }, { to: 110, ticks: [] }]);
 });
 
+test('a press point before drag is refused with the drag from a point and the held contact\'s phases (#1332)', () => {
+  expect(() => tapWords(['stage', 'at', '50', '400', 'drag', '300', '0'])).toThrow('`tap stage drag 300 0 from 50 400`');
+  expect(() => tapWords(['stage', 'down', 'at', '55', '430', 'drag', '300', '0'])).toThrow('`tap stage down at 55 430`, then `tap hold <ms>`, `tap move [by] <x> <y> [over <ms>]`, `tap up`');
+  expect(() => tapWords(['stage', 'down', 'drag'])).toThrow('`tap stage drag <dx> <dy> from <x> <y>`');
+  expect(tapWords(['stage', 'at', '50', '400'])).toEqual(['stage', { at: [50, 400] }]);
+  expect(tapWords(['stage', 'down', 'at', '55', '430'])).toEqual(['stage', { down: true, at: [55, 430] }]);
+  expect(tapWords(['move', '220', '430', 'over', '200'], true)).toEqual([null, { phase: 'move', x: 220, y: 430, ms: 200 }]);
+});
+
 test('a pad on a world canvas: tap stick and type key Gamepad… reach the world as its pad 0, held across requests (LLP 1127.003 D3)', async () => {
   expect(tapWords(['world', 'stick', 'left', '0.7', '-0.2'])).toEqual(['world', { stick: 'left', value: [0.7, -0.2] }]);
   expect(tapWords(['world', 'stick', 'right', '1', '0', 'for', '1500'])).toEqual(['world', { stick: 'right', value: [1, 0], for: 1500 }]);

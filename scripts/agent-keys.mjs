@@ -454,6 +454,13 @@ export function tapWords(args, held = false) {
   if (form === undefined) return [first, {}];
   // A held contact's phases name no target: the contact is the one `tap <target> down` began.
   if (['up', 'cancel', 'hold', 'move'].includes(form)) refuse(held ? `a held contact's phases take no target: \`tap ${[form, ...rest].join(' ')}\`` : `${form} is a phase of a held contact, which none is: \`tap <target> down\`, then \`tap ${form}${form === 'move' ? ' <x> <y>' : form === 'hold' ? ' <ms>' : ''}\``);
+  // A press point before `drag` (#1332): the drag's start point is its own `from`, and a held contact moves by phases.
+  if ((form === 'at' || form === 'down') && rest.includes('drag')) {
+    const drag = args.indexOf('drag'), at = args.slice(0, drag).indexOf('at');
+    const [x = '<x>', y = '<y>'] = at < 0 ? [] : args.slice(at + 1, Math.min(at + 3, drag));
+    const [dx = '<dx>', dy = '<dy>', ...more] = args.slice(drag + 1);
+    refuse(`a drag starts at a point with from: \`tap ${first} drag ${[dx, dy, 'from', x, y, ...more].join(' ')}\`; a held contact is \`tap ${first} down at ${x} ${y}\`, then \`tap hold <ms>\`, \`tap move [by] <x> <y> [over <ms>]\`, \`tap up\``);
+  }
   if (form.startsWith('{')) { try { return [first, JSON.parse(args.slice(1).join(' '))]; } catch (e) { refuse(e.message); } }
   switch (form) {
     // A click with modifiers held (gallery F20): `tap <target> modifiers Shift+Meta`.
