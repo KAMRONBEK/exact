@@ -2,6 +2,8 @@
 #[path = "../build_support.rs"]
 mod build_support;
 
+#[cfg(all(unix, not(target_os = "macos")))]
+use build_support::prepare_apple_simulator_link_archives;
 use build_support::{
     acquire_bundle, apple_simulator_arch, digest_file, download_options_from_env,
     installer_command, parse_pin_sha256, pin_for_target,
@@ -404,7 +406,7 @@ fn make_thin_archive(
     archive
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(unix)]
 fn test_install(root: &Path, archives: &[LinkArchive], authenticate: bool) -> EngineInstall {
     let authenticated_archive_digests = if authenticate {
         archives
@@ -504,6 +506,46 @@ fn checked_command(command: &mut Command, purpose: &str) -> std::process::Output
         String::from_utf8_lossy(&output.stderr)
     );
     output
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+#[test]
+fn off_a_mac_the_simulator_closure_runs_llvm_lipo_from_the_llvm_bin_directory() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let source = temporary.path().join("libtiny.a");
+    fs::write(&source, b"thin-arm64").expect("archive");
+    let archive = LinkArchive {
+        library: "tiny".to_owned(),
+        source,
+    };
+    let install = test_install(temporary.path(), std::slice::from_ref(&archive), true);
+    let llvm = temporary.path().join("llvm");
+    fs::create_dir(&llvm).expect("LLVM bin directory");
+    let lipo = llvm.join("llvm-lipo");
+    fs::write(
+        &lipo,
+        "#!/bin/sh\n[ \"$1\" = \"-archs\" ] && printf 'arm64\\n' && exit 0\nexit 99\n",
+    )
+    .expect("fake llvm-lipo");
+    fs::set_permissions(&lipo, fs::Permissions::from_mode(0o755)).expect("executable llvm-lipo");
+
+    let _llvm_bin = EnvGuard::set(
+        "EXACT_APPLE_LLVM_BIN",
+        llvm.to_str().expect("UTF-8 temporary path"),
+    );
+    let prepared = prepare_apple_simulator_link_archives(
+        &install,
+        "aarch64-apple-ios-sim",
+        &temporary.path().join("out"),
+        std::slice::from_ref(&archive),
+    )
+    .expect("inspect with llvm-lipo");
+    assert_eq!(
+        fs::read(&prepared[0].linked).expect("staged archive"),
+        b"thin-arm64"
+    );
 }
 
 #[cfg(unix)]

@@ -1409,8 +1409,20 @@ pub(crate) fn prepare_apple_simulator_link_archives(
         target,
         out_dir,
         archives,
-        Path::new("lipo"),
+        &apple_lipo(),
     )
+}
+
+/// Xcode's `lipo` on a Mac. Elsewhere LLVM's, from `EXACT_APPLE_LLVM_BIN` or
+/// `PATH`, as Exact's Apple toolchain finds it.
+fn apple_lipo() -> PathBuf {
+    if cfg!(target_os = "macos") {
+        return PathBuf::from("lipo");
+    }
+    match env::var_os("EXACT_APPLE_LLVM_BIN").filter(|bin| !bin.is_empty()) {
+        Some(bin) => Path::new(&bin).join("llvm-lipo"),
+        None => PathBuf::from("llvm-lipo"),
+    }
 }
 
 pub(crate) fn prepare_apple_simulator_link_archives_with_lipo(
@@ -1569,7 +1581,7 @@ pub(crate) fn prepare_apple_simulator_link_archives_with_lipo(
                 .arg("-output")
                 .arg(&thinned)
                 .output()
-                .map_err(|error| lipo_launch_error(&staged, error))?;
+                .map_err(|error| lipo_launch_error(lipo, &staged, error))?;
             if !output.status.success() {
                 return Err(format!(
                     "lipo -thin {arch} failed for verified snapshot of {} with {}: {}",
@@ -1888,7 +1900,7 @@ fn lipo_architectures(lipo: &Path, archive: &Path) -> Result<Vec<String>, String
         .arg("-archs")
         .arg(archive)
         .output()
-        .map_err(|error| lipo_launch_error(archive, error))?;
+        .map_err(|error| lipo_launch_error(lipo, archive, error))?;
     if !output.status.success() {
         return Err(format!(
             "lipo -archs failed for {} with {}: {}",
@@ -1910,15 +1922,17 @@ fn lipo_architectures(lipo: &Path, archive: &Path) -> Result<Vec<String>, String
     Ok(architectures)
 }
 
-fn lipo_launch_error(archive: &Path, error: io::Error) -> String {
+fn lipo_launch_error(lipo: &Path, archive: &Path, error: io::Error) -> String {
     if error.kind() == io::ErrorKind::NotFound {
         format!(
-            "cannot run `lipo` for Apple Simulator archive {}; install Xcode command-line tools (run `xcode-select --install`)",
+            "cannot run `{}` for Apple Simulator archive {}; install Xcode command-line tools (run `xcode-select --install`), or off a Mac put LLVM's bin directory on PATH or in EXACT_APPLE_LLVM_BIN",
+            lipo.display(),
             archive.display()
         )
     } else {
         format!(
-            "cannot run `lipo` for Apple Simulator archive {}: {error}",
+            "cannot run `{}` for Apple Simulator archive {}: {error}",
+            lipo.display(),
             archive.display()
         )
     }

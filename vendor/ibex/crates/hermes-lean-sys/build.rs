@@ -22,6 +22,7 @@ fn main() {
         "HERMES_LEAN_SYS_DIR",
         "HERMES_LEAN_SYS_MIRROR",
         "HERMES_LEAN_SYS_OFFLINE",
+        "EXACT_APPLE_LLVM_BIN",
         "EXACT_JS_ENGINE",
         "CARGO_NET_OFFLINE",
         "CARGO_HOME",

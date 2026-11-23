@@ -1260,6 +1260,12 @@ exact2's web worker answers alike. `src/tests.rs` covers each statement
 kind, and exact2's `exact-js` `topics` test what announces. Replay on a
 refresh.
 
+## Local patch 52, `llvm-lipo` off a Mac
+
+`build_support.rs` inspects and thins Simulator archives with Xcode's `lipo` on a
+Mac, and elsewhere with `llvm-lipo` from `EXACT_APPLE_LLVM_BIN` or `PATH`, the
+tool exact2's `host/apple/toolchain.mjs` runs there. Replay on a refresh.
+
 ## Windows recursive removal
 
 On filesystems that support POSIX disposition, a reader can keep its open
