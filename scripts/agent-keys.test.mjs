@@ -41,6 +41,11 @@ test('a press point before drag is refused with the drag from a point and the he
   expect(() => tapWords(['stage', 'down', 'drag', 'to', 'row', 'during', '"state"', 'from', '5', '6'])).toThrow('`tap stage drag to row during "state" from 5 6`; a held contact is `tap stage down at 5 6`');
   expect(() => tapWords(['stage', 'at', '5', '6', 'drag', 'to', 'from'])).toThrow('`tap stage drag to from from 5 6`');
   expect(() => tapWords(['stage', 'at', '5', '6', 'drag', '7'])).toThrow('`tap stage drag 7 <dy> from 5 6`');
+  // Escaped quotes stay inside their quoted word, as parseDrag reads them.
+  expect(() => tapWords(['stage', 'at', '5', '6', 'drag', '7', '8', 'hold', '500', 'during', '"state', '\\"items\\"', 'from', '2"'])).toThrow('`tap stage drag 7 8 from 5 6 hold 500 during "state \\"items\\" from 2"`');
+  expect(() => tapWords(['stage', 'at', '5', '6', 'drag', 'to', '"say', '\\"', 'hello"', 'over', '300'])).toThrow('`tap stage drag to "say \\" hello" from 5 6 over 300`');
+  expect(() => tapWords(['stage', 'at', '5', '6', 'modifiers', 'Shift', 'drag', 'to', 'row', 'modifiers'])).toThrow('`tap stage drag to row from 5 6 modifiers Shift`');
+  expect(() => tapWords(['stage', 'at', '5', '6', 'drag', 'to'])).toThrow('`tap stage drag to <target> from 5 6`');
   expect(tapWords(['stage', 'at', '50', '400'])).toEqual(['stage', { at: [50, 400] }]);
   expect(tapWords(['stage', 'down', 'at', '55', '430'])).toEqual(['stage', { down: true, at: [55, 430] }]);
   expect(tapWords(['move', '220', '430', 'over', '200'], true)).toEqual([null, { phase: 'move', x: 220, y: 430, ms: 200 }]);

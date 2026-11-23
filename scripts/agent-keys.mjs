@@ -3,7 +3,7 @@
 // `type` and `tap` forms. Split from agent.mjs, which re-exports each.
 import { randomBytes } from 'node:crypto';
 import { resolve } from 'node:path';
-import { dragArguments } from './agent-drag.mjs';
+import { dragArguments, dragWords } from './agent-drag.mjs';
 
 export function refusalMessage(reply) {
   const r = reply?.refused;
@@ -456,22 +456,19 @@ export function tapWords(args, held = false) {
   if (['up', 'cancel', 'hold', 'move'].includes(form)) refuse(held ? `a held contact's phases take no target: \`tap ${[form, ...rest].join(' ')}\`` : `${form} is a phase of a held contact, which none is: \`tap <target> down\`, then \`tap ${form}${form === 'move' ? ' <x> <y>' : form === 'hold' ? ' <ms>' : ''}\``);
   // A press point before `drag` (#1332): the drag's start point is its own `from`, and a held contact moves by phases.
   if ((form === 'at' || form === 'down') && rest.includes('drag')) {
-    const words = args.slice(1), split = words.indexOf('drag'), press = words.slice(0, split), after = words.slice(split + 1);
-    // The drag's head: `to <target>`, a quoted target running to its closing quote, or a distance `<dx> <dy>`.
-    let cut = 2;
-    const quote = after[0] === 'to' && /^["']/.test(after[1] ?? '') ? after[1][0] : null;
-    if (quote) while (cut < after.length && !(after[cut - 1].length > 1 && after[cut - 1].endsWith(quote))) cut++;
-    const head = after[0] === 'to' ? after.slice(0, cut) : [after[0] ?? '<dx>', after[1] ?? '<dy>'], tail = after.slice(cut);
-    // The first leg's own options run to `then`; a quoted read is not one of them.
-    const own = [];
-    for (let i = 0, open = null; i < tail.length && (open || tail[i] !== 'then'); i++) {
-      const w = tail[i];
-      if (open) { if (w.endsWith(open)) open = null; } else if (/^["']/.test(w)) { if (w.length < 2 || !w.endsWith(w[0])) open = w[0]; } else own.push(w);
-    }
+    const words = args.slice(1), split = words.indexOf('drag'), press = words.slice(0, split);
+    // The drag's words as parseDrag reads them. Its head is `to <target>` or a distance `<dx> <dy>`; the first leg's
+    // own options follow it, up to `then`.
+    const after = dragWords(words.slice(split + 1).join(' '));
+    const head = after[0] === 'to' ? ['to', after[1] ?? '<target>'] : [after[0] ?? '<dx>', after[1] ?? '<dy>'], tail = after.slice(2);
+    const own = tail.includes('then') ? tail.slice(0, tail.indexOf('then')) : tail;
     const point = (list, name) => list.includes(name) ? list.slice(list.indexOf(name) + 1, list.indexOf(name) + 3) : null;
     const [x = '<x>', y = '<y>'] = point(press, 'at') ?? point(own, 'from') ?? [];
     const held = press.indexOf('modifiers'), modifiers = held < 0 || press[held + 1] === undefined ? [] : press.slice(held, held + 2);
-    const drag = [...head, ...(own.includes('from') ? [] : ['from', x, y]), ...modifiers, ...tail];
+    // The drag's own modifiers win; a bare one ending its leg takes the press's.
+    const mine = own.indexOf('modifiers'), fill = mine >= 0 && mine === own.length - 1 && modifiers.length;
+    const rest = fill ? [...tail.slice(0, mine + 1), modifiers[1], ...tail.slice(mine + 1)] : tail;
+    const drag = [...head, ...(own.includes('from') ? [] : ['from', x, y]), ...(mine < 0 ? modifiers : []), ...rest];
     // A target of several words, or none, goes back in quotes, as the op reads it.
     const target = first === '' || /[\s"\\]/.test(first) ? JSON.stringify(first) : first;
     refuse(`a drag starts at a point with from: \`tap ${[target, 'drag', ...drag].join(' ')}\`; a held contact is \`tap ${[target, 'down', 'at', x, y, ...modifiers].join(' ')}\`, then \`tap hold <ms>\`, \`tap move [by] <x> <y> [over <ms>]\`, \`tap up\``);
