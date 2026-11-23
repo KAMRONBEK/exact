@@ -203,23 +203,26 @@ final class PhotoKitLibrary: NSObject, PHPhotoLibraryChangeObserver {
             }
             DispatchQueue.global(qos: .userInitiated).async {
                 let (page, more) = Self.page(limit, after: after, options: options, predicates: predicates)
-                let out = page.map { a -> [String: Any] in
-                    let adjusted = PHAssetResource.assetResources(for: a).contains { $0.type == .adjustmentData }
-                    return [
-                        "id": a.localIdentifier, "mediaType": "image", "width": a.pixelWidth, "height": a.pixelHeight,
-                        "creationDate": a.creationDate.map { $0.timeIntervalSince1970 * 1000 } ?? NSNull(),
-                        "favorite": a.isFavorite, "picture": "photos:\(a.localIdentifier)",
-                        "apple": ["mediaSubtypes": Self.subtypes.filter { a.mediaSubtypes.contains($0.0) }.map(\.1),
-                                  "burstIdentifier": a.burstIdentifier as Any? ?? NSNull(), "hasAdjustments": adjusted],
-                        "android": NSNull(),
-                    ]
-                }
+                let out = page.map(Self.json)
                 let cursor = more ? page.last.map {
                     PageCursor.text("photokit", .init(date: $0.creationDate?.timeIntervalSinceReferenceDate, id: $0.localIdentifier))
                 } : nil
                 DispatchQueue.main.async { reply(["assets": out, "cursor": cursor ?? NSNull()]) }
             }
         }
+    }
+
+    /// A `PhotoAsset`, read on the worker that fetched it.
+    private static func json(_ a: PHAsset) -> [String: Any] {
+        let adjusted = PHAssetResource.assetResources(for: a).contains { $0.type == .adjustmentData }
+        return [
+            "id": a.localIdentifier, "mediaType": "image", "width": a.pixelWidth, "height": a.pixelHeight,
+            "creationDate": a.creationDate.map { $0.timeIntervalSince1970 * 1000 } ?? NSNull(),
+            "favorite": a.isFavorite, "picture": "photos:\(a.localIdentifier)",
+            "apple": ["mediaSubtypes": subtypes.filter { a.mediaSubtypes.contains($0.0) }.map(\.1),
+                      "burstIdentifier": a.burstIdentifier as Any? ?? NSNull(), "hasAdjustments": adjusted],
+            "android": NSNull(),
+        ]
     }
 
     /// `subtypes`' predicate (LLP 1133.019.000 D4), nil for every image:
@@ -229,19 +232,127 @@ final class PhotoKitLibrary: NSObject, PHPhotoLibraryChangeObserver {
         return NSPredicate(format: "(mediaSubtypes & %ld) != 0", Int(PHAssetMediaSubtype.photoScreenshot.rawValue))
     }
 
-    /// What changed since `since` (LLP 1133.019.000 D1): every view is
-    /// rescan-only here, so a token answers `expired` with a fresh one, and
-    /// the app replaces its index from `photoAssets`.
+    /// Whether the view walks PhotoKit's persistent history (LLP 1133.019.000
+    /// D2): full access with no fetch hatch. Under limited access a selection
+    /// can change while the app is closed with no history to recover it, and a
+    /// hatch shapes a list the history does not know, so either view is
+    /// rescan-only.
+    private var history: Bool { level(.readWrite) == .authorized && PhotosModule.fetchOptions == nil }
+
+    /// What changed since `since` (LLP 1133.019.000 D1, D2). A rescan-only
+    /// view answers any token `expired` with a fresh one, and the app replaces
+    /// its index from `photoAssets`. A history walk fixes its end on its first
+    /// page; a continuation finds that end again before it answers.
     func changes(_ args: [String: Any], origin: String, reply: @escaping ([String: Any]) -> Void) {
         whenReadable(origin: origin, reply) { [self] in
             observe()
             let here = ChangeToken(backend: "photokit", access: facts()["access"]!, subtypes: ChangeToken.subtypes(args))
-            let since: ChangeToken?
-            do { since = try ChangeToken.parse(args["since"], backend: "photokit") } catch { return reply(ChangeToken.refused) }
-            // Every token this answers is a rescan-only one.
-            guard let since else { return reply(here.answer()) }
-            reply(since.rescan && since.epoch == nil ? here.answer(expired: true) : ChangeToken.refused)
+            let given: ChangeToken?
+            do { given = try ChangeToken.parse(args["since"], backend: "photokit") } catch { return reply(ChangeToken.refused) }
+            guard history else {
+                guard let given else { return reply(here.answer()) }
+                return reply(given.epoch == nil ? here.answer(expired: true) : ChangeToken.refused)
+            }
+            let fresh = { () -> ChangeToken in
+                var t = here
+                t.at = Self.archive(PHPhotoLibrary.shared().currentChangeToken)
+                return t
+            }
+            guard let since = given else { return reply(fresh().answer()) }
+            // A token's positions are PhotoKit's own archives.
+            let start = since.at.map(Self.unarchive), end = since.end.map(Self.unarchive)
+            guard since.epoch == nil, start != .some(nil), end != .some(nil) else { return reply(ChangeToken.refused) }
+            guard here.sameView(since), let start = start ?? nil else { return reply(fresh().answer(expired: true)) }
+            let (limit, after, screenshots) = (ChangeToken.limit(args), since.after, here.subtypes.contains("screenshot"))
+            DispatchQueue.global(qos: .userInitiated).async {
+                let walked = Self.walk(from: start, through: end ?? nil, after: after, limit: limit, screenshots: screenshots)
+                DispatchQueue.main.async { [self] in
+                    guard readable else { return reply(["error": "NotAllowedError"]) }
+                    // The view the walk began in is still the app's.
+                    guard history, facts()["access"] == here.access else { return reply(fresh().answer(expired: true)) }
+                    switch walked {
+                    case .expired: reply(fresh().answer(expired: true))
+                    case .malformed: reply(ChangeToken.refused)
+                    case let .failed(name):
+                        say("photoChanges failed: \(name)")
+                        reply(["error": name])
+                    case let .page(upserts, removed, last, through, more):
+                        var next = here
+                        if more { (next.at, next.end, next.after) = (since.at, Self.archive(through), last) } else { next.at = Self.archive(through) }
+                        reply(next.answer(added: upserts.filter(\.inserted).map(\.json), updated: upserts.filter { !$0.inserted }.map(\.json),
+                                          deleted: removed, more: more))
+                    }
+                }
+            }
         }
+    }
+
+    private enum Walked {
+        case page(upserts: [(json: [String: Any], inserted: Bool)], removed: [String], last: String?, through: NSObject, more: Bool)
+        case expired, malformed
+        case failed(String)
+    }
+
+    /// One page of the changes after `start` through `saved` (the walk's end;
+    /// nil on its first page, which takes the newest change's): D2's fold of
+    /// each asset changed into one candidate, by `localIdentifier` after
+    /// `after`, at most `limit`, read now with the list's rules. A candidate
+    /// the list holds is an upsert, `inserted` when its first change inserted
+    /// it; any other is a removal.
+    private static func walk(from start: PHPersistentChangeToken, through saved: PHPersistentChangeToken?, after: String?,
+                             limit: Int, screenshots: Bool) -> Walked {
+        let changes: PHPersistentChangeFetchResult
+        do { changes = try PHPhotoLibrary.shared().fetchPersistentChanges(since: start) } catch { return failure(error) }
+        var first: [String: Bool] = [:], end = start, reached = saved == nil
+        for change in changes {
+            do {
+                let details = try change.changeDetails(for: .asset)
+                for (ids, insert) in [(details.insertedLocalIdentifiers, true), (details.updatedLocalIdentifiers, false),
+                                      (details.deletedLocalIdentifiers, false)] {
+                    for id in ids where first[id] == nil { first[id] = insert }
+                }
+            } catch { return failure(error) }
+            end = change.changeToken
+            if let saved, change.changeToken.isEqual(saved) {
+                reached = true
+                break
+            }
+        }
+        // The saved end, found again by comparing tokens: a count of changes cannot identify it.
+        guard reached else { return .expired }
+        let ids = first.keys.filter { id in after.map { id > $0 } ?? true }.sorted()
+        if let after, first[after] == nil || ids.isEmpty { return .malformed }
+        let page = Array(ids.prefix(limit))
+        let options = PHFetchOptions()
+        var predicates = [NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)]
+        if screenshots, let only = subtypePredicate(["subtypes": ["screenshot"]]) { predicates.append(only) }
+        options.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
+        let found = PHAsset.fetchAssets(withLocalIdentifiers: page, options: options)
+        var listed: [String: PHAsset] = [:]
+        found.enumerateObjects { asset, _, _ in listed[asset.localIdentifier] = asset }
+        return .page(upserts: page.compactMap { id in listed[id].map { (json($0), first[id]!) } },
+                     removed: page.filter { listed[$0] == nil }, last: page.last, through: end, more: ids.count > page.count)
+    }
+
+    /// D1's names for a failed fetch: a token PhotoKit can no longer walk from
+    /// expires; a cancelled one is `AbortError`.
+    private static func failure(_ error: Error) -> Walked {
+        let e = error as NSError
+        if e.domain == PHPhotosErrorDomain,
+           [PHPhotosError.persistentChangeTokenExpired.rawValue, PHPhotosError.persistentChangeDetailsUnavailable.rawValue].contains(e.code) {
+            return .expired
+        }
+        return .failed(e.domain == NSCocoaErrorDomain && e.code == NSUserCancelledError ? "AbortError" : "UnknownError")
+    }
+
+    private static func archive(_ token: NSObject) -> String? {
+        (try? NSKeyedArchiver.archivedData(withRootObject: token, requiringSecureCoding: true))?.base64EncodedString()
+    }
+
+    /// A token PhotoKit archived, or nil for text that is not one.
+    private static func unarchive(_ text: String) -> PHPersistentChangeToken? {
+        guard let data = Data(base64Encoded: text) else { return nil }
+        return try? NSKeyedUnarchiver.unarchivedObject(ofClass: PHPersistentChangeToken.self, from: data)
     }
 
     /// The page after `after` in the list's order: newest first, the
