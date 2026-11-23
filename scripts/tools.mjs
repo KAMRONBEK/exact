@@ -150,8 +150,8 @@ export function fetchedTool(name, env = process.env, download = true) {
   return null;
 }
 
-/** The set D5's order takes product `name` from, after this checkout's own fresh build: one built here, else (where a
- * kept product does not answer first) a fetched one where that is allowed. */
+/** The set D5's order takes product `name` from: one built here, else (where this checkout's fresh build or a kept
+ * product does not answer first) a fetched one where that is allowed. */
 export const fromSets = (name, env = process.env, download = true) => fromSet(name, 'built', env) ?? fetchedTool(name, env, download);
 
 /** Thrown where product `name` would need Cargo and Rust is missing: says why no set matched, the newest set's commit
@@ -185,10 +185,17 @@ export class RustMissing extends Error {
   }
 }
 
+/** Compiler `name` already built, as `{ path, set }` (`set` null for `debug`): a set built on this machine, else this
+ * checkout's fresh `debug` build, else a fetched set where one may run. A built set is optimized (`keep` builds
+ * host-dev), about ten times faster than debug with the same output, and matches only while its inputs are these
+ * bytes, so an edited compiler still falls through to its debug build. */
+export const compilerFrom = (name, debug, env = process.env) =>
+  fromSet(name, 'built', env) ?? (freshCompiler(debug) ? { path: debug, set: null } : fetchedTool(name, env));
+
 const CONTRACT = resolve(ROOT, 'target/debug', `contract${EXE}`);
-/** The Contract compiler built already, to `launch`: this checkout's fresh debug build or a matching tool set's. */
+/** The Contract compiler built already, to `launch`, from where `compilerFrom` takes it. */
 export function builtContract(env = process.env) {
-  const path = freshCompiler(CONTRACT) ? CONTRACT : fromSets('contract', env)?.path;
+  const path = compilerFrom('contract', CONTRACT, env)?.path;
   return path ? launch(path, [], undefined, env) : null;
 }
 

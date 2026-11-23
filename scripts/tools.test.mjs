@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { digest, lockClosure, workspaceManifest } from './kept.mjs';
 import { cargoOnPath } from './cargo-check.mjs';
-import { ROOT, RustMissing, fetchToolSet, fromSet, fromSets, hostTriple, publishToolSet, publishWatchedTip, readToolManifest, rustMissing } from './tools.mjs';
+import { ROOT, RustMissing, compilerFrom, fetchToolSet, fromSet, fromSets, hostTriple, publishToolSet, publishWatchedTip, readToolManifest, rustMissing } from './tools.mjs';
 import { DirectoryOrigin, HttpsOrigin, blobPath } from './origin.mjs';
 import { offlineMiss } from './filesystem.mjs';
 
@@ -206,6 +206,22 @@ test('a set is taken while its inputs are these bytes, and a miss names the firs
     assert.equal(fromSet('contract', 'built', miss.env), null);
     assert.match(new RustMissing('contract', miss.env).message, /^error \[rust-missing\]: contract builds with Rust, .* contract\/syntax\/src differs from the newest tool set's, built at cccccccccccc.*https:\/\/rustup\.rs/);
   } finally { miss.done(); }
+}, 60000);
+
+test('a set built here is taken over a fresh debug compiler, which answers once an input differs from the set\'s', () => {
+  const changed = [ours[0], ['contract/syntax/src', 'f'.repeat(64)]];
+  for (const [inputs, taken] of [[ours, 'set'], [changed, 'debug']]) {
+    const m = machine([{ source: 'built', inputs, commit: 'a'.repeat(40) }], { rust: true });
+    const debug = resolve(m.env.HOME, 'target/debug/contract'), source = resolve(m.env.HOME, 'main.rs');
+    mkdirSync(resolve(debug, '..'), { recursive: true });
+    writeFileSync(source, '');
+    writeFileSync(`${debug}.d`, `${debug}: ${source}\n`);
+    writeFileSync(debug, '');
+    try {
+      const set = resolve(m.env.HOME, '.cache/exact/tools', hostTriple(), 'set0', 'contract');
+      assert.equal(compilerFrom('contract', debug, m.env)?.path, taken === 'set' ? set : debug);
+    } finally { m.done(); }
+  }
 }, 60000);
 
 test('when a cached compiler disappears, the next matching set supplies it', () => {
