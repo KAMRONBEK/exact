@@ -692,52 +692,66 @@ fn native_motion(p: exact_motion::Property) -> bool {
 /// Whether a value can be empty: a blank literal, `none`, or an arm of a
 /// choice that is one.
 fn may_be_empty(e: &Expr) -> bool {
-    may_be_empty_unless(e, None)
+    may_be_empty_unless(e, false)
 }
 
-/// What an enclosing `if` says a value is not: `""` or `none`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum RuledOut {
-    Empty,
-    Absent,
+fn without_ascriptions(mut e: &Expr) -> &Expr {
+    while let Expr::Typed(inner, _, _) = e {
+        e = inner;
+    }
+    e
 }
 
-/// The values a view `if`'s condition rules a blank out of, and which blank:
-/// `E` in `E != ""`, `"" != E`, `E != none` or `none != E`. In `"" != ""`
-/// either side may be the copy of a use's argument, so both are.
-pub(crate) fn ruled_out(cond: &Expr) -> Vec<(&Expr, RuledOut)> {
+/// The operands a view `if` requires to differ from `""`. In `"" != ""`,
+/// either side may be the inlined argument, so keep both.
+pub(crate) fn ruled_out(cond: &Expr) -> Vec<&Expr> {
     let Expr::Binary(contract_syntax::BinOp::Ne, a, b, _) = cond else {
         return Vec::new();
     };
-    let blank = |e: &Expr| match e {
-        Expr::Str(s, _) if s.is_empty() => Some(RuledOut::Empty),
-        Expr::None(_) => Some(RuledOut::Absent),
-        _ => None,
-    };
     [(a, b), (b, a)]
         .into_iter()
-        .filter_map(|(e, other)| blank(other).map(|out| (&**e, out)))
+        .filter_map(|(e, other)| {
+            matches!(without_ascriptions(other), Expr::Str(s, _) if s.is_empty()).then_some(&**e)
+        })
         .collect()
 }
 
-/// Whether `value` is never empty where `guards` hold ([`ruled_out`]).
-/// Inlining copies a use's argument into both the condition and the
-/// attribute, so `Item(label="")` under `if label != ""` compares equal to
-/// its guard, and the button it labels never renders.
-pub(crate) fn guarded<'e>(
-    value: &Expr,
-    mut guards: impl Iterator<Item = (&'e Expr, RuledOut)>,
-) -> bool {
-    guards.any(|(e, out)| e == value && !may_be_empty_unless(value, Some(out)))
+/// Whether a matching guard rules out every blank result of `value`.
+/// Forwarding a prop can add ascriptions to the inlined argument. Its
+/// original span still distinguishes it from a separate blank literal.
+pub(crate) fn guarded<'e>(value: &Expr, mut guards: impl Iterator<Item = &'e Expr>) -> bool {
+    let value = without_ascriptions(value);
+    guards.any(|e| without_ascriptions(e) == value) && !may_be_empty_unless(value, true)
 }
 
-fn may_be_empty_unless(e: &Expr, out: Option<RuledOut>) -> bool {
+fn may_be_empty_unless(e: &Expr, empty_ruled_out: bool) -> bool {
     match e {
-        Expr::Str(s, _) => s.trim().is_empty() && !(s.is_empty() && out == Some(RuledOut::Empty)),
-        Expr::None(_) => out != Some(RuledOut::Absent),
-        Expr::Ternary(_, a, b, _) => may_be_empty_unless(a, out) || may_be_empty_unless(b, out),
-        Expr::Typed(x, _, _) | Expr::Let { body: x, .. } => may_be_empty_unless(x, out),
-        _ => false,
+        Expr::Str(s, _) => s.trim().is_empty() && !(s.is_empty() && empty_ruled_out),
+        Expr::None(_) => true,
+        Expr::Ternary(_, a, b, _) => {
+            may_be_empty_unless(a, empty_ruled_out) || may_be_empty_unless(b, empty_ruled_out)
+        }
+        Expr::Typed(x, _, _) | Expr::Let { body: x, .. } => may_be_empty_unless(x, empty_ruled_out),
+        // A guard exemption requires proof for every remaining arm.
+        _ => empty_ruled_out,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use contract_syntax::BinOp;
+
+    #[test]
+    fn only_the_empty_string_produces_a_label_guard() {
+        let span = Span::default();
+        let label = Expr::Ident("label".into(), span);
+        let none = Expr::None(span);
+        let empty = Expr::Str(String::new(), span);
+        let unequal = |a, b| Expr::Binary(BinOp::Ne, Box::new(a), Box::new(b), span);
+        assert_eq!(ruled_out(&unequal(label.clone(), empty)), [&label]);
+        assert!(ruled_out(&unequal(label.clone(), none.clone())).is_empty());
+        assert!(ruled_out(&unequal(none, label)).is_empty());
     }
 }
 
@@ -770,7 +784,7 @@ impl Lowerer<'_> {
     /// `lower`, with what a view `if`'s condition rules out held in `guards`.
     pub(crate) fn under_guard<T>(&mut self, cond: &Expr, lower: impl FnOnce(&mut Self) -> T) -> T {
         let held = self.guards.len();
-        (self.guards).extend(ruled_out(cond).into_iter().map(|(e, out)| (e.clone(), out)));
+        self.guards.extend(ruled_out(cond).into_iter().cloned());
         let lowered = lower(self);
         self.guards.truncate(held);
         lowered
@@ -949,8 +963,7 @@ impl Lowerer<'_> {
         }
         let labelled = attrs.iter().any(|a| {
             a.name == "aria-label"
-                && (!may_be_empty(&a.value)
-                    || guarded(&a.value, self.guards.iter().map(|(e, out)| (e, *out))))
+                && (!may_be_empty(&a.value) || guarded(&a.value, self.guards.iter()))
         });
         // A tab that names its panel may hold its badge beside its face (LLP 1075.003 §9.9).
         let panel_tab = attrs.iter().any(|a| a.name == "aria-controls")

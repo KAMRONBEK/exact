@@ -379,15 +379,41 @@ fn its_face_is_a_title_a_symbol_or_both() {
     }
 }
 
-/// An app using `Item`, whose image-only native button shows only under
-/// `cond` and is named `label`, once per value in `labels`.
-fn guarded_item(cond: &str, label: &str, labels: &[&str]) -> String {
+fn item(view: &str, labels: &[&str]) -> String {
     let uses: String = labels
         .iter()
         .map(|l| format!("      Item(label={l}, go=go)\n"))
         .collect();
+    let view: String = view.lines().map(|line| format!("    {line}\n")).collect();
     format!(
-        "component App\n  state busy = false\n  action go\n    busy = !busy\n  view\n    column\n{uses}component Item\n  props\n    label: string\n    go: action\n  view\n    if {cond}\n      button appearance=\"auto\" press=go aria-label={label}\n        image \"symbol:add\"\n"
+        "component App\n  state busy = false\n  action go\n    busy = !busy\n  view\n    column\n{uses}component Item\n  props\n    label: string\n    go: action\n  view\n{view}"
+    )
+}
+
+fn guarded_item(cond: &str, label: &str, labels: &[&str]) -> String {
+    item(
+        &format!(
+            "if {cond}\n  button appearance=\"auto\" press=go aria-label={label}\n    image \"symbol:add\""
+        ),
+        labels,
+    )
+}
+
+fn assert_label_refused(src: &str) {
+    let Err(e) = contract::compile(src) else {
+        panic!("compiled a native button with a blank label\n{src}");
+    };
+    assert_eq!(e.id, "lower-button-content", "{src}\n{e}");
+    assert!(e.message.contains("never empty"), "{e}");
+}
+
+fn assert_unlabelled_warning(src: &str) {
+    let (result, warnings) = contract::compile_warned(src);
+    result.unwrap_or_else(|e| panic!("{e}\n{src}"));
+    assert_eq!(
+        warnings.iter().map(|w| w.id.as_str()).collect::<Vec<_>>(),
+        ["lower-button-unlabelled"],
+        "{src}\n{warnings:?}"
     )
 }
 
@@ -402,21 +428,77 @@ fn a_label_its_if_rules_blank_out_of_is_never_empty() {
         assert!(warnings.is_empty(), "{labels:?}: {warnings:?}");
     }
     boot(&guarded_item("\"\" != label", "label", &["\"\""]));
-    // The `if` speaks for the value it compares, not another blank, and
-    // rules out only the empty string.
     for (cond, label, labels) in [
         ("label != \"\"", "\"\"", &["\"Add\""][..]),
         ("label != \"\"", "label", &["\" \""]),
+        (
+            "label != \"\"",
+            "label",
+            &["(busy ? \"\" : (\" \" + \" \"))"],
+        ),
         ("label == \"\"", "label", &["\"\""]),
     ] {
-        let e = contract::compile(&guarded_item(cond, label, labels)).unwrap_err();
-        assert_eq!(
-            e.id, "lower-button-content",
-            "{cond} {label} {labels:?}: {}",
-            e.message
-        );
-        assert!(e.message.contains("never empty"), "{}", e.message);
+        assert_label_refused(&guarded_item(cond, label, labels));
     }
+}
+
+#[test]
+fn an_unlabelled_inline_warns_once_in_either_order() {
+    for labels in [["\"\"", "\" \"", "\" \""], ["\" \"", "\" \"", "\"\""]] {
+        let src = guarded_item("label != \"\"", "label", &labels)
+            .replace("appearance=\"auto\"", "appearance=\"none\"");
+        assert_unlabelled_warning(&src);
+    }
+}
+
+#[test]
+fn a_label_guard_follows_a_forwarded_enum_prop() {
+    let src = r#"component App
+  state busy = false
+  action go
+    busy = !busy
+  view
+    column
+      Item(label="", go=go)
+      Item(label="Add", go=go)
+component Item
+  props
+    label: enum<"", "Add">
+    go: action
+  view
+    if label != ""
+      Face(label=label, go=go)
+component Face
+  props
+    label: enum<"", "Add">
+    go: action
+  view
+    button appearance="auto" press=go aria-label=label
+      image "symbol:add"
+"#;
+    let (result, warnings) = contract::compile_warned(src);
+    result.unwrap_or_else(|e| panic!("{e}"));
+    assert!(warnings.is_empty(), "{warnings:?}");
+}
+
+#[test]
+fn a_label_guard_does_not_reach_the_else_arm() {
+    let src = item(
+        "if label != \"\"\n  text \"Add\"\nelse\n  button appearance=\"auto\" press=go aria-label=label\n    image \"symbol:add\"",
+        &["\"\""],
+    );
+    assert_label_refused(&src);
+    assert_unlabelled_warning(&src.replace("appearance=\"auto\"", "appearance=\"none\""));
+}
+
+#[test]
+fn a_label_guard_does_not_reach_the_next_sibling() {
+    let src = item(
+        "if label != \"\"\n  text \"Add\"\nbutton appearance=\"auto\" press=go aria-label=label\n  image \"symbol:add\"",
+        &["\"\""],
+    );
+    assert_label_refused(&src);
+    assert_unlabelled_warning(&src.replace("appearance=\"auto\"", "appearance=\"none\""));
 }
 
 #[test]

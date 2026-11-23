@@ -331,7 +331,7 @@ pub(crate) struct Lowerer<'a> {
     parent_horizontal_flex: Option<bool>,
     /// Where a native button may not be, from the nearest ancestor that says.
     pub(crate) button_context: Option<&'static str>,
-    pub(crate) guards: Vec<(Expr, controls::RuledOut)>,
+    pub(crate) guards: Vec<Expr>,
     /// Whether the element being lowered is a popover's direct child.
     pub(crate) popover_child: bool,
     /// Where the element being lowered sits relative to a navigation root.

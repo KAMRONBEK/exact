@@ -135,6 +135,7 @@ pub(crate) fn with_text_styles(
             ]
         });
     let (mut seen, mut platform) = (BTreeSet::new(), Vec::new());
+    let mut seen_buttons = BTreeSet::new();
     for (visit, (in_root, back, guards)) in visits {
         if let Some((tag, positional, attrs)) = visit.element() {
             // A component used twice is inlined twice: one line for its source.
@@ -148,7 +149,11 @@ pub(crate) fn with_text_styles(
                     selection,
                 ));
             }
-            out.extend(roles::button(tag, attrs, visit, span, &guards).filter(|_| fresh));
+            // A later inline may be the first to produce a button warning.
+            out.extend(
+                roles::button(tag, attrs, visit, span, &guards)
+                    .filter(|w| seen_buttons.insert((w.id, w.span))),
+            );
             out.extend(roles::dialog_role(tag, attrs, span).filter(|_| fresh));
             out.extend(roles::alert_font(tag, attrs, &checked.file.styles).filter(|_| fresh));
             out.extend(roles::level_without_heading(tag, attrs, span).filter(|_| fresh));

@@ -4,7 +4,7 @@
 //! level with no heading (LLP 1115.000 D12.5), and a bar with only one tab.
 
 use super::{computed, has, literal, BOXES};
-use crate::controls::{guarded, RuledOut};
+use crate::controls::guarded;
 use crate::LowerError;
 use contract_checking::{Structure, View, Visit};
 use contract_syntax::{Attr, Expr, Span, StyleDecl, VisitSpans};
@@ -177,9 +177,9 @@ pub(super) fn keys(
     })
 }
 
-/// Whether an element names itself: a written `aria-label` or
-/// `aria-labelledby` that is not the empty string.
-fn named(attrs: &[Attr], guards: &[(&Expr, RuledOut)]) -> bool {
+/// An `aria-label` or `aria-labelledby` counts as a name if it is a non-blank
+/// literal, a computed expression, or an empty string its enclosing `if` rules out.
+fn named(attrs: &[Attr], guards: &[&Expr]) -> bool {
     ["aria-label", "aria-labelledby"].iter().any(|name| {
         attrs
             .iter()
@@ -274,7 +274,7 @@ pub(super) fn button(
     attrs: &[Attr],
     node: Visit<'_>,
     span: Span,
-    guards: &[(&Expr, RuledOut)],
+    guards: &[&Expr],
 ) -> impl Iterator<Item = LowerError> {
     let button = tag == "button";
     let unlabelled = button.then(|| unlabelled_button(attrs, node, span, guards));
@@ -292,7 +292,7 @@ fn unlabelled_button(
     attrs: &[Attr],
     node: Visit<'_>,
     span: Span,
-    guards: &[(&Expr, RuledOut)],
+    guards: &[&Expr],
 ) -> Option<LowerError> {
     let hidden = attrs
         .iter()
