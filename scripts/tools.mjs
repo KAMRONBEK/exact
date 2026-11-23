@@ -41,6 +41,11 @@ export const launch = (cmd, pre = [], done = () => {}, env = process.env) => ({ 
 
 /** The packages whose source roots the web build's receipt holds (host/web/build.mjs `webSourceRoots`). */
 export const WEB_CRATES = ['exact-web-js', 'exact-web', 'exact-js-bake', 'exact-markdown-editor', 'exact-web-js-motion', 'exact-textflow'];
+const WORKSPACE_INPUTS = ['Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', '.cargo/config.toml', '.cargo/config'];
+const NATIVE_RECIPE = ['rust-toolchain.toml', '.cargo/config.toml'];
+const HELPER_RECIPE = ['scripts/filesystem.mjs', 'scripts/rustc/exact-rustc'];
+const CROSS_RECIPE = ['scripts/tools.mjs', 'scripts/rustc/exact-linux-cc'];
+const LEAF_RECIPE = ['host/web-js/module.mjs', 'scripts/cargo-check.mjs', '.cargo/config.toml'];
 
 const TRIPLES = { 'darwin-arm64': 'aarch64-apple-darwin', 'darwin-x64': 'x86_64-apple-darwin', 'linux-x64': 'x86_64-unknown-linux-gnu', 'linux-arm64': 'aarch64-unknown-linux-gnu', 'win32-x64': 'x86_64-pc-windows-msvc', 'win32-arm64': 'aarch64-pc-windows-msvc' };
 /** This machine's target triple, as Rust names it, without asking rustc. */
@@ -232,27 +237,33 @@ export function contractTool({ env = process.env, json = false, file = '', prefe
   return compilerCargo('run', env);
 }
 
-/** Cargo's metadata as `webSourceRoots` reads it, for `WEB_CRATES`' closure: its local packages with their targets,
- * and every reachable package's dependencies. Paths are relative to the checkout, so another checkout reads it as its
- * own (`setMetadata`). */
-function recordMetadata() {
-  const result = spawnSync('cargo', ['metadata', '--locked', '--offline', '--format-version', '1'], { cwd: ROOT, env: cargoEnvironment(), encoding: 'utf8', maxBuffer: 128 << 20 });
+/** Cargo's metadata for `webSourceRoots` and the tool set's input directories. The recorded paths are relative to
+ * the checkout so another checkout can read them as its own (`setMetadata`). */
+function recordMetadata(root, env) {
+  if (rustMissing(env)) throw new Error(`tools keep builds the set, with Rust: install it with rustup (https://rustup.rs) and the pinned toolchain ${pin()}`);
+  const result = spawnSync('cargo', ['metadata', '--locked', '--format-version', '1'], { cwd: root, env: cargoEnvironment(env), encoding: 'utf8', maxBuffer: 128 << 20 });
   if (result.status !== 0) throw new Error(`cargo metadata: ${result.stderr}${offlineMiss(result.stderr)}`);
   const metadata = JSON.parse(result.stdout), packages = new Map(metadata.packages.map(pkg => [pkg.id, pkg]));
-  const nodes = new Map(metadata.resolve.nodes.map(node => [node.id, node])), seenIds = new Set();
-  const pending = WEB_CRATES.map(name => metadata.packages.find(pkg => pkg.name === name).id);
-  while (pending.length) {
-    const id = pending.pop(); if (seenIds.has(id)) continue; seenIds.add(id);
-    for (const dep of nodes.get(id)?.deps ?? []) if (dep.dep_kinds.some(kind => kind.kind !== 'dev')) pending.push(dep.pkg);
-  }
-  const ids = [...seenIds].sort(), local = ids.map(id => packages.get(id)).filter(pkg => !pkg.source);
+  const nodes = new Map(metadata.resolve.nodes.map(node => [node.id, node]));
+  const reachable = names => {
+    const seenIds = new Set(), pending = names.map(name => metadata.packages.find(pkg => pkg.name === name).id);
+    while (pending.length) {
+      const id = pending.pop(); if (seenIds.has(id)) continue; seenIds.add(id);
+      for (const dep of nodes.get(id)?.deps ?? []) if (dep.dep_kinds.some(kind => kind.kind !== 'dev')) pending.push(dep.pkg);
+    }
+    return [...seenIds].sort();
+  };
+  const local = ids => ids.map(id => packages.get(id)).filter(pkg => !pkg.source && within(root, pkg.manifest_path));
+  const ids = reachable(WEB_CRATES);
   const record = {
     packages: ids.map(id => { const { name, source, manifest_path, targets } = packages.get(id); return source ? { id, name, source } : { id, name, source: null, manifest_path, targets: targets.map(({ name, kind, src_path }) => ({ name, kind, src_path })) }; }),
     resolve: { nodes: ids.map(id => ({ id, deps: (nodes.get(id)?.deps ?? []).map(({ pkg, dep_kinds }) => ({ pkg, dep_kinds: dep_kinds.map(({ kind }) => ({ kind })) })) })) },
   };
-  const text = JSON.stringify(record).replaceAll(JSON.stringify(ROOT).slice(1, -1), '<root>');
-  const inputs = ['Cargo.toml', 'Cargo.lock', ...local.map(pkg => relative(ROOT, pkg.manifest_path))];
-  return { record: JSON.parse(text), inputs };
+  const text = JSON.stringify(record).replaceAll(JSON.stringify(root).slice(1, -1), '<root>');
+  const inputs = ['Cargo.toml', 'Cargo.lock', ...local(ids).map(pkg => relative(root, pkg.manifest_path))];
+  const dirs = local(reachable([...EXECUTABLES, ...WEB_CRATES, 'exact-web-capabilities']))
+    .map(pkg => relative(root, dirname(pkg.manifest_path)) || '.');
+  return { metadata: { record: JSON.parse(text), inputs }, dirs };
 }
 
 /** The Cargo metadata the set the web compiler is taken from recorded for `WEB_CRATES` (null when its inputs differ
@@ -314,7 +325,6 @@ const buildsToolSet = triple => triple === hostTriple() || (hostTriple() === 'aa
 /** Build all seven products for one machine. The Mac producer also builds the Linux
  * executables with Zig. The four wasm modules are identical for both machines. */
 async function buildProducts(triple) {
-  if (rustMissing()) throw new Error(`tools keep builds the set, with Rust: install it with rustup (https://rustup.rs) and the pinned toolchain ${pin()}`);
   const host = /^host: (.+)$/m.exec(spawnSync('rustc', ['-vV'], { cwd: ROOT, encoding: 'utf8' }).stdout ?? '')?.[1];
   if (host !== hostTriple()) throw new Error(`rustc builds for ${host}, and this machine's tool sets are ${hostTriple()}'s`);
   const cross = triple !== host;
@@ -322,9 +332,8 @@ async function buildProducts(triple) {
   const target = process.env.CARGO_TARGET_DIR ? resolve(process.env.CARGO_TARGET_DIR) : resolve(ROOT, 'target');
   const env = cargoEnvironment();
   delete env.RUSTUP_TOOLCHAIN;
-  const recipe = ['rust-toolchain.toml', '.cargo/config.toml'];
+  const recipe = cross ? [...NATIVE_RECIPE, ...CROSS_RECIPE] : NATIVE_RECIPE;
   if (cross) {
-    recipe.push('scripts/tools.mjs', 'scripts/rustc/exact-linux-cc');
     env.PATH = [resolve(ROOT, 'scripts/rustc'), env.PATH].join(':');
     env.CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER = 'exact-linux-cc';
     env.CRATE_CC_NO_DEFAULTS = '1';
@@ -332,7 +341,7 @@ async function buildProducts(triple) {
     env.CXX_x86_64_unknown_linux_gnu = 'exact-linux-cc -x c++';
   }
   const products = {}, files = new Map();
-  for (const crate of ['contract', 'exact-web-js', 'exact-filesystem']) {
+  for (const crate of EXECUTABLES) {
     const nativeHelper = !cross && crate === 'exact-filesystem';
     const profile = nativeHelper ? 'dev' : 'host-dev';
     console.log(`tools: building ${crate} (${triple}, ${profile})`);
@@ -346,10 +355,10 @@ async function buildProducts(triple) {
       if (!existsSync(binary) || sha(readFileSync(binary)) !== sha(readFileSync(file))) throw new Error(`${binary} is not the helper ${file}, so its dep-info cannot name that helper's inputs`);
       depInfo = depInfoOf(binary);
       buildDirs = [resolve(directory, 'build')];
-      inputs = [...recipe, 'scripts/filesystem.mjs', 'scripts/rustc/exact-rustc'];
+      inputs = [...recipe, ...HELPER_RECIPE];
     } else {
-      const args = [cross ? 'rustc' : 'build', '--locked', '-q', '--profile', profile, '-p', crate, '--bin', crate, '--message-format=json-render-diagnostics'];
-      if (cross) args.push('--target', triple, '--', '-C', 'strip=symbols');
+      const args = [cross ? 'rustc' : 'build', '--locked', '-q', '--profile', profile, '-p', crate, '--bin', crate, '--message-format=json-render-diagnostics', '--target', triple];
+      if (cross) args.push('--', '-C', 'strip=symbols');
       const built = spawnSync('cargo', args, { cwd: ROOT, env, encoding: 'utf8', maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'inherit'] });
       if (built.status !== 0) throw new Error(`${crate} did not build for ${triple}`, { cause: built.error });
       const artifact = built.stdout.split('\n').filter(Boolean).map(line => JSON.parse(line))
@@ -369,25 +378,31 @@ async function buildProducts(triple) {
   for (const leaf of await leafRecipes()) {
     files.set(leaf.name, leaf.wasm);
     products[leaf.name] = { file: leaf.name, crate: leaf.crate, profile: leaf.profile, toolchain: leaf.toolchain, flags: leaf.flags, wasmOpt: leaf.wasmOpt,
-      inputs: inputsOf({ depInfo: leaf.depInfo, buildDirs: leaf.buildDirs, skip: [target], recipe: ['host/web-js/module.mjs', 'scripts/cargo-check.mjs', '.cargo/config.toml'] }) };
+      inputs: inputsOf({ depInfo: leaf.depInfo, buildDirs: leaf.buildDirs, skip: [target], recipe: LEAF_RECIPE }) };
   }
-  return { products, files, metadata: recordMetadata() };
+  return { products, files };
 }
 
-export async function keep(triple = hostTriple(), { root = ROOT, env = process.env, build = buildProducts } = {}) {
-  const commit = gitAt(root, 'rev-parse', 'HEAD');
-  const { products, files, metadata } = await build(triple);
-  if (gitAt(root, 'rev-parse', 'HEAD') !== commit) throw new Error('HEAD changed while building the tool set. No set was kept.');
-  // A set serves every checkout with these bytes, so its sources must be committed.
-  const dirty = gitAt(root, 'status', '--porcelain');
+function committedInputs(root, inputs) {
+  const dirty = gitAt(root, 'status', '--porcelain', '--untracked-files=normal', '--', ...new Set(inputs));
   if (dirty) throw new Error(`tools keep keeps committed sources only:\n${dirty}`);
+}
+
+export async function keep(triple = hostTriple(), { root = ROOT, env = process.env, build = buildProducts, readMetadata = recordMetadata } = {}) {
+  const commit = gitAt(root, 'rev-parse', 'HEAD');
+  const { metadata, dirs } = readMetadata(root, env);
+  const recipe = triple === hostTriple() ? HELPER_RECIPE : CROSS_RECIPE;
+  committedInputs(root, [...WORKSPACE_INPUTS, ...recipe, ...LEAF_RECIPE, ...dirs]);
+  const { products, files } = await build(triple);
+  if (gitAt(root, 'rev-parse', 'HEAD') !== commit) throw new Error('HEAD changed while building the tool set. No set was kept.');
+  const inputs = [...new Set([...Object.values(products).flatMap(product => product.inputs), ...metadata.inputs])];
+  committedInputs(root, [...WORKSPACE_INPUTS, ...inputs]);
   const workspace = sha(JSON.stringify(workspaceManifest(root)));
   for (const product of Object.values(products)) {
     product.closure = lockClosure(root, product.crate);
     product.workspace = workspace;
     product.target = triple;
   }
-  const inputs = [...new Set([...Object.values(products).flatMap(product => product.inputs), ...metadata.inputs])];
   const hashes = new Map(inputs.map(file => [file, digest(resolve(root, file))]));
   const hashed = files => files.map(file => [file, hashes.get(file)]);
   for (const product of Object.values(products)) product.inputs = hashed(product.inputs);
@@ -657,7 +672,7 @@ async function recordCommit(origin, stream, base, commit, id, newer) {
 function gitAt(tree, ...args) {
   const r = spawnSync('git', ['-C', tree, ...args], { encoding: 'utf8', maxBuffer: 32 << 20 });
   if (r.status !== 0) throw new Error(`git ${args[0]}: ${r.error?.message ?? r.stderr.trim()}`);
-  return args.includes('-z') ? r.stdout : r.stdout.trim();
+  return r.stdout.trim();
 }
 
 function cleanRevision(tree) {

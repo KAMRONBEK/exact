@@ -335,7 +335,7 @@ test.skipIf(process.platform === 'win32')('builtContract passes over a set with 
   } finally { m.done(); }
 });
 
-test('keep verifies an executable across clean revisions and includes ignored children of watched directories', async () => {
+test('keep verifies committed tool inputs before and after building', async () => {
   const m = machine([], { rust: false });
   const root = resolve(m.env.HOME, 'checkout'), file = 'sources/input.rs', product = 'contract';
   mkdirSync(resolve(root, 'sources'), { recursive: true });
@@ -352,18 +352,21 @@ test('keep verifies an executable across clean revisions and includes ignored ch
     writeFileSync(resolve(root, 'Cargo.lock'), '[[package]]\nname = "contract"\nversion = "0.1.0"\n');
     writeFileSync(resolve(root, '.gitignore'), '.DS_Store\nignored-link\n');
     writeFileSync(resolve(root, file), 'first');
-    mkdirSync(resolve(root, 'unrelated'));
-    writeFileSync(resolve(root, 'unrelated/notes'), 'first');
+    mkdirSync(resolve(root, 'apps/unrelated'), { recursive: true });
+    const app = resolve(root, 'apps/unrelated/app.contract');
+    writeFileSync(app, 'first');
     const first = commit('first');
-    writeFileSync(resolve(root, 'unrelated/notes'), 'other');
+    writeFileSync(app, 'other');
     const second = commit('second');
     git('checkout', '-q', '--detach', first);
-    const run = (duringBuild = () => {}, inputs = ['sources']) => keep(hostTriple(), { root, env: m.env, build() {
-      copyFileSync(process.platform === 'win32' ? process.execPath : '/usr/bin/true', artifact);
-      duringBuild();
-      return { products: { [product]: { file: product, crate: 'contract', inputs } },
-        files: new Map([[product, artifact]]), metadata: { inputs: [] } };
-    } });
+    const run = (duringBuild = () => {}, inputs = ['sources']) => keep(hostTriple(), {
+      root, env: m.env, readMetadata: () => ({ dirs: ['sources'], metadata: { inputs: [] } }),
+      build() {
+        copyFileSync(process.platform === 'win32' ? process.execPath : '/usr/bin/true', artifact);
+        duringBuild();
+        return { products: { [product]: { file: product, crate: 'contract', inputs } }, files: new Map([[product, artifact]]) };
+      },
+    });
     const prior = await run();
     assert.equal(prior.manifest.verifiedBuild, true);
     assert.equal(JSON.parse(readFileSync(resolve(prior.dir, 'manifest.json'), 'utf8')).verifiedBuild, true);
@@ -371,22 +374,35 @@ test('keep verifies an executable across clean revisions and includes ignored ch
     writeFileSync(resolve(root, 'sources/.DS_Store'), 'ignored');
     const withIgnored = await run();
     assert.deepEqual(withIgnored.manifest.products[product].inputs, [['sources', digest(resolve(root, 'sources'))]]);
+    writeFileSync(resolve(root, file), 'dirty before the build');
+    await assert.rejects(run(() => git('restore', file)), /keeps committed sources only:[\s\S]*sources\/input\.rs/);
+    assert.equal(readFileSync(resolve(root, file), 'utf8'), 'dirty before the build');
+    git('restore', file);
+    mkdirSync(resolve(root, 'ud'));
+    writeFileSync(resolve(root, 'ud/notes'), 'untracked');
+    assert.equal((await run()).dir, withIgnored.dir);
+    writeFileSync(app, 'uncommitted app edit');
+    assert.equal((await run()).dir, withIgnored.dir);
+    git('restore', 'apps/unrelated/app.contract');
+    rmSync(resolve(root, 'ud'), { recursive: true });
     await assert.rejects(run(() => git('checkout', '-q', '--detach', second)), /HEAD changed while building the tool set\. No set was kept\./);
     assert.equal(git('status', '--porcelain'), '');
     const untracked = 'sources/untracked.rs';
+    git('config', 'status.showUntrackedFiles', 'no');
     await assert.rejects(run(() => writeFileSync(resolve(root, untracked), 'untracked'), [untracked]), /keeps committed sources only:[\s\S]*sources\/untracked\.rs/);
     rmSync(resolve(root, untracked));
     if (process.platform !== 'win32') {
-      symlinkSync('ignored-link', resolve(root, 'unrelated/ignored-link'));
+      symlinkSync('ignored-link', resolve(root, 'apps/unrelated/ignored-link'));
       assert.equal((await run()).dir, withIgnored.dir);
     }
     assert.deepEqual(readdirSync(m.cache).sort(), [basename(prior.dir), basename(withIgnored.dir)].sort());
   } finally { m.done(); }
 });
 
-test('keep takes the executable and dep-info Cargo reports for an explicit native target', () => {
+test('keep takes the native executable and dep-info despite an inherited cross target', () => {
   const m = machine([], { rust: true }), triple = hostTriple();
   const target = m.env.CARGO_TARGET_DIR;
+  const inherited = triple.startsWith('aarch64-') ? triple.replace('aarch64-', 'x86_64-') : triple.replace('x86_64-', 'aarch64-');
   try {
     const result = spawnSync(process.execPath, ['-e', `
       import { mock } from 'bun:test';
@@ -396,7 +412,8 @@ test('keep takes the executable and dep-info Cargo reports for an explicit nativ
       import { EXE } from './scripts/paths.mjs';
       import { depInfoOf } from './scripts/cargo-dep-info.mjs';
       import * as filesystem from './scripts/filesystem.mjs';
-      const { CARGO_TARGET_DIR: target, CARGO_BUILD_TARGET: triple } = process.env;
+      const { CARGO_TARGET_DIR: target, CARGO_BUILD_TARGET: inherited } = process.env;
+      const host = ${JSON.stringify(triple)};
       const make = (path, body, input) => {
         mkdirSync(dirname(path), { recursive: true });
         writeFileSync(path, body);
@@ -407,16 +424,17 @@ test('keep takes the executable and dep-info Cargo reports for an explicit nativ
       const helper = make(resolve(target, 'debug', 'exact-filesystem' + EXE), 'helper', 'README.md');
       mock.module('./scripts/filesystem.mjs', () => ({ ...filesystem, builtFilesystemHelper: () => ({ directory: target, path: helper }) }));
       mock.module('./host/web-js/module.mjs', () => ({ leafRecipes: async () => [] }));
-      const packages = ${JSON.stringify(WEB_CRATES)}.map(name => ({ id: name, name, source: 'registry:fixture' }));
+      const packages = ${JSON.stringify([...WEB_CRATES, 'contract', 'exact-filesystem', 'exact-web-capabilities'])}.map(name => ({ id: name, name, source: 'registry:fixture' }));
       const output = stdout => ({ status: 0, stdout, stderr: '' });
       mock.module('node:child_process', () => ({ ...children, spawnSync(command, args) {
         if (command === 'git') return output(args.includes('rev-parse') ? 'a'.repeat(40) : '');
-        if (command === 'rustc') return output('host: ' + triple);
+        if (command === 'rustc') return output('host: ' + host);
         if (command === 'strip') return output('');
         if (args[0] === 'metadata') return output(JSON.stringify({ packages, resolve: { nodes: [] } }));
         const name = args[args.indexOf('--bin') + 1];
+        const triple = args.includes('--target') ? args[args.indexOf('--target') + 1] : inherited;
         make(resolve(target, 'host-dev', name + EXE), 'stale', 'README.md');
-        const path = make(resolve(target, triple, 'host-dev', name + EXE), 'built ' + name, 'AGENTS.md');
+        const path = make(resolve(target, triple, 'host-dev', name + EXE), 'built ' + name + ' for ' + triple, 'AGENTS.md');
         const artifact = { reason: 'compiler-artifact', target: { name, kind: ['bin'] }, filenames: [path],
           executable: name === 'contract' ? path : null };
         return output(JSON.stringify(artifact) + '\\n');
@@ -424,10 +442,11 @@ test('keep takes the executable and dep-info Cargo reports for an explicit nativ
       const { keep } = await import('./scripts/tools.mjs');
       const { dir, manifest } = await keep();
       for (const name of ['contract', 'exact-web-js']) {
-        if (readFileSync(resolve(dir, name), 'utf8') !== 'built ' + name) throw new Error('kept the stale ' + name);
+        const kept = readFileSync(resolve(dir, name), 'utf8');
+        if (kept !== 'built ' + name + ' for ' + host) throw new Error('kept ' + kept + ', expected ' + host);
         if (!manifest.products[name].inputs.some(([path]) => path === 'AGENTS.md')) throw new Error('used the wrong dep-info for ' + name);
       }
-    `], { cwd: ROOT, env: { ...m.env, CARGO_TARGET_DIR: target, CARGO_BUILD_TARGET: triple }, encoding: 'utf8' });
+    `], { cwd: ROOT, env: { ...m.env, CARGO_TARGET_DIR: target, CARGO_BUILD_TARGET: inherited }, encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
   } finally { m.done(); }
 });

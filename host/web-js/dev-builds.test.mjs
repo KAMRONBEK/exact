@@ -5,7 +5,7 @@
 // carries it. EXACT_DEV_BUILD_HOLD_MS holds each build's end, as a slow one.
 import { afterEach, expect, test } from 'bun:test';
 import { spawnOwned, stopAll } from '../../scripts/test-children.mjs';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
@@ -907,6 +907,48 @@ test('a tool set is revalidated once a second through repeated reader requests',
   now = 1001;
   expect(current()).toBe(false);
   expect(calls).toBe(2);
+});
+
+test.skipIf(process.platform === 'win32')('an inspect request retries when the selected reader was evicted', async () => {
+  const source = readFileSync(new URL('./dev.mjs', import.meta.url), 'utf8');
+  const current = source.slice(source.indexOf('  const readerCompiler = '), source.indexOf('  const patcher = '));
+  const reader = source.slice(source.indexOf('  const toolFresh = '), source.indexOf('  // The design\'s shape'));
+  const dir = mkdtempSync(join(tmpdir(), 'exact-reader-eviction-'));
+  const kept = join(dir, 'kept'), debug = join(dir, 'debug'), plan = join(dir, 'app.plan');
+  const launch = cmd => ({ cmd, pre: [], done() {} });
+  const writeReader = (path, marker) => writeFileSync(path, `#!/bin/sh
+    [ "$1" = inspect-table ] || exit 1
+    printf '{"plan":"%s","marker":"${marker}"}' "$(/bin/cat "$2")" > "$3"
+  `, { mode: 0o755 });
+  const launched = [], inspections = new Set();
+  try {
+    writeReader(kept, 'kept');
+    writeReader(debug, 'debug');
+    const inspectTable = runInNewContext(current + reader + '\ninspectTable', {
+      app: { target: dir }, root: dir, stopping: false, process, resolve, readFileSync, rmSync,
+      performance: { now: () => 1 }, ownTool: join(dir, 'host-dev'), tool: { path: kept, ready: true },
+      buildTool() {}, inspections, launch, webCompiler: () => launch(debug),
+      webCompilerFrom: () => ({ path: existsSync(kept) ? kept : debug }),
+      spawn(cmd, args, options) { launched.push(cmd); return spawn(cmd, args, options); },
+    });
+    const inspect = async name => {
+      const digest = sha(name);
+      writeFileSync(plan, digest);
+      const bytes = await inspectTable(digest, plan);
+      return bytes && JSON.parse(bytes).marker;
+    };
+    expect(await inspect('first')).toBe('kept');
+    rmSync(kept);
+    expect(await inspect('second')).toBe('debug');
+    expect(launched).toEqual([kept, kept, debug]);
+
+    rmSync(debug);
+    expect(await inspect('third')).toBeNull();
+    expect(launched.slice(3)).toEqual([debug, debug]);
+    expect(inspections.size).toBe(0);
+    writeReader(debug, 'debug');
+    expect(await inspect('third')).toBe('debug');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('a resident design reader restarts when its executable is replaced at the same path', async () => {

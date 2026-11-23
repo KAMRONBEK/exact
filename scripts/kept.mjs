@@ -42,9 +42,8 @@ function under(path, name = '') {
   if (!stat.isDirectory()) return [[name, stat, path]];
   return readdirSync(path).sort().flatMap(child => under(resolve(path, child), `${name}/${child}`) ?? []);
 }
-const digestEntries = entries => sha(entries.map(([name, hash]) => `${name}\0${hash}`).join('\n'));
 /** A file's or a directory's bytes, a directory's as the names and bytes of every file under it; null when absent. */
-export const digest = (path) => { const all = under(path); return all && digestEntries(all.map(([name, , file]) => [name, sha(readFileSync(file))])); };
+export const digest = (path) => { const all = under(path); return all && sha(all.map(([name, , file]) => `${name}\0${sha(readFileSync(file))}`).join('\n')); };
 
 /** What a glance sees of a file or directory: each file's name, modification time and size. */
 export const seen = (path) => under(path)?.map(([name, s]) => `${name}:${s.mtimeMs}:${s.size}`).join('\n') ?? null;
