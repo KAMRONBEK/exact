@@ -371,9 +371,11 @@ function buildSwiftDependencies({ app, graph, declarations, compile, sdkName, di
       .flatMap(copy => copy.inputs.map(input => input.name)).flatMap(path => path.endsWith('.framework')
         ? [resolve(path, basename(path, '.framework'))] : path.endsWith('.a') ? [path] : [])
       .filter(path => machOType(path) !== 6);
-    // The empty shared target references no SDK symbols. Keep every archive member for its consumers.
+    // The empty shared target references no SDK symbols. Keep every archive member for its consumers. The option goes to
+    // clang, which puts it before SwiftPM's link of its own copy: ld64.lld loads in order, and after the copy it
+    // reports each member already taken from there as a duplicate.
     if (staticLibraries.length) writeFileSync(resolve(dir, 'Package.swift'), swiftManifest(graph, name, declarations, compile,
-      [...link, ...[...new Set(staticLibraries)].flatMap(path => ['-Xlinker', '-force_load', '-Xlinker', path])]));
+      [...link, ...[...new Set(staticLibraries)].flatMap(path => ['-Xclang-linker', '-force_load', '-Xclang-linker', path])]));
     swiftRun([...args, ...swiftResourceOverlay(bin)], dir);
   }
   catch (error) { throw new Error(`${error.message}\n${lockAdvice(app)}`); }

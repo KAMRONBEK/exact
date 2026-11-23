@@ -117,6 +117,44 @@ print("shared static SDK state")
   } finally { swift?.mockRestore(); rmSync(dir, { recursive: true, force: true }); }
 }, 120_000);
 
+test('a static SwiftPM framework or archive is force-loaded ahead of the copy SwiftPM links', () => {
+  const dir = mkdtempSync(resolve(tmpdir(), 'swift-force-load-'));
+  let swift;
+  try {
+    const bin = resolve(dir, 'bin'), artifacts = resolve(dir, 'artifacts'), destination = resolve(dir, 'modules');
+    mkdirSync(bin); mkdirSync(destination);
+    const machO = type => { const head = Buffer.alloc(16); head.writeUInt32LE(0xfeedfacf); head.writeUInt32LE(type, 12); return head; };
+    const archive = Buffer.from('!<arch>\n'.padEnd(16));
+    for (const [name, contents] of [['Static', archive], ['Dynamic', machO(6)]]) {
+      mkdirSync(resolve(artifacts, `${name}.framework`), { recursive: true });
+      writeFileSync(resolve(artifacts, `${name}.framework`, name), contents);
+    }
+    writeFileSync(resolve(artifacts, 'libPlain.a'), archive);
+    writeFileSync(resolve(bin, 'libExactSwiftDependencies.dylib'), '');
+    // SwiftPM copies each binary target's product into `bin` and links that copy; `Other` is no input of this product.
+    const copies = ['Static.framework', 'Dynamic.framework', 'libPlain.a'];
+    const node = (root, name) => ({ kind: 'directory', name: resolve(root, name) });
+    writeFileSync(resolve(bin, 'description.json'), JSON.stringify({
+      swiftCommands: { dependencies: { moduleName: 'ExactSwiftDependencies', otherArguments: [], inputs: copies.map(name => node(bin, name)) } },
+      copyCommands: Object.fromEntries([...copies, 'Other.framework'].map(name => [name, { inputs: [node(artifacts, name)], outputs: [node(bin, name)] }])),
+    }));
+    const swiftPackages = [{ url: 'https://fixture.invalid/vendor.git', exactVersion: '1.0.0', products: ['Vendor'] }];
+    writeFileSync(resolve(dir, 'Package.resolved'), JSON.stringify({ version: 3, pins: [{ identity: 'vendor', location: swiftPackages[0].url,
+      state: { version: '1.0.0', revision: 'a'.repeat(40) } }] }));
+    let manifest;
+    swift = spyOn(appleToolchain, 'spawnSync').mockImplementation((command, args, opts) => {
+      if (command === 'swift') manifest = readFileSync(resolve(opts.cwd, 'Package.swift'), 'utf8');
+      return { status: 0, stdout: args.includes('--show-bin-path') ? `${bin}\n` : '', stderr: '' };
+    });
+    packageCompiler({ app: { dir, target: dir, manifest: { host: { ios: { swiftPackages } } } }, packages: [], extensions: {},
+      packageDir: destination, packageTargets: new Map([[destination, ['iphonesimulator', ['-target', 'arm64-apple-ios17.0-simulator']]]]),
+      packageCopies: [], packagesRoot: dir, swiftc: 'fixture', ios: true }).place(destination);
+    // clang moves its own -force_load before the link's inputs; an -Xlinker option stays after them.
+    const loaded = [...manifest.matchAll(/"([^"]+)","-force_load","([^"]+)","([^"]+)"/g)].map(match => match.slice(1));
+    assert.deepEqual(loaded, ['Static.framework/Static', 'libPlain.a'].map(path => ['-Xclang-linker', '-Xclang-linker', resolve(artifacts, path)]));
+  } finally { swift?.mockRestore(); rmSync(dir, { recursive: true, force: true }); }
+});
+
 test.skipIf(process.platform !== 'darwin')('SwiftPM frameworks load from a relocated Mac app without a host run path', () => {
   useXcode();
   const root = resolve(import.meta.dir, '../..');
