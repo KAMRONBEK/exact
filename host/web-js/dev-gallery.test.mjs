@@ -191,8 +191,8 @@ test("the gallery is told of a kept design only after the app's own publication:
 
 /** A stand-in root and target: a `contract` that writes the gallery's source (or waits, holding a child of its
  * own), and a builder that waits holding one; each records its pid and its child's. */
-function standIns(stall) {
-  const dir = mkdtempSync(join(tmpdir(), 'exact-gallery-life-'));
+function standIns(stall, parent = tmpdir()) {
+  const dir = mkdtempSync(join(parent, 'exact-gallery-life-'));
   const pids = join(dir, 'pids'), buildEnv = join(dir, 'build-env.json'), home = join(dir, 'home');
   const env = { ...process.env, HOME: home, USERPROFILE: home, EXACT_TOOLS_ORIGIN: 'none', CARGO_TARGET_DIR: join(dir, 'target') };
   writeFileSync(pids, '');
@@ -219,25 +219,35 @@ const fakeReq = () => { const handlers = {}; return { method: 'GET', headers: {}
 
 test('every process the gallery starts, a child of its generator or its builder included, stops with it: at stop, at either stage, and when its last page has been gone a while', async () => {
   const { galleryLoop } = await import('./dev-gallery.mjs');
+  const parent = mkdtempSync(join(tmpdir(), 'exact-gallery-parent-'));
+  mkdirSync(join(parent, 'node_modules'));
   // ('build, res only': its page gone with only the response's close, as under Bun on a handed-off socket.)
-  for (const [stage, by] of [['generate', null], ['build', 'req'], ['build', 'res']]) {
-    const s = standIns(stage);
-    const loop = galleryLoop({ app: { dir: join(s.dir, 'app'), id: `life-${stage}` }, root: join(s.dir, 'root'), appDist: join(s.dir, 'dist'), env: s.env, client: () => '', log: () => {}, idleMs: 200 });
-    try {
-      const req = fakeReq(), res = fakeRes();
-      await loop.handle(req, res, new URL('http://x/__dev/gallery/stream'));
-      await until(() => s.pids().length >= 2, 30_000);
-      const started = s.pids();
-      expect(started.every(alive)).toBe(true);
-      if (stage === 'generate') await loop.stop();
-      else {
-        expect(JSON.parse(readFileSync(s.buildEnv, 'utf8'))).toEqual({ HOME: join(s.dir, 'home'), USERPROFILE: join(s.dir, 'home'), EXACT_TOOLS_ORIGIN: 'none' });
-        (by === 'req' ? req : res).close();
-      }
-      await until(() => !started.some(alive), 10_000);
-      expect(started.filter(alive)).toEqual([]);
-    } finally { await loop.stop(); rmSync(s.dir, { recursive: true, force: true }); }
-  }
+  try {
+    for (const [stage, by] of [['generate', null], ['build', 'req'], ['build', 'res']]) {
+      const s = standIns(stage, parent);
+      const loop = galleryLoop({ app: { dir: join(s.dir, 'app'), id: `life-${stage}` }, root: join(s.dir, 'root'), appDist: join(s.dir, 'dist'), env: s.env, client: () => '', log: () => {}, idleMs: 200 });
+      const stale = join(loop.cache, 'previous-run');
+      mkdirSync(loop.cache, { recursive: true });
+      writeFileSync(stale, '');
+      rmSync(loop.cache, { recursive: true, force: true });
+      try {
+        const req = fakeReq(), res = fakeRes();
+        await loop.handle(req, res, new URL('http://x/__dev/gallery/stream'));
+        await until(() => s.pids().length >= 2, 30_000);
+        const started = s.pids();
+        expect(started.every(alive)).toBe(true);
+        if (stage === 'generate') await loop.stop();
+        else {
+          expect(JSON.parse(readFileSync(s.buildEnv, 'utf8'))).toEqual({ HOME: join(s.dir, 'home'), USERPROFILE: join(s.dir, 'home'), EXACT_TOOLS_ORIGIN: 'none' });
+          (by === 'req' ? req : res).close();
+        }
+        await until(() => !started.some(alive), 10_000);
+        expect(started.filter(alive)).toEqual([]);
+        expect(existsSync(stale)).toBe(false);
+      } finally { await loop.stop(); rmSync(loop.cache, { recursive: true, force: true }); rmSync(s.dir, { recursive: true, force: true }); }
+      expect(existsSync(loop.cache)).toBe(false);
+    }
+  } finally { rmSync(parent, { recursive: true, force: true }); }
 }, 120_000);
 
 test("an inspect table asked with no page of the gallery open is a process of the gallery's, stopped with it after the quiet period", async () => {

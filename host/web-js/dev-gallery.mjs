@@ -130,7 +130,7 @@ function previewLoop({ app, root, appDist, base, label, cache, frame, inputs, on
       if (mine !== run) return;
       // The JS target's build, rendering no pages, into its own stage: nothing of the app's build is shared.
       rmSync(stage, { recursive: true, force: true });
-      const started = Date.now(), webCompiler = env.EXACT_WEB_COMPILER ?? compiler();
+      const started = Date.now(), webCompiler = env.EXACT_WEB_COMPILER || compiler();
       const entry = frame ? [app.dir, '--frame', frame, '--serve-frame'] : [live];
       const buildEnv = { ...env };
       if (webCompiler) buildEnv.EXACT_WEB_COMPILER = webCompiler;

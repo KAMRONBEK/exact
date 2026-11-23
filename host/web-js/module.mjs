@@ -626,16 +626,16 @@ export const withoutDev = (text) => text.replace(/^[ \t]*\/\/ dev-only \{.*\n[\s
 
 const COMPILER = resolve(TARGET_DIR, `debug/exact-web-js${EXE}`);
 const compilerKept = () => kept({ crate: 'exact-web-js', product: COMPILER, depInfo: depInfoOf(COMPILER), group: ['debug'], buildDirs: [resolve(TARGET_DIR, 'debug/build')], stamp: resolve(MODULES, 'kept', 'exact-web-js.json') });
-export function webCompilerFrom(env) {
+export function webCompilerFrom(env = process.env, { rehash = false } = {}) {
   // The dev loop can lend a fresh copy of its optimized design reader to this build.
   const fast = env.EXACT_WEB_COMPILER;
   if (fast && freshCompiler(fast)) return { path: fast, set: null };
-  return compilerFrom('exact-web-js', COMPILER, env, { kept: () => rustMissing(env) ? null : compilerKept().find() });
+  return compilerFrom('exact-web-js', COMPILER, env, { rehash, kept: () => rustMissing(env) ? null : compilerKept().find() });
 }
 
 /** Launch the compiler selected by LLP 1174 D5, or build it with Cargo when none answers. */
-export function webCompiler() {
-  const selected = webCompilerFrom(process.env);
+export function webCompiler(options) {
+  const selected = webCompilerFrom(process.env, options);
   if (selected) return launch(selected.path);
   if (rustMissing()) throw new RustMissing('exact-web-js');
   const started = Date.now();
@@ -643,7 +643,7 @@ export function webCompiler() {
 }
 /** The selected compiler's tool set supplies the web build's Cargo metadata (LLP 1174 D5). */
 export function compilerSet() {
-  return webCompilerFrom(process.env)?.set ?? null;
+  return webCompilerFrom()?.set ?? null;
 }
 
 /** Everything an app's web build shares, compiled where it is not yet and

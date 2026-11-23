@@ -27,7 +27,7 @@ import { compilerPaths, cargoInputPaths, crateDir, depInfoOf, freshCompiler } fr
 export { freshCompiler } from './cargo-dep-info.mjs';
 import { cargoEnvironment, cargoOnPath } from './cargo-check.mjs';
 import { builtFilesystemHelper, filesystemLock, offlineMiss } from './filesystem.mjs';
-import { digest, lockClosure, seen, snapshotDigests, workspaceManifest } from './kept.mjs';
+import { digest, lockClosure, seen, workspaceManifest } from './kept.mjs';
 import { EXE, within } from './paths.mjs';
 import { canonicalBytes } from './deploy-signing.mjs';
 
@@ -88,7 +88,7 @@ function differs(product, root = ROOT) {
 
 /** What a checkout saw of a matched product's inputs; while it is unchanged the product is not hashed again (D3). */
 const glance = (entry, product) => sha(JSON.stringify([entry, product.inputs.map(([file]) => seen(resolve(ROOT, file))), seen(resolve(ROOT, 'Cargo.lock')), seen(resolve(ROOT, 'Cargo.toml'))]));
-const stampOf = (name) => resolve(ROOT, 'target/tools', `${name}.json`);
+const stampOf = (name, env) => resolve(ROOT, env.CARGO_TARGET_DIR || 'target', 'tools', `${name}.json`);
 
 function productFile(set, name, product) {
   try {
@@ -103,9 +103,10 @@ function productFile(set, name, product) {
  * Product `name` from the newest set in this machine's cache that `source` made (`built` here by `keep`, or
  * `fetched`) and whose inputs are this checkout's bytes: `{ path, set, product }`, or null.
  */
-export function fromSet(name, source, env = process.env, { requireVerifiedBuild = false } = {}) {
-  if (!requireVerifiedBuild) try {
-    const last = JSON.parse(readFileSync(stampOf(name), 'utf8'));
+export function fromSet(name, source, env = process.env, { requireVerifiedBuild = false, rehash = false } = {}) {
+  const stamp = stampOf(name, env);
+  if (!requireVerifiedBuild && !rehash) try {
+    const last = JSON.parse(readFileSync(stamp, 'utf8'));
     const set = { dir: last.entry, manifest: JSON.parse(readFileSync(resolve(last.entry, 'manifest.json'), 'utf8')) };
     const product = set.manifest.products[name];
     if (within(cacheDir(env), set.dir) && set.manifest.source === source && glance(last.entry, product) === last.glance) {
@@ -120,8 +121,8 @@ export function fromSet(name, source, env = process.env, { requireVerifiedBuild 
     const path = productFile(set, name, product);
     if (!path || differs(product)) continue;
     try {
-      mkdirSync(dirname(stampOf(name)), { recursive: true });
-      writeFileSync(stampOf(name), JSON.stringify({ entry: set.dir, glance: glance(set.dir, product) }));
+      mkdirSync(dirname(stamp), { recursive: true });
+      writeFileSync(stamp, JSON.stringify({ entry: set.dir, glance: glance(set.dir, product) }));
     } catch {}
     return { path, set, product };
   }
@@ -135,9 +136,9 @@ const fetchMisses = new Map();
 const lookupKey = (env, name) => JSON.stringify([cacheDir(env), env.EXACT_TOOLS_ORIGIN || TOOLS_ORIGIN, name]);
 
 /** A fetched product from the cache or the tools origin, when this machine accepts one. */
-export function fetchedTool(name, env = process.env, download = true) {
+export function fetchedTool(name, env = process.env, download = true, { rehash = false } = {}) {
   if (!fetchedAllowed(env)) return null;
-  const cached = fromSet(name, 'fetched', env);
+  const cached = fromSet(name, 'fetched', env, { rehash });
   if (cached || !download) return cached;
   const origin = env.EXACT_TOOLS_ORIGIN || TOOLS_ORIGIN;
   if (!origin) return null;
@@ -190,17 +191,17 @@ export class RustMissing extends Error {
 }
 
 /** The compiler and its set, if any (LLP 1174 D5). A set built here takes precedence over a fresh debug build when
- * its inputs were verified across the build and still match by content. Callers that need unwinding or supply dev
+ * it passed the build's committed-sources check and its inputs still match by content. Callers that need unwinding or supply dev
  * build flags take a fresh debug build first.
  * A kept product comes next where the caller has one, then a fetched set where one may run. */
-export function compilerFrom(name, debug, env = process.env, { preferDebug = false, kept } = {}) {
+export function compilerFrom(name, debug, env = process.env, { preferDebug = false, kept, rehash = false } = {}) {
   const local = freshCompiler(debug) ? { path: debug, set: null } : null;
   if (local && (preferDebug || env.RUSTFLAGS !== undefined || env.CARGO_ENCODED_RUSTFLAGS !== undefined ||
     Object.keys(env).some(key => key.startsWith('CARGO_PROFILE_DEV_') && env[key] !== undefined))) return local;
-  const built = fromSet(name, 'built', env, { requireVerifiedBuild: !!local });
+  const built = fromSet(name, 'built', env, { requireVerifiedBuild: !!local, rehash });
   if (built || local) return built ?? local;
   const path = kept?.();
-  return path ? { path, set: null } : fetchedTool(name, env);
+  return path ? { path, set: null } : fetchedTool(name, env, true, { rehash });
 }
 
 const CONTRACT = resolve(ROOT, 'target/debug', `contract${EXE}`);
@@ -250,8 +251,8 @@ function recordMetadata() {
     resolve: { nodes: ids.map(id => ({ id, deps: (nodes.get(id)?.deps ?? []).map(({ pkg, dep_kinds }) => ({ pkg, dep_kinds: dep_kinds.map(({ kind }) => ({ kind })) })) })) },
   };
   const text = JSON.stringify(record).replaceAll(JSON.stringify(ROOT).slice(1, -1), '<root>');
-  const files = ['Cargo.toml', 'Cargo.lock', ...local.map(pkg => relative(ROOT, pkg.manifest_path))];
-  return { record: JSON.parse(text), inputs: files.map(file => [file, digest(resolve(ROOT, file))]) };
+  const inputs = ['Cargo.toml', 'Cargo.lock', ...local.map(pkg => relative(ROOT, pkg.manifest_path))];
+  return { record: JSON.parse(text), inputs };
 }
 
 /** The Cargo metadata the set the web compiler is taken from recorded for `WEB_CRATES` (null when its inputs differ
@@ -335,29 +336,34 @@ async function buildProducts(triple) {
     const nativeHelper = !cross && crate === 'exact-filesystem';
     const profile = nativeHelper ? 'dev' : 'host-dev';
     console.log(`tools: building ${crate} (${triple}, ${profile})`);
-    let directory, file, buildDirs, inputs = recipe;
+    let file, depInfo, buildDirs, inputs = recipe;
     if (nativeHelper) {
       const helper = builtFilesystemHelper();
-      directory = resolve(helper.directory, 'debug');
+      const directory = resolve(helper.directory, 'debug');
       file = helper.path;
       // A reused capture must still match the build whose dep-info we read.
       const binary = resolve(directory, crate + EXE);
       if (!existsSync(binary) || sha(readFileSync(binary)) !== sha(readFileSync(file))) throw new Error(`${binary} is not the helper ${file}, so its dep-info cannot name that helper's inputs`);
+      depInfo = depInfoOf(binary);
       buildDirs = [resolve(directory, 'build')];
       inputs = [...recipe, 'scripts/filesystem.mjs', 'scripts/rustc/exact-rustc'];
     } else {
-      const args = [cross ? 'rustc' : 'build', '--locked', '-q', '--profile', profile, '-p', crate, '--bin', crate];
+      const args = [cross ? 'rustc' : 'build', '--locked', '-q', '--profile', profile, '-p', crate, '--bin', crate, '--message-format=json-render-diagnostics'];
       if (cross) args.push('--target', triple, '--', '-C', 'strip=symbols');
-      const built = spawnSync('cargo', args, { cwd: ROOT, env, stdio: 'inherit' });
-      if (built.status !== 0) throw new Error(`${crate} did not build for ${triple}`);
-      directory = resolve(target, cross ? triple : '', profile);
-      file = resolve(directory, crate + EXE);
+      const built = spawnSync('cargo', args, { cwd: ROOT, env, encoding: 'utf8', maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'inherit'] });
+      if (built.status !== 0) throw new Error(`${crate} did not build for ${triple}`, { cause: built.error });
+      const artifact = built.stdout.split('\n').filter(Boolean).map(line => JSON.parse(line))
+        .find(message => message.reason === 'compiler-artifact' && message.target.name === crate && message.target.kind.includes('bin'));
+      file = artifact?.executable ?? artifact?.filenames.find(name => basename(name) === crate + EXE);
+      if (!file) throw new Error(`Cargo did not report the ${crate} executable for ${triple}`);
+      const directory = dirname(file);
+      depInfo = depInfoOf(file);
       buildDirs = [resolve(directory, 'build')];
-      if (cross) buildDirs.push(resolve(target, profile, 'build'));
+      if (directory !== resolve(target, profile)) buildDirs.push(resolve(target, profile, 'build'));
     }
     files.set(crate, file);
     products[crate] = { file: crate, crate, profile, toolchain: pin(),
-      inputs: inputsOf({ depInfo: resolve(directory, crate + '.d'), buildDirs, skip: [target], recipe: inputs }) };
+      inputs: inputsOf({ depInfo, buildDirs, skip: [target], recipe: inputs }) };
   }
   const { leafRecipes } = await import('../host/web-js/module.mjs');
   for (const leaf of await leafRecipes()) {
@@ -370,25 +376,22 @@ async function buildProducts(triple) {
 
 export async function keep(triple = hostTriple(), { root = ROOT, env = process.env, build = buildProducts } = {}) {
   const commit = gitAt(root, 'rev-parse', 'HEAD');
-  // Cargo names the inputs after it builds. Snapshot tracked files first so a checkout that moves during the build
-  // cannot give its new input hashes to an older compiler (LLP 1174 D5).
-  const before = snapshotDigests(root, gitAt(root, 'ls-files', '--cached', '-z').split('\0').filter(Boolean));
   const { products, files, metadata } = await build(triple);
+  if (gitAt(root, 'rev-parse', 'HEAD') !== commit) throw new Error('HEAD changed while building the tool set. No set was kept.');
+  // A set serves every checkout with these bytes, so its sources must be committed.
+  const dirty = gitAt(root, 'status', '--porcelain');
+  if (dirty) throw new Error(`tools keep keeps committed sources only:\n${dirty}`);
   const workspace = sha(JSON.stringify(workspaceManifest(root)));
   for (const product of Object.values(products)) {
     product.closure = lockClosure(root, product.crate);
     product.workspace = workspace;
     product.target = triple;
   }
-  const inputs = [...new Set(['Cargo.toml', 'Cargo.lock', ...Object.values(products).flatMap(product => product.inputs),
-    ...metadata.inputs.map(([file]) => file)])];
-  const after = new Map(inputs.map(file => [file, digest(resolve(root, file))]));
-  const changed = inputs.find(file => after.get(file) !== before(file));
-  if (changed) throw new Error(`${changed} changed while building the tool set. No set was kept.`);
-  // A set serves every checkout with these bytes, so its inputs must be committed.
-  const dirty = gitAt(root, 'status', '--porcelain', '--', ...inputs);
-  if (dirty) throw new Error(`tools keep keeps committed sources only, and these inputs are not:\n${dirty}`);
-  for (const product of Object.values(products)) product.inputs = product.inputs.map(file => [file, after.get(file)]);
+  const inputs = [...new Set([...Object.values(products).flatMap(product => product.inputs), ...metadata.inputs])];
+  const hashes = new Map(inputs.map(file => [file, digest(resolve(root, file))]));
+  const hashed = files => files.map(file => [file, hashes.get(file)]);
+  for (const product of Object.values(products)) product.inputs = hashed(product.inputs);
+  metadata.inputs = hashed(metadata.inputs);
   const manifest = { version: 1, triple, commit, source: 'built', verifiedBuild: true, built: Date.now(), products, metadata };
   const id = sha(JSON.stringify(Object.entries(products).map(([name, product]) => [name, product.inputs, product.closure, product.workspace]))).slice(0, 24);
   const dir = cacheDir(env, triple), entry = resolve(dir, id), making = `${entry}.${process.pid}`;
