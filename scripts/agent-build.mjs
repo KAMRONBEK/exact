@@ -191,16 +191,17 @@ export function logged(command, args, log, { cwd, env, append = false, say = nul
     });
   });
 }
-/** Drop shell values the launch supplies for settings marked `"launch": true` (LLP 1153.002 D1).
- * Keep values that `EXACT_BUN_LOADED` records as loaded by Bun from its `.env` files. */
+/** Tell the bake which shell values belong to the launch (LLP 1153.002 D1). Build tools
+ * still read the full environment. */
 export function driveBuildEnv(app, env = process.env, launch = env, { windows = false } = {}) {
   const fold = windows ? name => name.toUpperCase() : name => name;
   const loaded = new Set((childValue(env, 'EXACT_BUN_LOADED', windows) ?? '').split(',').filter(Boolean).map(fold));
-  const marked = new Set([...launchNames(app.manifest?.env)].map(fold));
-  return Object.fromEntries(Object.entries(env).filter(([name]) => {
-    const key = fold(name);
-    return !marked.has(key) || loaded.has(key) || childValue(launch, name, windows) === undefined;
-  }));
+  const available = new Set(Object.keys(env).map(fold));
+  const omit = [...launchNames(app.manifest?.env)].filter(name =>
+    available.has(fold(name)) && !loaded.has(fold(name)) && childValue(launch, name, windows) !== undefined);
+  const { EXACT_LAUNCH_OMIT: _, ...build } = env;
+  if (omit.length) build.EXACT_LAUNCH_OMIT = omit.sort().join(',');
+  return build;
 }
 /** The environment a drive on `host` starts the app with: a simulator's (`simulatorLaunch`), else this process's. */
 const driveLaunch = host => host === 'ios' ? simulatorLaunch() : process.env;
@@ -491,8 +492,10 @@ export async function prebuild(app, args, { timeout = 30_000, say = line => cons
   const sources = prebuildSources(app);
   const out = openSync(log, 'w');
   const build = [resolve(ROOT, 'host/apple/build.mjs'), ...built];
-  // Device launches use phoneLaunch. tvOS receipts have no simulator launch environment.
-  const env = host === 'tvos' || args.includes('--device') ? process.env : driveBuildEnv(app, process.env, driveLaunch(host));
+  const production = process.env.EXACT_UPDATE_TRUST === 'production' || ['--release', '--distribution', '--appstore'].some(flag => args.includes(flag))
+    || (args.includes('--archive') && !args.includes('--development'));
+  const drive = !production && host !== 'tvos' && !['--embed', '--device', '--watchos'].some(flag => args.includes(flag));
+  const env = driveBuildEnv(app, process.env, drive ? driveLaunch(host) : {});
   const child = spawn('/bin/sh', ['-c', '"$0" "$@"; built=$?; "$0" "$TOOL" --tool "$built"; exit $built', process.execPath, ...build],
     { detached: true, stdio: ['ignore', out, out], env: { ...env, TOOL: fileURLToPath(import.meta.url), EXACT_PREBUILD_RECORD: record, EXACT_PREBUILD_LOG: log, EXACT_PREBUILD_ID: id } });
   publish(record, { id, args: built, sources, started: new Date().toLocaleTimeString('en-GB'), pid: child.pid });

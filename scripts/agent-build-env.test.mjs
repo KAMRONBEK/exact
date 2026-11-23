@@ -25,18 +25,17 @@ test('a drive build keeps file and build settings and leaves shell launch settin
     const app = resolveApp(dir);
     const shell = { PATH: '/usr/bin', API_TOKEN: 'from-shell', SESSION: 'from-dotenv', API_BASE_URL: 'https://api.test', EXACT_BUN_LOADED: 'SESSION' };
     const env = driveBuildEnv(app, shell);
-    assert.deepEqual(env, { PATH: '/usr/bin', SESSION: 'from-dotenv', API_BASE_URL: 'https://api.test', EXACT_BUN_LOADED: 'SESSION' });
+    assert.deepEqual(env, { ...shell, EXACT_LAUNCH_OMIT: 'API_TOKEN' });
     assert.deepEqual(settingValues(dir, ['API_TOKEN', 'SESSION'], env), { API_TOKEN: null, SESSION: { value: 'from-dotenv', source: '.env' } });
-    assert.equal(driveBuildEnv(app, shell, { PATH: '/usr/bin' }).API_TOKEN, 'from-shell');
-    assert.equal(shell.API_TOKEN, 'from-shell');
+    assert.deepEqual(driveBuildEnv(app, shell, { PATH: '/usr/bin' }), shell);
   });
 });
 
-test('Windows build filtering matches manifest, launch and Bun-loaded names regardless of case', () => {
+test('Windows build omissions match manifest, launch and Bun-loaded names regardless of case', () => {
   const app = { manifest: { env: [launch('API_TOKEN'), launch('SESSION')] } };
   const env = { Api_Token: 'from-shell', Session: 'from-dotenv', exact_bun_loaded: 'sEsSiOn' };
   const launched = { api_token: '', SESSION: 'from-dotenv' };
-  assert.deepEqual(driveBuildEnv(app, env, launched, { windows: true }), { Session: 'from-dotenv', exact_bun_loaded: 'sEsSiOn' });
+  assert.deepEqual(driveBuildEnv(app, env, launched, { windows: true }), { ...env, EXACT_LAUNCH_OMIT: 'API_TOKEN' });
   assert.deepEqual(driveBuildEnv(app, env, launched), env);
 });
 
@@ -54,6 +53,8 @@ function checkSpawns(names, script) {
       delete process.env.EXACT_MAC_BIN;
       delete process.env.EXACT_WINDOWS_BIN;
       delete process.env.SIMCTL_CHILD_API_TOKEN;
+      delete process.env.SIMCTL_CHILD_SESSION;
+      delete process.env.EXACT_LAUNCH_OMIT;
       let onSpawn = () => {};
       mock.module('node:child_process', () => ({ ...processes, spawn(command, args, options) {
         calls.push({ command, args, ...options });
@@ -77,68 +78,82 @@ function checkSpawns(names, script) {
   });
 }
 
-test('macOS drive rebuilds leave launch settings out of the Apple build child', () => {
-  checkSpawns(['API_TOKEN'], `
-    process.env.API_TOKEN = 'mac-launch';
+test('macOS drive rebuilds give the Apple builder its Cargo target and name the bake omission', () => {
+  checkSpawns(['CARGO_TARGET_DIR'], `
     assert.equal(await buildFirst('macos', app, quiet), 0);
     assert.equal(calls.length, 1);
     assert.equal(calls[0].args[0], resolve('host/apple/build.mjs'));
-    assert.equal(calls[0].env.API_TOKEN, undefined);
-    assert.equal(process.env.API_TOKEN, 'mac-launch');
+    assert.equal(calls[0].env.CARGO_TARGET_DIR, resolve(dir, 'target'));
+    assert.equal(calls[0].env.EXACT_LAUNCH_OMIT, 'CARGO_TARGET_DIR');
   `);
 });
 
-test('iOS drive rebuilds filter settings the simulator launch receives', () => {
-  checkSpawns(['API_TOKEN', 'EXACT_STORE'], `
+test('iOS drive rebuilds name the setting the simulator launch receives', () => {
+  checkSpawns(['API_TOKEN', 'SESSION'], `
     process.env.API_TOKEN = 'build-only';
-    process.env.EXACT_STORE = 'real';
+    process.env.SESSION = 'from-shell';
+    process.env.SIMCTL_CHILD_SESSION = 'from-launch';
     assert.equal(await buildFirst('ios', app, quiet), 0);
     assert.equal(calls.length, 1);
     assert.equal(calls[0].args[0], resolve('host/apple/build.mjs'));
     assert.ok(calls[0].args.includes('--ios'));
     assert.equal(calls[0].env.API_TOKEN, 'build-only');
-    assert.equal(calls[0].env.EXACT_STORE, undefined);
+    assert.equal(calls[0].env.SESSION, 'from-shell');
+    assert.equal(calls[0].env.SIMCTL_CHILD_SESSION, 'from-launch');
+    assert.equal(calls[0].env.EXACT_LAUNCH_OMIT, 'SESSION');
   `);
 });
 
-test('Windows drive rebuilds leave a mixed-case launch setting out of the Windows build child', () => {
-  checkSpawns(['API_TOKEN'], `
+test('Windows drive rebuilds preserve the Cargo target and name mixed-case omissions', () => {
+  checkSpawns(['API_TOKEN', 'CARGO_TARGET_DIR'], `
     delete process.env.API_TOKEN;
     process.env.Api_Token = 'windows-launch';
     assert.equal(await windowsBuildFirst(app, quiet), 0);
     assert.equal(calls.length, 1);
     assert.equal(calls[0].args[0], resolve('host/windows/build.mjs'));
-    assert.ok(!Object.keys(calls[0].env).some(name => name.toUpperCase() === 'API_TOKEN'), 'the build child received API_TOKEN');
+    assert.equal(calls[0].env.CARGO_TARGET_DIR, resolve(dir, 'target'));
+    assert.equal(Object.entries(calls[0].env).find(([name]) => name.toUpperCase() === 'API_TOKEN')?.[1], 'windows-launch');
+    assert.equal(calls[0].env.EXACT_LAUNCH_OMIT, 'API_TOKEN,CARGO_TARGET_DIR');
   `);
 });
 
-test('Apple prebuilds filter launch settings for macOS and the iOS simulator', () => {
-  checkSpawns(['API_TOKEN', 'EXACT_STORE'], `
+test.each([
+  ['macOS --run', ['--run'], 'development', 'API_TOKEN,CARGO_TARGET_DIR'],
+  ['iOS simulator', ['--ios'], 'development', 'API_TOKEN'],
+  ['--release', ['--release'], 'development', ''],
+  ['--distribution', ['--distribution'], 'development', ''],
+  ['--appstore', ['--appstore'], 'development', ''],
+  ['--archive', ['--archive', 'app.ipa'], 'development', ''],
+  ['production trust', [], 'production', ''],
+  ['--embed', ['--embed'], 'development', ''],
+  ['--device', ['--device'], 'development', ''],
+  ['--tvos', ['--tvos'], 'development', ''],
+])('Apple prebuild preserves the child environment for %s', (_label, flags, trust, omit) => {
+  checkSpawns(['API_TOKEN', 'CARGO_TARGET_DIR'], `
     process.env.API_TOKEN = 'from-shell';
-    process.env.EXACT_STORE = 'real';
-    for (const { flags, token, store } of [
-      { flags: [], token: undefined, store: undefined },
-      { flags: ['--ios'], token: 'from-shell', store: undefined },
-      { flags: ['--device'], token: 'from-shell', store: 'real' },
-      { flags: ['--tvos'], token: 'from-shell', store: 'real' },
-    ]) {
-      assert.equal(await prebuild(app, [...flags, '--prebuild'], quiet), 0);
-      const { args, env } = calls.at(-1);
-      assert.ok(args.includes(resolve('host/apple/build.mjs')));
-      assert.deepEqual([env.API_TOKEN, env.EXACT_STORE], [token, store], flags.join(' ') || 'macOS');
-    }
-    assert.equal(calls.length, 4);
+    process.env.SIMCTL_CHILD_API_TOKEN = 'from-launch';
+    process.env.EXACT_UPDATE_TRUST = ${JSON.stringify(trust)};
+    assert.equal(await prebuild(app, [...${JSON.stringify(flags)}, '--prebuild'], quiet), 0);
+    assert.equal(calls.length, 1);
+    const { args, env } = calls[0];
+    assert.ok(args.includes(resolve('host/apple/build.mjs')));
+    assert.equal(env.CARGO_TARGET_DIR, resolve(dir, 'target'));
+    assert.equal(env.API_TOKEN, 'from-shell');
+    assert.equal(env.SIMCTL_CHILD_API_TOKEN, 'from-launch');
+    assert.equal(env.EXACT_LAUNCH_OMIT ?? '', ${JSON.stringify(omit)});
   `);
 });
 
-test('a plan-only bake keeps Cargo settings when compiling the bake tool', () => {
-  checkSpawns(['CARGO_TARGET_DIR'], `
+test.each(['macos', 'ios'])('a plan-only %s bake names omissions only when baking the app', host => {
+  checkSpawns(['API_TOKEN', 'CARGO_TARGET_DIR'], `
     const { mkdirSync, writeFileSync } = await import('node:fs');
     const { createHash } = await import('node:crypto');
     const { isDeepStrictEqual } = await import('node:util');
     const { bakeOutput } = await import('./scripts/app.mjs');
     const { bakeTool, linkedBakeDir } = await import('./scripts/linked-plan.mjs');
-    const target = 'aarch64-apple-darwin', platform = 'macos';
+    const platform = ${JSON.stringify(host)}, target = platform === 'macos' ? 'aarch64-apple-darwin' : 'aarch64-apple-ios-sim';
+    process.env.API_TOKEN = 'from-shell';
+    process.env.SIMCTL_CHILD_API_TOKEN = 'from-launch';
     const linked = linkedBakeDir({ EXACT_BAKE_OUTPUT: bakeOutput(app) }, platform, target);
     const plan = 'built plan', sha256 = createHash('sha256').update(plan).digest('hex');
     const receipt = resolve(dir, 'receipt.json');
@@ -151,10 +166,12 @@ test('a plan-only bake keeps Cargo settings when compiling the bake tool', () =>
       mkdirSync(args[2], { recursive: true });
       writeFileSync(resolve(args[2], 'app.module.json'), '{}');
     };
-    assert.deepEqual(await makeOverride('macos', app, { receipt, changed: ['app.contract'] }, { log: resolve(dir, 'plan.log') }), { made: true, output: '' });
+    assert.deepEqual(await makeOverride(platform, app, { receipt, changed: ['app.contract'] }, { log: resolve(dir, 'plan.log') }), { made: true, output: '' });
     assert.deepEqual(calls.map(call => call.command), [bakeTool.command, bakeTool.built]);
     assert.equal(calls[0].env.CARGO_TARGET_DIR, resolve(dir, 'target'));
     assert.ok(isDeepStrictEqual(calls[0].env, bakeTool.options().env), 'Cargo received a different environment');
-    assert.equal(calls[1].env.CARGO_TARGET_DIR, undefined);
+    assert.equal(calls[1].env.CARGO_TARGET_DIR, resolve(dir, 'target'));
+    assert.equal(calls[1].env.API_TOKEN, 'from-shell');
+    assert.equal(calls[1].env.EXACT_LAUNCH_OMIT, platform === 'macos' ? 'API_TOKEN,CARGO_TARGET_DIR' : 'API_TOKEN');
   `);
 });
