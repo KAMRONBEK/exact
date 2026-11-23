@@ -50,7 +50,7 @@ export const classifications = [
     ["painted:host/painted/src/canvas/jni.rs", "Java_dev_exact_canvas_Native_bar Java_dev_exact_canvas_Native_bars"],
     ["painted:host/painted/src/canvas/jni_extensions.rs", "Java_dev_exact_canvas_Native_orientationApplied"],
     ["painted:host/painted/src/canvas/jni_frames.rs", "Java_dev_exact_canvas_Native_framePeriod"],
-    ["painted:host/painted/src/canvas/jni_scroll.rs", "Java_dev_exact_canvas_Native_scrolled"],
+    ["painted:host/painted/src/canvas/jni_scroll.rs", "Java_dev_exact_canvas_Native_moved Java_dev_exact_canvas_Native_scrolled"],
     ["painted:host/painted/src/canvas/requests.rs", "CanvasHost::orientation_applied CanvasHost::page_hidden"],
     ["painted:host/painted/src/canvas/surface.rs", "CanvasHost::bar CanvasHost::bars"],
     ["painted:host/painted/src/content_region/presenter.rs", "Presenter::frame_with_canvas_tick"],
@@ -122,7 +122,7 @@ export const classifications = [
     ["painted:host/painted/src/canvas/jni_pad.rs", "Java_dev_exact_canvas_Native_pad"],
     ["painted:host/painted/src/canvas/jni_scroll.rs", "Java_dev_exact_canvas_Native_scrollDrag Java_dev_exact_canvas_Native_sheetDrag"],
     ["painted:host/painted/src/canvas/keys.rs", "CanvasHost::back CanvasHost::back_progress CanvasHost::key CanvasHost::named_key CanvasHost::open CanvasHost::pad"],
-    ["painted:host/painted/src/canvas/scroll.rs", "CanvasHost::drag_began CanvasHost::drag_ended CanvasHost::fling_ended CanvasHost::refresh CanvasHost::scrolled CanvasHost::scrollers CanvasHost::sheet_drag CanvasHost::snaps_around CanvasHost::under"],
+    ["painted:host/painted/src/canvas/scroll.rs", "CanvasHost::drag_began CanvasHost::drag_ended CanvasHost::fling_ended CanvasHost::moved CanvasHost::refresh CanvasHost::scrolled CanvasHost::scrollers CanvasHost::sheet_drag CanvasHost::snaps_around CanvasHost::under"],
     ["painted:host/painted/src/height_binding.rs", "Host::dispatch_height_held"],
     ["painted:host/painted/src/holds.rs", "Host::dispatch_held Host::dispatch_retained"],
     ["painted:host/painted/src/host.rs", "Host::boot_decoded Host::dispatch_at Host::dispatch_now"],
@@ -182,7 +182,7 @@ export const classifications = [
     ["painted:host/painted/src/presenter/unload.rs", "Presenter::before_unload"],
     ["painted:host/painted/src/presenter/wheel.rs", "Presenter::wheel_at"],
     ["painted:host/painted/src/surface_controls.rs",
-      "Presenter::blur Presenter::dispatch_press Presenter::focusable Presenter::forget_pads Presenter::handler_target Presenter::hardware_key " +
+      "Presenter::blur Presenter::dispatch_press Presenter::focusable Presenter::forget_pads Presenter::handler_target Presenter::hardware_key Presenter::in_hidden_mover Presenter::listener_parent " +
       "Presenter::hardware_key_typing Presenter::hardware_pad Presenter::has_gamepad_input Presenter::mouse_press_target Presenter::press_at Presenter::press_target"],
     ["painted:host/painted/src/surfaces.rs", "Surfaces::sync"],
     ["painted:host/painted/src/transform_binding.rs", "Host::dispatch_transform_held"],
@@ -218,7 +218,7 @@ export const classifications = [
     ["runner:runner/src/runner/canvas2d.rs",
       "Canvases::draw#next_seq:1 Canvases::publish#LIFETIMES.fetch_add:1 Canvases::reply#generation:1 Canvases::set_geometry#generation:1 Runner::canvas_bitmap " +
       "Runner::canvas_describe Runner::canvas_frame Runner::canvas_owed Runner::canvas_settings Runner::canvas_views Runner::canvas_wants_frame " +
-      "Runner::draw_canvases Runner::is_canvas_2d Runner::layout_canvases Runner::retire_canvas_generations Runner::set_canvas_geometry Runner::set_canvas_limits Runner::set_canvas_text " +
+      "Runner::draw_canvases Runner::is_canvas_2d Runner::layout_canvases Runner::reread_canvas_bitmaps Runner::retire_canvas_generations Runner::set_canvas_geometry Runner::set_canvas_limits Runner::set_canvas_text " +
       "Runner::take_canvas_lists"],
     ["runner:runner/src/runner/canvas2d/completion.rs", "Runner::canvas_draw_completion Runner::canvas_reply"],
     ["runner:runner/src/runner/canvas_performance.rs", "Runner::set_canvas_performance Runner::wants_canvas_performance"],
@@ -426,6 +426,7 @@ export const classifications = [
     ["painted:host/painted/src/presenter/clock.rs", "Presenter::background_due_ms"],
     ["painted:host/painted/src/presenter/collection/anchoring.rs", "Presenter::publish_scroll"],
     ["painted:host/painted/src/presenter/commands.rs", "Presenter::refuse_picture_in_picture"],
+    ["painted:host/painted/src/presenter/frames.rs", "Presenter::frame_by_id Presenter::frame_command Presenter::frame_event Presenter::serve_frame_partitions"],
     ["painted:host/painted/src/presenter/device.rs", "Presenter::device"],
     ["painted:host/painted/src/presenter/display_frame.rs", "Presenter::activation_refused Presenter::display_input_mapping"],
     ["painted:host/painted/src/presenter/feedback.rs", "Presenter::feedback_at"],
@@ -538,7 +539,7 @@ export const classifications = [
     ["runner:runner/src/runner/module_seam/forward.rs", "Runner::polls_asking"],
     ["runner:runner/src/runner/module_seam/forward.rs", "Runner::report_views Runner::view_origin"],
     ["runner:runner/src/runner/processes.rs", "Runner::set_work_clock"],
-    ["runner:runner/src/runner/provenance.rs", "Runner::act_from Runner::call_origin"],
+    ["runner:runner/src/runner/provenance.rs", "Runner::act_from Runner::as_person Runner::call_origin"],
     ["runner:runner/src/runner/seams.rs", "Runner::call_agent Runner::call_tool Runner::intents_state Runner::place_controls Runner::press_control"],
     ["web:host/web/src/abi.rs", "exact_data_ready"],
   ]),
@@ -843,10 +844,10 @@ export const classifications = [
       "exact_web_set_sandbox exact_web_set_src exact_web_snapshot"],
   ]),
   group("web frames", ["subscription"], "live Android iframe allocation and native session", "UI-owned",
-    "Natives.kt consumes each document completion and drops it when the WebView binding is retired. The painted presenter checks the session and iframe allocation before dispatch.", [
-    ["painted:host/painted/src/canvas/jni.rs", "Java_dev_exact_canvas_Native_frameLoaded"],
-    ["painted:host/painted/src/canvas/requests.rs", "CanvasHost::frame_loaded"],
-    ["painted:host/painted/src/presenter/events.rs", "Presenter::reader_frame_loaded"],
+    "Natives.kt and FrameClient.kt consume each document completion and frame record and drop it when the WebView binding is retired. The painted presenter checks the session and iframe allocation before dispatch.", [
+    ["painted:host/painted/src/canvas/jni_frames.rs", "Java_dev_exact_canvas_Native_frameEvent Java_dev_exact_canvas_Native_frameLoaded"],
+    ["painted:host/painted/src/canvas/requests.rs", "CanvasHost::frame_event CanvasHost::frame_loaded"],
+    ["painted:host/painted/src/presenter/events.rs", "Presenter::reader_frame_event Presenter::reader_frame_loaded"],
   ]),
   group("storage", ["durable operation"], "committed app store/secret values and write queue", "durable",
     "host/painted/src/store_writer.rs drains already committed writes and reports write warnings; runner/src/store.rs and store/presence.rs revisions version durable store contents, not UI continuations. host/apple/webarm/WebArm.swift exactWebClearSiteData clears the named browser partition and calls its completion context.", [
@@ -875,6 +876,7 @@ export const classifications = [
       "Config::initial_window_background Config::painter Config::use_updates Config::windowed Config::windowed_from_env incoming_location launch_argument launch_location " +
       "prepare_environment prepare_window_painter print_baked_receipt row_reuse_from_env run_headless Services::with_image_downloads Services::with_local_images show_material_look show_neutral_look"],
     ["painted:host/painted/src/canvas/codec.rs", "attach"],
+    ["painted:host/painted/src/canvas/frame_partitions.rs", "attach kept"],
     ["painted:host/painted/src/canvas/legacy.rs", "attach decode glyph"],
     ["painted:host/painted/src/canvas/presence.rs", "attach"],
     ["painted:host/painted/src/canvas/secrets.rs", "attach"],
@@ -1069,8 +1071,9 @@ export const classifications = [
     ["runner:runner/src/frame_health/history.rs", "History::push#retained:1"],
     ["runner:runner/src/instance.rs",
       "Ids::evaluated#evaluated:1 Ids::evaluated#unchanged:1 Ids::retain#forgotten:1 NodeInst::create#created:1 NodeInst::create#nodes_visited:1 " +
-      "NodeInst::emit_bindings#bindings_evaluated:1 NodeInst::emit_bindings#bindings_evaluated:2 NodeInst::update#nodes_visited:1 update_all#regions_skipped:1 " +
+      "NodeInst::emit_bindings#bindings_evaluated:1 NodeInst::emit_bindings#bindings_evaluated:2 NodeInst::update#nodes_visited:1 " +
       "update_row#rows_reused:1 update_row#rows_scanned:1"],
+    ["runner:runner/src/instance/children.rs", "needs_update#regions_skipped:1"],
     ["runner:runner/src/instance/collection/index.rs", "SumTree::fill#zeros:1"],
     ["runner:runner/src/instance/collection/into_view.rs", "Collection::settle_target#reports:1"],
     ["runner:runner/src/instance/collection/mod.rs", "Collection::build_row#row_constructed:1 Collection::feedback#size:1 Collection::realize_window_with_row#rows_reused:1 Collection::update_data#regions_skipped:1"],
@@ -1117,7 +1120,7 @@ export const classifications = [
     ["runner:runner/src/store.rs", "Store::remember#copied:1"],
     ["runner:runner/src/stream_timing.rs", "committed#busy_us:1 committed#commits:1 committed#refused:1 decoded#decoded_bytes:1 decoded#decodes:1 entered#messages:1"],
     ["runner:runner/src/surface_record.rs", "Reader::digits#at:1 Reader::eat#at:1 Reader::hex#at:1 Reader::space#at:1 Reader::string#at:1 Reader::string#at:2 Reader::value#at:1 Reader::value#at:2 Reader::word#at:1"],
-    ["runner:runner/src/transport.rs", "Transport::segment#recorded:1"],
+    ["runner:runner/src/transport.rs", "Transport::arm#starts:1 Transport::segment#recorded:1"],
     ["runner:runner/src/transport/clock.rs", "Follow::feed#ticks:1"],
     ["runner:runner/src/vm.rs", "Extent::with#bytes:1 Extent::with#nodes:1 measure#bytes:1 measure#nodes:1 Run::load_derive#calls:1"],
     ["runner:runner/src/vm/column.rs", "Iter::next#at:1"],
@@ -1341,7 +1344,7 @@ export const classifications = [
   group("inspection", ["one-shot"], "synchronous session inspection or diagnostics; no delivered completion", "UI-owned",
     "The named public runner-crate source is the inspection API or its value/admission helper. The declaration reads or reports the current session. It does not establish a durable operation.", [
     ["runner:runner/src/agent.rs", "base64 frames handle holds logs logs_request node node_request picker shown_value state state_at state_with tags tree tree_request unbase64"],
-    ["runner:runner/src/json.rs", "error field_bool field_num field_str num quote typed_json untyped_json"],
+    ["runner:runner/src/json.rs", "error field_bool field_num field_str num quote surface_args typed_json untyped_json untyped_signed_json"],
     ["runner:runner/src/agent/row.rs", "row_json"],
     ["runner:runner/src/agent/tree.rs", "tagged"],
     ["runner:runner/src/runner/carry.rs", "Runner::generation Runner::set_replacement_pending"],
