@@ -11,10 +11,10 @@ import { basename, delimiter, dirname, relative, resolve } from 'node:path';
 import { appleArtifacts, appleRunBinary } from '../host/apple/build.mjs';
 import { notBuildInput, receiptChanges, refuseBinaryBackend } from './agent-launch.mjs';
 import { directoryInputSnapshot } from './cargo-dep-info.mjs';
-import { buildArgs, buildFirst, buildReason, childFailure, failureSummary, linuxRebuild, lockHolder, logged, nativeBuild, overrideDir, planOverride, planSource, planSources, ownVerb, prebuild, rebuildCommand, refuseBuild } from './agent-build.mjs';
+import { buildArgs, buildFirst, driveBuildEnv, buildReason, childFailure, failureSummary, linuxRebuild, lockHolder, logged, nativeBuild, overrideDir, planOverride, planSource, planSources, ownVerb, prebuild, rebuildCommand, refuseBuild } from './agent-build.mjs';
 import { openStdio } from './agent-stdio.mjs';
 import { bakeOutput, hermesBundle, hermesTarget, linuxBinary, resolveApp, windowsFile, PINNED_RUST } from './app.mjs';
-import { recordBuiltSettings } from '../js/bake/src/__exact_env.mjs';
+import { recordBuiltSettings, settingValues } from '../js/bake/src/__exact_env.mjs';
 import { writePackagedReceipt } from '../host/windows/build.mjs';
 
 test('Mac drives use the assembled app bundle even without catalogs or widgets, and the sample host its own', () => {
@@ -61,6 +61,26 @@ function scratchApp(name) {
   write('exact.mjs', "// …\nconst built = await run(['scripts/agent-build.mjs', host]);\n");
   return { dir, write };
 }
+
+test("a drive's build leaves a launch-marked value the launch gives to the launch, and keeps .env's and the rest (#1336)", () => {
+  const { dir, write } = scratchApp('launch-probe');
+  try {
+    write('app.json', JSON.stringify({ name: 'launch-probe', app: { id: 'com.exact.launch-probe', name: 'launch-probe' },
+      env: [{ name: 'API_TOKEN', launch: true }, { name: 'SESSION', launch: true }, 'API_BASE_URL'] }));
+    write('.env', 'SESSION=from-dotenv\n');
+    const app = resolveApp(dir);
+    const shell = { PATH: '/usr/bin', API_TOKEN: 'agentsecret7d2b4', SESSION: 'from-dotenv', API_BASE_URL: 'https://api.test', EXACT_BUN_LOADED: 'SESSION' };
+    const env = driveBuildEnv(app, shell);
+    assert.equal(env.API_TOKEN, undefined, "the shell's value of a marked name is the launch's");
+    assert.equal(env.SESSION, 'from-dotenv', 'a value Bun loaded from .env stays');
+    assert.equal(env.API_BASE_URL, 'https://api.test');
+    assert.equal(env.PATH, '/usr/bin');
+    assert.deepEqual(settingValues(dir, ['API_TOKEN', 'SESSION'], env), { API_TOKEN: null, SESSION: { value: 'from-dotenv', source: '.env' } });
+    // A launch that does not give the name (an iOS simulator without SIMCTL_CHILD_API_TOKEN) leaves it the build's.
+    assert.equal(driveBuildEnv(app, shell, { PATH: '/usr/bin' }).API_TOKEN, 'agentsecret7d2b4');
+    assert.equal(shell.API_TOKEN, 'agentsecret7d2b4', 'the given environment is not changed');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
 
 test('Apple rebuilds carry a path-selected app into the child without changing the parent environment', () => {
   const { dir } = scratchApp('field-log');

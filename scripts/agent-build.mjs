@@ -32,6 +32,8 @@ import { compilerError, compilerWarnings, warningLines, depInfoInputs, newerThan
 import { CONFIG_JSON, DECLARATIONS, moduleGraph } from './module-graph.mjs';
 import { bakeOutput, bakeTarget, claimLive, developmentBuildEnv, executableName, resolveApp, shaderWatchRoots } from './app.mjs';
 import { bakeTool, linkedBakeDir } from './linked-plan.mjs';
+import { launchNames } from '../js/bake/src/__exact_env.mjs';
+import { simulatorLaunch } from '../host/apple/devices.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const label = host => host === 'ios' ? 'iOS' : host === 'windows' ? 'Windows' : 'macOS';
@@ -189,10 +191,22 @@ export function logged(command, args, log, { cwd, env, append = false, say = nul
     });
   });
 }
+/** The environment a drive's build of `app` runs with: `env` without each name app.json marks `"launch": true`
+ * (LLP 1153.002 D1) that `env` gives and `launch`, the environment the drive starts the app with, gives too. That value
+ * is the launch's, not the build's (`settingChanges` with `launch`); a build that took it would bake it, and its
+ * receipt and the reuse cache would keep it, as the build's value. A value Bun loaded from `.env` (EXACT_BUN_LOADED)
+ * is the app's and stays. */
+export function driveBuildEnv(app, env = process.env, launch = env) {
+  const loaded = new Set((env.EXACT_BUN_LOADED ?? '').split(',').filter(Boolean)), marked = launchNames(app.manifest?.env);
+  return Object.fromEntries(Object.entries(env).filter(([name]) => !marked.has(name) || launch[name] === undefined || loaded.has(name)));
+}
+/** The environment a drive on `host` starts the app with: a simulator's (`simulatorLaunch`), else this process's. */
+const driveLaunch = host => host === 'ios' ? simulatorLaunch() : process.env;
+
 /** host/apple/build.mjs with `args`, its output into `log`; its exit code and output. */
 // The bake's warnings whole (`bakeWarnings`): the drive says them in one line itself and lists each in its file.
 const appleBuild = (args, log, say, app) => logged(process.execPath, [resolve(ROOT, 'host/apple/build.mjs'), ...args], log,
-  { say, env: { ...process.env, EXACT_WARNINGS_WHOLE: '1', ...(app.outside ? { EXACT_APP_DIR: app.dir } : {}) } });
+  { say, env: { ...driveBuildEnv(app, process.env, driveLaunch(args.includes('--ios') ? 'ios' : 'macos')), EXACT_WARNINGS_WHOLE: '1', ...(app.outside ? { EXACT_APP_DIR: app.dir } : {}) } });
 
 // ---------------------------------------------------------------- a plan-only edit (LLP 1116.003)
 
@@ -284,9 +298,10 @@ export function moduleRefusal(built, baked) {
   return null;
 }
 
-/** The bake tool baking `app` into the new directory `out`. */
-async function bakePlan(app, out, log) {
-  const options = bakeTool.options(), tool = await logged(bakeTool.command, bakeTool.args, log, options);
+/** The bake tool baking `app` into the new directory `out`, for a drive on `host`. */
+async function bakePlan(app, out, log, host) {
+  const tooled = bakeTool.options(), options = { ...tooled, env: driveBuildEnv(app, tooled.env, driveLaunch(host)) };
+  const tool = await logged(bakeTool.command, bakeTool.args, log, options);
   if (tool.code) return { ...tool, tool: true };
   return logged(bakeTool.built, [app.dir, '--out', out], log, { ...options, append: true });
 }
@@ -302,7 +317,7 @@ export async function makeOverride(host, app, state, { bake = bakePlan, log } = 
   rmSync(stage, { recursive: true, force: true });
   mkdirSync(dirname(dir), { recursive: true });
   try {
-    const { code, output = '', tool } = await bake(app, stage, log);
+    const { code, output = '', tool } = await bake(app, stage, log, host);
     if (tool) return { refusal: `the bake tool did not build (exit ${code}; its log: ${shown(log)})` };
     if (code) return { failed: output.trim() || `the bake exited ${code}` };
     const why = moduleRefusal(builtModule(app, receipt), JSON.parse(readFileSync(resolve(stage, 'app.module.json'), 'utf8')));
@@ -444,7 +459,7 @@ export async function windowsBuildFirst(app, { say = line => console.error(line)
   if (changed && !changed.length) return 0;
   const log = resolve(app.dir, '.exact', 'windows-build.log');
   say(`building for Windows: ${changed ? `the build is older than its sources (${named(app, changed)} changed)` : 'there is no build yet'}; its log: ${shown(log)}`);
-  const { code, output } = await logged(process.execPath, [resolve(ROOT, 'host/windows/build.mjs'), app.name], log, { env: { ...process.env, EXACT_APP_DIR: app.dir }, say });
+  const { code, output } = await logged(process.execPath, [resolve(ROOT, 'host/windows/build.mjs'), app.name], log, { env: { ...driveBuildEnv(app), EXACT_APP_DIR: app.dir }, say });
   if (code) say(failureSummary(output, { host: 'windows', code, log: shown(log) }));
   else for (const line of warningLines(app.dir, 'windows', compilerWarnings(output))) say(line);
   return code;
