@@ -379,6 +379,46 @@ fn its_face_is_a_title_a_symbol_or_both() {
     }
 }
 
+/// An app using `Item`, whose image-only native button shows only under
+/// `cond` and is named `label`, once per value in `labels`.
+fn guarded_item(cond: &str, label: &str, labels: &[&str]) -> String {
+    let uses: String = labels
+        .iter()
+        .map(|l| format!("      Item(label={l}, go=go)\n"))
+        .collect();
+    format!(
+        "component App\n  state busy = false\n  action go\n    busy = !busy\n  view\n    column\n{uses}component Item\n  props\n    label: string\n    go: action\n  view\n    if {cond}\n      button appearance=\"auto\" press=go aria-label={label}\n        image \"symbol:add\"\n"
+    )
+}
+
+#[test]
+fn a_label_its_if_rules_blank_out_of_is_never_empty() {
+    // #1324: `label=""` inlines to `if "" != ""` around `aria-label=""`, a
+    // button that never renders.
+    for labels in [&["\"\"", "\"Add\""][..], &["(busy ? \"Add\" : \"\")"]] {
+        let src = guarded_item("label != \"\"", "label", labels);
+        boot(&src);
+        let (_, warnings) = contract::compile_warned(&src);
+        assert!(warnings.is_empty(), "{labels:?}: {warnings:?}");
+    }
+    boot(&guarded_item("\"\" != label", "label", &["\"\""]));
+    // The `if` speaks for the value it compares, not another blank, and
+    // rules out only the empty string.
+    for (cond, label, labels) in [
+        ("label != \"\"", "\"\"", &["\"Add\""][..]),
+        ("label != \"\"", "label", &["\" \""]),
+        ("label == \"\"", "label", &["\"\""]),
+    ] {
+        let e = contract::compile(&guarded_item(cond, label, labels)).unwrap_err();
+        assert_eq!(
+            e.id, "lower-button-content",
+            "{cond} {label} {labels:?}: {}",
+            e.message
+        );
+        assert!(e.message.contains("never empty"), "{}", e.message);
+    }
+}
+
 #[test]
 fn its_box_carries_place_size_opacity_transforms_and_accent_only() {
     boot(&app(

@@ -111,21 +111,31 @@ pub(crate) fn with_text_styles(
     let controlled = roles::controlled(&checked_view);
     crate::menu_rows::notes(&checked_view, &mut out);
     crate::symbols::tints(&root.view, checked.file, lowered, &mut out);
-    let visits = checked_view.walk_with((false, None), |node, &(in_root, back)| {
-        if let Some((_, _, attrs)) = node.element() {
-            let keyed = has(attrs, "navigationKey");
-            let back = if keyed && !in_root {
-                literal(attrs, "navigationBack").filter(|name| !name.is_empty())
-            } else {
-                back
-            };
-            (in_root || keyed, back)
-        } else {
-            (in_root, back)
-        }
-    });
+    let start = (false, None, Vec::new());
+    let visits =
+        (checked_view.structure()).walk_regions_with(start, |node, (in_root, back, guards)| {
+            let (in_root, mut back) = (*in_root, *back);
+            if let Some((_, _, attrs)) = node.element() {
+                let keyed = has(attrs, "navigationKey");
+                if keyed && !in_root {
+                    back = literal(attrs, "navigationBack").filter(|name| !name.is_empty());
+                }
+                let inner = (in_root || keyed, back, guards.clone());
+                return [Some(inner.clone()), Some(inner)];
+            }
+            let mut then = guards.clone();
+            then.extend(
+                node.condition()
+                    .into_iter()
+                    .flat_map(crate::controls::ruled_out),
+            );
+            [
+                Some((in_root, back, then)),
+                Some((in_root, back, guards.clone())),
+            ]
+        });
     let (mut seen, mut platform) = (BTreeSet::new(), Vec::new());
-    for (visit, (in_root, back)) in visits {
+    for (visit, (in_root, back, guards)) in visits {
         if let Some((tag, positional, attrs)) = visit.element() {
             // A component used twice is inlined twice: one line for its source.
             let span = visit.span();
@@ -138,7 +148,7 @@ pub(crate) fn with_text_styles(
                     selection,
                 ));
             }
-            out.extend(roles::button(tag, attrs, visit, span).filter(|_| fresh));
+            out.extend(roles::button(tag, attrs, visit, span, &guards).filter(|_| fresh));
             out.extend(roles::dialog_role(tag, attrs, span).filter(|_| fresh));
             out.extend(roles::alert_font(tag, attrs, &checked.file.styles).filter(|_| fresh));
             out.extend(roles::level_without_heading(tag, attrs, span).filter(|_| fresh));

@@ -4,6 +4,7 @@
 //! level with no heading (LLP 1115.000 D12.5), and a bar with only one tab.
 
 use super::{computed, has, literal, BOXES};
+use crate::controls::{guarded, RuledOut};
 use crate::LowerError;
 use contract_checking::{Structure, View, Visit};
 use contract_syntax::{Attr, Expr, Span, StyleDecl, VisitSpans};
@@ -178,13 +179,16 @@ pub(super) fn keys(
 
 /// Whether an element names itself: a written `aria-label` or
 /// `aria-labelledby` that is not the empty string.
-fn named(attrs: &[Attr]) -> bool {
+fn named(attrs: &[Attr], guards: &[(&Expr, RuledOut)]) -> bool {
     ["aria-label", "aria-labelledby"].iter().any(|name| {
         attrs
             .iter()
             .rev()
             .find(|a| a.name == *name)
-            .is_some_and(|a| !matches!(&a.value, Expr::Str(v, _) if v.trim().is_empty()))
+            .is_some_and(|a| {
+                !matches!(&a.value, Expr::Str(v, _) if v.trim().is_empty())
+                    || guarded(&a.value, guards.iter().copied())
+            })
     })
 }
 
@@ -207,7 +211,7 @@ fn says(regions: [Structure<'_>; 2], in_svg: bool) -> Says {
     for region in regions {
         for (node, svg, entering) in region.events(in_svg, |node, svg| match node.element() {
             Some((tag, positional, attrs)) => {
-                if named(attrs) {
+                if named(attrs, &[]) {
                     return None;
                 }
                 match tag {
@@ -229,7 +233,7 @@ fn says(regions: [Structure<'_>; 2], in_svg: bool) -> Says {
                 continue;
             }
             let contribution = if let Some((tag, positional, attrs)) = node.element() {
-                if named(attrs) {
+                if named(attrs, &[]) {
                     Says::Words
                 } else {
                     match tag {
@@ -270,9 +274,10 @@ pub(super) fn button(
     attrs: &[Attr],
     node: Visit<'_>,
     span: Span,
+    guards: &[(&Expr, RuledOut)],
 ) -> impl Iterator<Item = LowerError> {
     let button = tag == "button";
-    let unlabelled = button.then(|| unlabelled_button(attrs, node, span));
+    let unlabelled = button.then(|| unlabelled_button(attrs, node, span, guards));
     let nested = button.then(|| nested_button(node));
     unlabelled.flatten().into_iter().chain(nested.flatten())
 }
@@ -283,7 +288,12 @@ pub(super) fn button(
 /// with no child drew an empty button, and VoiceOver reads one as
 /// "button". A text of any expression, a symbol image with a name, and a
 /// button hidden from assistive technology are not named.
-fn unlabelled_button(attrs: &[Attr], node: Visit<'_>, span: Span) -> Option<LowerError> {
+fn unlabelled_button(
+    attrs: &[Attr],
+    node: Visit<'_>,
+    span: Span,
+    guards: &[(&Expr, RuledOut)],
+) -> Option<LowerError> {
     let hidden = attrs
         .iter()
         .rev()
@@ -293,7 +303,7 @@ fn unlabelled_button(attrs: &[Attr], node: Visit<'_>, span: Span) -> Option<Lowe
             Expr::Str(v, _) => v != "false",
             _ => true,
         });
-    if named(attrs) || hidden {
+    if named(attrs, guards) || hidden {
         return None;
     }
     let message = match says(node.regions(), false) {
