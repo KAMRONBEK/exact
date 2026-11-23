@@ -2,14 +2,17 @@
 //! against the plan and stored on it with what its tool can do.
 //!
 //! A tool's effects are walked from its action through the calls the plan
-//! holds inline, every branch, and the `then` of every mutation it sends,
-//! transitively (D3). A send is classified by what it resolves to: the
+//! holds inline, every branch, the `then` of every mutation it sends, the
+//! resources it refreshes or its sends re-ask, and the actions of the tasks
+//! and sequences whose gate or key reads a slot it assigns, directly or
+//! through a derive, transitively (D3). A send is classified by what it resolves to: the
 //! reserved ActivityKit sends by operation, and a package name by its
 //! package and declared name, so an aliased `use` is still seen: every
-//! name a package grants the microphone, camera or screen to, except those
-//! that only use a track already open (`applyConstraints`, a recognition
-//! of a `track`). A media
-//! argument the walk cannot read as a literal counts as possibly set.
+//! name a package grants the microphone, camera or screen to, except
+//! `applyConstraints` and `takePhoto`, which only use a track already open. Speech
+//! recognition of a `track` subscribes to it, which can reopen an idle one,
+//! so it counts as a restart. A media argument the walk cannot read as a
+//! literal, or a `let` of one, counts as possibly set.
 //! `faces::tool_signature`'s `sends` bit says only whether there is a send.
 
 use crate::manifest::{Control, ControlAction};
@@ -17,6 +20,7 @@ use contract_syntax::{Component, Expr, Stmt};
 use exact_plan::{Plan, ToolsId};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::collections::{BTreeSet, HashSet};
 
 /// How surely a capture kind is in a tool's reach. Ordered: a reach is
@@ -50,6 +54,9 @@ struct Reach {
     /// A `startActivity` whose kind is not a literal.
     dynamic_kind: bool,
     audio: Level,
+    /// `startSpeechRecognition` on the microphone, which no Apple intent
+    /// conformance qualifies.
+    speech: Level,
     camera: Level,
     display: Level,
     /// `startMediaRecorder`: records a stream whose tracks only the run
@@ -61,18 +68,31 @@ struct Reach {
 
 /// The effects of the action named `action` in the expanded root, as the
 /// plan stores them on a control and the bake derives conformances from:
-/// `{activity, activityKinds, dynamicKind, audio, camera, display,
+/// `{activity, activityKinds, dynamicKind, audio, speech, camera, display,
 /// recorder, restart}`, each capture kind `none`, `possible` or `known`.
 pub fn effects(root: &Component, plan: &Plan, action: &str) -> Value {
     let mut reach = Reach::default();
     let mut seen = HashSet::new();
     let mut next = vec![action.to_owned()];
-    while let Some(name) = next.pop() {
-        if !seen.insert(name.clone()) {
-            continue;
+    let mut walker = Walker {
+        root,
+        plan,
+        lets: HashMap::new(),
+        assigned: HashSet::new(),
+    };
+    loop {
+        while let Some(name) = next.pop() {
+            if !seen.insert(name.clone()) {
+                continue;
+            }
+            if let Some(a) = root.actions.iter().find(|a| a.name == name) {
+                walker.lets.clear();
+                walker.walk(&a.body, &mut reach, &mut next);
+            }
         }
-        if let Some(a) = root.actions.iter().find(|a| a.name == name) {
-            walk(&a.body, root, plan, &mut reach, &mut next);
+        next.extend(walker.armed().into_iter().filter(|a| !seen.contains(a)));
+        if next.is_empty() {
+            break;
         }
     }
     json!({
@@ -80,6 +100,7 @@ pub fn effects(root: &Component, plan: &Plan, action: &str) -> Value {
         "activityKinds": reach.kinds,
         "dynamicKind": reach.dynamic_kind,
         "audio": reach.audio.word(),
+        "speech": reach.speech.word(),
         "camera": reach.camera.word(),
         "display": reach.display.word(),
         "recorder": reach.recorder,
@@ -91,127 +112,224 @@ pub fn effects(root: &Component, plan: &Plan, action: &str) -> Value {
 /// call is refused it (LLP 1133.009 D9), and only a control's press may
 /// start audio (D3).
 pub fn captures(effects: &Value) -> bool {
-    ["audio", "camera", "display"]
+    ["audio", "speech", "camera", "display"]
         .iter()
         .any(|k| effects[k] != "none")
         || effects["recorder"] == true
         || effects["restart"] == true
 }
 
-fn walk(stmts: &[Stmt], root: &Component, plan: &Plan, reach: &mut Reach, next: &mut Vec<String>) {
-    for stmt in stmts {
-        match stmt {
-            Stmt::Send {
-                target,
-                source,
-                args,
-                ..
-            } => {
-                let then = root.mutations.iter().find(|m| &m.name == target);
-                if let Some((action, _)) = then.and_then(|m| m.then.as_ref()) {
-                    next.push(action.clone());
+struct Walker<'a> {
+    root: &'a Component,
+    plan: &'a Plan,
+    /// The `let`s of the action walked, an inlined call's parameters among
+    /// them, so a literal bound to a name still reads as one.
+    lets: HashMap<String, Expr>,
+    /// The slots the walk assigns.
+    assigned: HashSet<String>,
+}
+
+impl Walker<'_> {
+    fn walk(&mut self, stmts: &[Stmt], reach: &mut Reach, next: &mut Vec<String>) {
+        for stmt in stmts {
+            match stmt {
+                Stmt::Send {
+                    target,
+                    source,
+                    args,
+                    ..
+                } => {
+                    if let Some(m) = self.root.mutations.iter().find(|m| &m.name == target) {
+                        if let Some((action, _)) = &m.then {
+                            next.push(action.clone());
+                        }
+                        for (resource, _) in &m.refreshes {
+                            self.refresh(resource, reach);
+                        }
+                    }
+                    self.classify(source, args, reach);
                 }
-                classify(source, args, plan, reach);
-            }
-            Stmt::Command { name, args, .. } => classify(name, args, plan, reach),
-            Stmt::If {
-                then, otherwise, ..
-            } => {
-                walk(then, root, plan, reach, next);
-                walk(otherwise, root, plan, reach, next);
-            }
-            Stmt::Match { some, none, .. } => {
-                walk(&some.1, root, plan, reach, next);
-                walk(none, root, plan, reach, next);
-            }
-            Stmt::Call { body, .. } => walk(body, root, plan, reach, next),
-            Stmt::Assign { .. } | Stmt::Refresh { .. } | Stmt::Let { .. } => {}
-        }
-    }
-}
-
-fn classify(source: &str, args: &[Expr], plan: &Plan, reach: &mut Reach) {
-    match source {
-        "startActivity" => {
-            reach.activity.insert("start");
-            match args.first() {
-                Some(Expr::Str(kind, _)) => {
-                    reach.kinds.insert(kind.clone());
+                Stmt::Command { name, args, .. } => self.classify(name, args, reach),
+                Stmt::Refresh { target, .. } => self.refresh(target, reach),
+                Stmt::If {
+                    then, otherwise, ..
+                } => {
+                    self.walk(then, reach, next);
+                    self.walk(otherwise, reach, next);
                 }
-                _ => reach.dynamic_kind = true,
+                Stmt::Match { some, none, .. } => {
+                    self.walk(&some.1, reach, next);
+                    self.walk(none, reach, next);
+                }
+                Stmt::Call { body, .. } => self.walk(body, reach, next),
+                Stmt::Let { name, expr, .. } => {
+                    self.lets.insert(name.clone(), expr.clone());
+                }
+                Stmt::Assign { target, .. } => {
+                    let slot = target.split(['.', '[']).next().unwrap_or(target);
+                    self.assigned.insert(slot.to_owned());
+                }
             }
-            return;
         }
-        "updateActivity" => {
-            reach.activity.insert("update");
-            return;
-        }
-        "endActivity" => {
-            reach.activity.insert("end");
-            return;
-        }
-        _ => {}
     }
-    let Some(module) = plan.module_named(source) else {
-        return;
-    };
-    // A package name's options reach the plan as one record of them
-    // (`modules.rs`); one the walk cannot open may ask for anything.
-    let (fields, opaque) = match args {
-        [Expr::Call(_, fields, _)] => (fields.as_slice(), false),
-        [] => (args, false),
-        _ => (args, !args.iter().all(|a| matches!(a, Expr::NamedArg(..)))),
-    };
-    let unread = Expr::Ident(String::new(), contract_syntax::Span::default());
-    let named = |key: &str| {
-        let given = fields.iter().find_map(|a| match a {
-            Expr::NamedArg(n, value, _) if n == key => Some(value.as_ref()),
-            _ => None,
-        });
-        given.or(opaque.then_some(&unread))
-    };
-    match (plan.str(module.package), plan.str(module.declared)) {
-        ("@exact/media-capture", "getUserMedia") => {
-            let audio = flag(named("audio")).max(constraints(named("audioConstraints")));
-            let camera = flag(named("video")).max(constraints(named("videoConstraints")));
-            reach.audio = reach.audio.max(audio);
-            reach.camera = reach.camera.max(camera);
+
+    /// A resource re-asked: its source, with the arguments it holds.
+    fn refresh(&self, name: &str, reach: &mut Reach) {
+        if let Some(r) = self.root.resources.iter().find(|r| r.name == name) {
+            self.classify(&r.source, &r.args, reach);
         }
-        ("@exact/media-capture", "setTrackEnabled") => {
-            reach.restart |= flag(named("enabled")) != Level::None;
+    }
+
+    /// The actions of the tasks and sequences whose gate or key reads a
+    /// slot the walk assigned, or a derive that does.
+    fn armed(&self) -> Vec<String> {
+        let mut names: HashSet<&str> = self.assigned.iter().map(String::as_str).collect();
+        loop {
+            let before = names.len();
+            for d in &self.root.derives {
+                if reads(&d.expr, &names) {
+                    names.insert(&d.name);
+                }
+            }
+            if names.len() == before {
+                break;
+            }
         }
-        ("@exact/recording", "resumeMediaRecorder") => reach.restart = true,
-        ("@exact/recording", "startMediaRecorder") => reach.recorder = true,
-        ("@exact/speech-recognition", "startSpeechRecognition") => {
-            reach.audio = reach.audio.max(flag(named("microphone")));
+        let gated = |gate: &Option<Expr>, key: &Option<Expr>| {
+            [gate, key].into_iter().flatten().any(|e| reads(e, &names))
+        };
+        let tasks = (self.root.tasks.iter())
+            .filter(|t| gated(&t.gate, &t.key))
+            .map(|t| t.timer.1.clone());
+        let sequences = (self.root.sequences.iter())
+            .filter(|q| gated(&q.gate, &q.key))
+            .filter_map(|q| q.ended.as_ref().map(|(a, _)| a.clone()));
+        tasks.chain(sequences).collect()
+    }
+
+    /// `value` with a name bound by a `let` read as what it binds.
+    fn resolved<'e>(&'e self, value: Option<&'e Expr>) -> Option<&'e Expr> {
+        let mut value = value;
+        for _ in 0..8 {
+            match value {
+                Some(Expr::Ident(name, _)) if self.lets.contains_key(name) => {
+                    value = self.lets.get(name);
+                }
+                _ => break,
+            }
         }
-        ("@exact/camera", "takePhoto") => reach.camera = Level::Known,
-        ("@exact/screen-capture", "captureScreens" | "requestScreenRecording") => {
-            reach.display = Level::Known;
-        }
-        _ => {}
+        value
     }
 }
 
-/// How surely a Boolean option asks for its kind: absent, `none` and
-/// `false` do not, `true` does, and anything computed may.
-fn flag(value: Option<&Expr>) -> Level {
+/// A string literal's text, or a template's without interpolation.
+fn literal(value: &Expr) -> Option<String> {
     match value {
-        None | Some(Expr::None(_) | Expr::Bool(false, _)) => Level::None,
-        Some(Expr::Some(inner, _)) => flag(Some(inner)),
-        Some(Expr::Bool(true, _)) => Level::Known,
-        Some(_) => Level::Possible,
+        Expr::Str(text, _) => Some(text.clone()),
+        Expr::Template(parts, _) => parts
+            .iter()
+            .map(|p| match p {
+                contract_syntax::TemplatePart::Text(t) => Some(t.as_str()),
+                contract_syntax::TemplatePart::Expr(_) => None,
+            })
+            .collect(),
+        _ => None,
     }
 }
 
-/// How surely a constraints option asks for its kind: a shape's
-/// constructor does, `none` does not, and anything computed may.
-fn constraints(value: Option<&Expr>) -> Level {
-    match value {
-        None | Some(Expr::None(_)) => Level::None,
-        Some(Expr::Some(inner, _)) => constraints(Some(inner)),
-        Some(Expr::Call(name, ..)) if name.starts_with(char::is_uppercase) => Level::Known,
-        Some(_) => Level::Possible,
+/// Whether `expr` reads one of `names`.
+fn reads(expr: &Expr, names: &HashSet<&str>) -> bool {
+    match expr {
+        Expr::Ident(name, _) => names.contains(name.as_str()),
+        _ => expr.operands().any(|e| reads(e, names)),
+    }
+}
+
+impl Walker<'_> {
+    fn classify(&self, source: &str, args: &[Expr], reach: &mut Reach) {
+        let plan = self.plan;
+        match source {
+            "startActivity" => {
+                reach.activity.insert("start");
+                match self.resolved(args.first()).and_then(literal) {
+                    Some(kind) => {
+                        reach.kinds.insert(kind);
+                    }
+                    None => reach.dynamic_kind = true,
+                }
+                return;
+            }
+            "updateActivity" => {
+                reach.activity.insert("update");
+                return;
+            }
+            "endActivity" => {
+                reach.activity.insert("end");
+                return;
+            }
+            _ => {}
+        }
+        let Some(module) = plan.module_named(source) else {
+            return;
+        };
+        // A package name's options reach the plan as one record of them
+        // (`modules.rs`); one the walk cannot open may ask for anything.
+        let (fields, opaque) = match args {
+            [Expr::Call(_, fields, _)] => (fields.as_slice(), false),
+            [] => (args, false),
+            _ => (args, !args.iter().all(|a| matches!(a, Expr::NamedArg(..)))),
+        };
+        let unread = Expr::Ident(String::new(), contract_syntax::Span::default());
+        let named = |key: &str| {
+            let given = fields.iter().find_map(|a| match a {
+                Expr::NamedArg(n, value, _) if n == key => Some(value.as_ref()),
+                _ => None,
+            });
+            self.resolved(given).or(opaque.then_some(&unread)).cloned()
+        };
+        let flag = |v: Option<Expr>| self.flag(v.as_ref());
+        let constraints = |v: Option<Expr>| self.constraints(v.as_ref());
+        match (plan.str(module.package), plan.str(module.declared)) {
+            ("@exact/media-capture", "getUserMedia") => {
+                let audio = flag(named("audio")).max(constraints(named("audioConstraints")));
+                let camera = flag(named("video")).max(constraints(named("videoConstraints")));
+                reach.audio = reach.audio.max(audio);
+                reach.camera = reach.camera.max(camera);
+            }
+            ("@exact/media-capture", "setTrackEnabled") => {
+                reach.restart |= flag(named("enabled")) != Level::None;
+            }
+            ("@exact/recording", "resumeMediaRecorder") => reach.restart = true,
+            ("@exact/recording", "startMediaRecorder") => reach.recorder = true,
+            ("@exact/speech-recognition", "startSpeechRecognition") => {
+                reach.speech = reach.speech.max(flag(named("microphone")));
+                reach.restart |= constraints(named("track")) != Level::None;
+            }
+            ("@exact/screen-capture", "captureScreens") => reach.display = Level::Known,
+            _ => {}
+        }
+    }
+
+    /// How surely a Boolean option asks for its kind: absent, `none` and
+    /// `false` do not, `true` does, and anything computed may.
+    fn flag(&self, value: Option<&Expr>) -> Level {
+        match self.resolved(value) {
+            None | Some(Expr::None(_) | Expr::Bool(false, _)) => Level::None,
+            Some(Expr::Some(inner, _)) => self.flag(Some(inner)),
+            Some(Expr::Bool(true, _)) => Level::Known,
+            Some(_) => Level::Possible,
+        }
+    }
+
+    /// How surely a constraints option asks for its kind: a shape's
+    /// constructor does, `none` does not, and anything computed may.
+    fn constraints(&self, value: Option<&Expr>) -> Level {
+        match self.resolved(value) {
+            None | Some(Expr::None(_)) => Level::None,
+            Some(Expr::Some(inner, _)) => self.constraints(Some(inner)),
+            Some(Expr::Call(name, ..)) if name.starts_with(char::is_uppercase) => Level::Known,
+            Some(_) => Level::Possible,
+        }
     }
 }
 

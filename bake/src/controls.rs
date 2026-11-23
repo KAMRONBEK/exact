@@ -39,6 +39,13 @@ pub(crate) fn derive(
         && !["tvos", "watchos", "xros", "visionos"]
             .iter()
             .any(|t| target.contains(t));
+    // The Apple build names the extensions it packages (host/apple/build.mjs),
+    // and a publisher replays that choice from the build's receipt.
+    let packaged = std::env::var("EXACT_APPLE_EXTENSIONS")
+        .map_or(true, |kinds| kinds.split(',').any(|k| k == "controls"));
+    if std::env::var_os("OUT_DIR").is_some() {
+        println!("cargo:rerun-if-env-changed=EXACT_APPLE_EXTENSIONS");
+    }
     let declared: Vec<String> = manifest
         .live_activities()?
         .into_iter()
@@ -57,13 +64,22 @@ pub(crate) fn derive(
                 control.kind
             ));
         };
-        let effects: Value = serde_json::from_str(plan.str(planned.effects)).unwrap_or_default();
+        let effects: Value = serde_json::from_str(plan.str(planned.effects)).map_err(|e| {
+            format!(
+                "control `{}`: the plan's effects do not parse ({e}); rebuild the plan",
+                control.kind
+            )
+        })?;
         let signature = planned
             .tool
             .map(|t| contract::faces::tool_signature(plan, t.0 as usize));
         let recording =
             effects["audio"].as_str().is_some_and(|a| a != "none") || effects["recorder"] == true;
-        let unsupported = ["camera", "display"].iter().any(|k| effects[k] == "known");
+        // Speech recognition on the microphone is capture no Apple
+        // conformance qualifies (D3's table).
+        let unsupported = ["camera", "display", "speech"]
+            .iter()
+            .any(|k| effects[k] == "known");
         if iphone && recording && !unsupported {
             prerequisites(&control.kind, &effects, &declared, &ceiling)?;
         }
@@ -81,10 +97,11 @@ pub(crate) fn derive(
         }
         let placement = match () {
             _ if !iphone => omitted("control-host", "this host offers no controls in this build"),
+            _ if !packaged => omitted("control-metadata", "this build packages no control extension: the portable Apple builder cannot extract a control's App Intents metadata, or `--extensions` left `controls` out"),
             _ => match &control.action {
                 ControlAction::Url(_) => json!({ "offered": [{ "from": FIRST_IOS, "intent": "open" }] }),
                 ControlAction::Tool(_) if unsupported => {
-                    omitted("control-capture", "its tool starts a camera or screen capture, which a control may not")
+                    omitted("control-capture", "its tool starts a camera, screen or speech capture, which a control may not")
                 }
                 ControlAction::Tool(_) if recording => omitted("control-recording-unqualified", "starting a recording from a locked iPhone awaits its device qualification (LLP 1126.004 §7 piece 0)"),
                 ControlAction::Tool(_) if !conformances.is_empty() => {
@@ -102,6 +119,12 @@ pub(crate) fn derive(
             "placement": placement,
         }));
     }
+    // By kind, so reordering the rows leaves the id as it was.
+    out.sort_by(|a, b| {
+        a["control"]["kind"]
+            .as_str()
+            .cmp(&b["control"]["kind"].as_str())
+    });
     compat.inputs["controls"] = json!(out);
     compat.id = compatibility_digest(&compat.inputs);
     Ok(())

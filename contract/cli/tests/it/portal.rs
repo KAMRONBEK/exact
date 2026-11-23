@@ -53,6 +53,7 @@ fn what_no_placement_could_move_is_refused() {
         ("      table\n        tr portal=\"a\"\n          td\n            text \"1\"\n      box id=\"a\"\n", "lower-portal-mover"),
         ("      list\n        section\n          row portal=\"a\"\n            text \"1\"\n      box id=\"a\"\n", "lower-portal-mover"),
         ("      box role=\"tab\" portal=\"a\"\n      box id=\"a\"\n", "lower-portal-mover"),
+        ("      box role=\"dialog\" portal=\"a\"\n      box id=\"a\"\n", "lower-portal-mover"),
         // A computed id inside the mover names only its own descendant.
         ("      button id=\"a\"\n        text \"Go\"\n      box portal=\"a\"\n        box id=(on ? \"x\" : \"a\")\n", "lower-portal-target"),
     ] {
@@ -442,4 +443,50 @@ fn a_whole_table_moves_and_a_long_chain_parks_past_the_depth_limit() {
         .filter(|i| parent(&r, view(&r, &format!("m-{i}")).unwrap()).is_some())
         .count();
     assert!(shown < n && shown > 100, "{shown} of {n} shown");
+}
+
+#[test]
+fn a_route_headers_bar_item_is_refused_and_a_foreign_object_box_receives() {
+    let source = r#"routes nav
+  tab home "/"
+
+component App
+  view
+    main navigationKey=`${top(nav).id}` width="100%" height="100%"
+      for e in stack(nav) key=e.id
+        column navigationKey=`${e.id}`
+          header
+            text "Home" role="heading"
+            button portal="d"
+              text "Done"
+          box id="d"
+"#;
+    assert_eq!(
+        contract::compile(source).unwrap_err().id,
+        "lower-portal-mover"
+    );
+    let r = boot(
+        "component App\n  view\n    column\n      svg width=10 height=10\n        foreignObject width=10 height=10\n          box id=\"d\" testId=\"d\"\n      box portal=\"d\" testId=\"m\"\n",
+    );
+    assert_eq!(parent(&r, view(&r, "m").unwrap()), view(&r, "d"));
+}
+
+#[test]
+fn a_reload_keeps_a_mover_declared_before_its_destination() {
+    let source = "component App\n  view\n    column\n      video \"m.mp4\" portal=\"d\" testId=\"v\"\n      box id=\"d\" testId=\"d\"\n";
+    let r = boot(source);
+    let v = view(&r, "v").unwrap();
+    assert_eq!(parent(&r, v), view(&r, "d"));
+    let plan = Plan::decode(&contract::compile(source).unwrap().encode()).unwrap();
+    let again = Runner::boot_carrying(
+        plan,
+        NoData,
+        Kernel::with_monospace(),
+        &r.carry(),
+        Default::default(),
+        "/",
+    )
+    .unwrap();
+    assert_eq!(view(&again, "v"), Some(v));
+    assert_eq!(parent(&again, v), view(&again, "d"));
 }

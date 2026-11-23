@@ -56,7 +56,10 @@ fn app(name: &str) -> crate::TempDir {
     let packages = Path::new(env!("CARGO_MANIFEST_DIR")).join("../packages/media-capture");
     std::fs::create_dir_all(dir.join("node_modules/@exact")).unwrap();
     #[cfg(unix)]
-    std::os::unix::fs::symlink(
+    use std::os::unix::fs::symlink as symlink_dir;
+    #[cfg(windows)]
+    use std::os::windows::fs::symlink_dir;
+    symlink_dir(
         packages.canonicalize().unwrap(),
         dir.join("node_modules/@exact/media-capture"),
     )
@@ -108,20 +111,30 @@ fn ios_offers_url_and_activity_controls_and_names_what_it_omits() {
         control("film", "film"),
         control("record", "record"),
     ]);
-    let (controls, _) = bake(&dir, rows.clone(), true, MIC, IOS).unwrap();
-    let placement = |i: usize| &controls[i]["placement"];
-    assert_eq!(placement(0)["offered"][0]["intent"], "open");
-    assert_eq!(placement(1)["offered"][0]["from"], "18.0");
-    assert_eq!(controls[1]["conformances"], json!(["LiveActivityIntent"]));
-    assert_eq!(placement(2)["omitted"], "control-process");
-    assert_eq!(placement(3)["omitted"], "control-capture");
-    assert_eq!(placement(4)["omitted"], "control-recording-unqualified");
+    let (controls, id) = bake(&dir, rows.clone(), true, MIC, IOS).unwrap();
+    let row = |kind: &str| {
+        let all = controls.as_array().unwrap();
+        all.iter().find(|c| c["control"]["kind"] == kind).unwrap()
+    };
+    let placement = |kind: &str| &row(kind)["placement"];
+    assert_eq!(placement("open")["offered"][0]["intent"], "open");
+    assert_eq!(placement("glance")["offered"][0]["from"], "18.0");
+    assert_eq!(row("glance")["conformances"], json!(["LiveActivityIntent"]));
+    assert_eq!(placement("plain")["omitted"], "control-process");
+    assert_eq!(placement("film")["omitted"], "control-capture");
     assert_eq!(
-        controls[4]["conformances"],
+        placement("record")["omitted"],
+        "control-recording-unqualified"
+    );
+    assert_eq!(
+        row("record")["conformances"],
         json!(["LiveActivityIntent", "AudioRecordingIntent"])
     );
-    assert_eq!(controls[4]["control"]["authentication"], "required");
-    assert_eq!(controls[4]["digest"].as_str().unwrap().len(), 64);
+    assert_eq!(row("record")["control"]["authentication"], "required");
+    assert_eq!(row("record")["digest"].as_str().unwrap().len(), 64);
+    let reversed = Value::Array(rows.as_array().unwrap().iter().rev().cloned().collect());
+    let (_, again) = bake(&dir, reversed, true, MIC, IOS).unwrap();
+    assert_eq!(id, again, "reordering the rows keeps the id");
 
     for target in [
         ("ios", "aarch64-apple-tvos"),

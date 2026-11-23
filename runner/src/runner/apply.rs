@@ -9,6 +9,19 @@ impl<D: DataSource> Runner<D> {
         }
     }
 
+    /// The views a destroy in the batch just placed leaves alive: each
+    /// extracted mover's subtree, which the kernel still shows inside the
+    /// destroyed node until the batch applies.
+    pub(super) fn kept_by_portals(&self) -> std::collections::HashSet<ViewId> {
+        let arena = self.kernel.arena();
+        (self.tree.iter())
+            .flat_map(|t| t.extracted())
+            .filter_map(|v| self.kernel.node(*v))
+            .flat_map(|n| arena.subtree(n.key.index))
+            .map(|slot| arena.local_id(slot))
+            .collect()
+    }
+
     pub(super) fn apply(
         &mut self,
         mut ops: Vec<exact_kernel::Op>,

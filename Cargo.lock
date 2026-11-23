@@ -92,6 +92,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "activity-fixture-android"
+version = "0.1.0"
+dependencies = [
+ "activity-fixture-data",
+ "contract",
+ "exact-bake",
+ "exact-painted",
+]
+
+[[package]]
 name = "activity-fixture-apple"
 version = "0.1.0"
 dependencies = [

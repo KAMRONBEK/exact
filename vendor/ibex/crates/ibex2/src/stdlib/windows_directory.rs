@@ -201,8 +201,55 @@ fn open_encoded(
             validate(&file)?;
             Ok(file)
         }
+        // FILE_CREATE made this entry, so the held handle is the object, with
+        // nothing to recall, unless a filter has tagged it since.
+        Walk::Known
+            if disposition == FILE_CREATE
+                && self::attributes(&file)?.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT == 0 =>
+        {
+            Ok(file)
+        }
         Walk::Known => open_known(file, access),
     }
+}
+/// Remove the entry `file` holds with `DELETE`; a directory must be empty.
+fn delete(file: &File) -> io::Result<()> {
+    let mut status = IO_STATUS_BLOCK::default();
+    let flags = FILE_DISPOSITION_INFORMATION_EX {
+        Flags: FILE_DISPOSITION_DELETE | FILE_DISPOSITION_POSIX_SEMANTICS,
+    };
+    // A reader that shares deletion may keep reading through its handle after this name disappears.
+    // SAFETY: the buffers live through this synchronous call on the opened entry.
+    let result = unsafe {
+        NtSetInformationFile(
+            file.as_raw_handle(),
+            &mut status,
+            (&flags as *const FILE_DISPOSITION_INFORMATION_EX).cast(),
+            size_of::<FILE_DISPOSITION_INFORMATION_EX>() as u32,
+            FileDispositionInformationEx,
+        )
+    };
+    if !matches!(
+        result,
+        STATUS_INVALID_INFO_CLASS
+            | STATUS_INVALID_PARAMETER
+            | STATUS_NOT_SUPPORTED
+            | STATUS_INVALID_DEVICE_REQUEST
+    ) {
+        return checked(result);
+    }
+    // Filesystems without POSIX disposition delete when the last open handle closes.
+    let info = FILE_DISPOSITION_INFORMATION { DeleteFile: true };
+    // SAFETY: the handle and both buffers remain live through the synchronous fallback.
+    checked(unsafe {
+        NtSetInformationFile(
+            file.as_raw_handle(),
+            &mut status,
+            (&info as *const FILE_DISPOSITION_INFORMATION).cast(),
+            size_of::<FILE_DISPOSITION_INFORMATION>() as u32,
+            FileDispositionInformation,
+        )
+    })
 }
 pub fn identity(file: &File) -> io::Result<(u64, u64)> {
     let mut info = BY_HANDLE_FILE_INFORMATION::default();
@@ -340,15 +387,20 @@ impl Directory {
         )
         .map(|file| Self(file, self.1, self.2))
     }
-    pub(crate) fn create_child(&self, leaf: &str) -> io::Result<Self> {
+    /// Create `leaf` exclusively; `removable` holds it with `DELETE` for [`Self::delete`].
+    pub(crate) fn create_child(&self, leaf: &str, removable: bool) -> io::Result<Self> {
         open(
             self,
             leaf,
-            FILE_LIST_DIRECTORY | FILE_TRAVERSE,
+            FILE_LIST_DIRECTORY | FILE_TRAVERSE | if removable { DELETE } else { 0 },
             FILE_CREATE,
             true,
         )
         .map(|file| Self(file, self.1, self.2))
+    }
+    /// Remove this empty directory through its own handle, which must hold `DELETE`.
+    pub(crate) fn delete(self) -> io::Result<()> {
+        delete(&self.0)
     }
     pub fn parent(&self, relative: &str, create: bool) -> io::Result<(Self, String)> {
         let parts: Vec<_> = relative.split('/').collect();
@@ -483,43 +535,7 @@ impl Directory {
         Ok(())
     }
     pub fn unlink(&self, leaf: &str) -> io::Result<()> {
-        let file = open(self, leaf, DELETE, FILE_OPEN, false)?;
-        let mut status = IO_STATUS_BLOCK::default();
-        let flags = FILE_DISPOSITION_INFORMATION_EX {
-            Flags: FILE_DISPOSITION_DELETE | FILE_DISPOSITION_POSIX_SEMANTICS,
-        };
-        // A reader that shares deletion may keep reading through its handle after this name disappears.
-        // SAFETY: the buffers live through this synchronous call on the opened entry.
-        let result = unsafe {
-            NtSetInformationFile(
-                file.as_raw_handle(),
-                &mut status,
-                (&flags as *const FILE_DISPOSITION_INFORMATION_EX).cast(),
-                size_of::<FILE_DISPOSITION_INFORMATION_EX>() as u32,
-                FileDispositionInformationEx,
-            )
-        };
-        if !matches!(
-            result,
-            STATUS_INVALID_INFO_CLASS
-                | STATUS_INVALID_PARAMETER
-                | STATUS_NOT_SUPPORTED
-                | STATUS_INVALID_DEVICE_REQUEST
-        ) {
-            return checked(result);
-        }
-        // Filesystems without POSIX disposition delete when the last open handle closes.
-        let info = FILE_DISPOSITION_INFORMATION { DeleteFile: true };
-        // SAFETY: the handle and both buffers remain live through the synchronous fallback.
-        checked(unsafe {
-            NtSetInformationFile(
-                file.as_raw_handle(),
-                &mut status,
-                (&info as *const FILE_DISPOSITION_INFORMATION).cast(),
-                size_of::<FILE_DISPOSITION_INFORMATION>() as u32,
-                FileDispositionInformation,
-            )
-        })
+        delete(&open(self, leaf, DELETE, FILE_OPEN, false)?)
     }
     pub fn rename(&self, file: &File, leaf: &str) -> io::Result<()> {
         self.rename_using(file, leaf, true)

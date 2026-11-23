@@ -1208,3 +1208,53 @@ fn a_budget_thumbnail_follows_an_enlarged_box() {
     images.wait(SETTLED);
     assert_eq!(images.bitmaps[&1].width(), 1024);
 }
+
+#[test]
+fn a_canvas_read_is_decoded_once_its_header_is_read_with_no_second_poll() {
+    let mut images = Images::with_assets(Assets::selected(
+        PathBuf::new(),
+        Arc::new(|_| Ok(Some(encoded(640, 360, [30, 60, 90, 255])))),
+    ));
+    images.ask_canvas("still.png".into());
+    // The read registers what it will ask for; a worker reads the header and
+    // asks, though nothing polls again.
+    images.start_canvas_reads();
+    let deadline = Instant::now() + SETTLED;
+    while images.backend.session.stats().ready == 0 {
+        assert!(Instant::now() < deadline, "no decode without a second poll");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    images.start_canvas_reads();
+    let (name, answer) = images.canvas_answers.pop().unwrap();
+    assert_eq!(name, "still.png");
+    assert_eq!(
+        answer.unwrap().payload::<Arc<Bitmap>>().unwrap().natural(),
+        (640, 360)
+    );
+}
+
+#[test]
+fn a_canvas_read_that_leaves_before_its_header_cancels_the_ask() {
+    let mut images = Images::with_assets(Assets::selected(
+        PathBuf::new(),
+        Arc::new(|_| Ok(Some(encoded(640, 360, [30, 60, 90, 255])))),
+    ));
+    images.ask_canvas("gone.png".into());
+    images.start_canvas_reads();
+    images.cancel_canvas("gone.png");
+    // Whether the worker asked before or after the read went, nothing holds
+    // the picture: at most a decode under way lands in the cache, unheld.
+    let deadline = Instant::now() + SETTLED;
+    while images.backend.session.stats().running + images.backend.session.stats().queued > 0
+        || images.backend.sources() > 0
+    {
+        assert!(Instant::now() < deadline, "the workers settle");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let stats = images.backend.session.stats();
+    assert_eq!(
+        (stats.pinned_bytes, stats.pending_jobs),
+        (0, 0),
+        "{stats:?}"
+    );
+}

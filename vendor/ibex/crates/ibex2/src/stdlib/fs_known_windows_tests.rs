@@ -83,3 +83,49 @@ fn links_below_a_known_root_are_refused_and_agent_roots_stay_pinned() {
     drop(folders);
     std::fs::remove_dir_all(base).unwrap();
 }
+
+#[test]
+fn mkdir_creates_every_component_and_refuses_an_existing_one() {
+    let base = std::env::temp_dir().join(format!("ibex-known-mkdir-{}", std::process::id()));
+    std::fs::create_dir_all(&base).unwrap();
+    let make = |parts: &[&str]| {
+        let parts: Vec<String> = parts.iter().map(|part| part.to_string()).collect();
+        create(base.clone().into(), &parts, FsOp::Mkdir, None, b"")
+    };
+    make(&["made", "nested"]).unwrap();
+    assert!(base.join("made/nested").is_dir());
+    assert_eq!(
+        make(&["made"]).unwrap_err().kind(),
+        io::ErrorKind::AlreadyExists
+    );
+    // The new directories are ordinary parents of a create.
+    create(
+        base.clone().into(),
+        &["made".into(), "nested".into(), "shot".into()],
+        FsOp::WriteFile,
+        None,
+        b"png",
+    )
+    .unwrap();
+    assert_eq!(
+        std::fs::read(base.join("made/nested/shot")).unwrap(),
+        b"png"
+    );
+    // A later component's failure removes the ones this call made.
+    let parts: Vec<String> = ["undone", "middle", "last"].map(Into::into).into();
+    let refused = mkdir(
+        Directory::known(&base, None).unwrap(),
+        &parts,
+        |parent: &Directory, leaf: &str, removable| {
+            if leaf == "last" {
+                Err(io::Error::from_raw_os_error(5))
+            } else {
+                parent.create_child(leaf, removable)
+            }
+        },
+    )
+    .unwrap_err();
+    assert_eq!(refused.raw_os_error(), Some(5));
+    assert!(!base.join("undone").exists());
+    std::fs::remove_dir_all(base).unwrap();
+}

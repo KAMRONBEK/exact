@@ -22,6 +22,8 @@ struct Within<'a> {
     cells: bool,
     /// Inside an `svg`, not inside its `foreignObject`.
     svg: bool,
+    /// Its parent is a route's header, whose children are bar items.
+    bar: bool,
     /// Under a `for`: each row is another instance with its own descendants.
     repeated: bool,
     /// The arm taken at each enclosing `if`/`match`.
@@ -94,8 +96,14 @@ fn unmovable(tag: &str, attrs: &[Attr], within: &Within<'_>) -> Option<&'static 
     }
     if matches!(literal(attrs, "role"), Some("tab" | "tabpanel" | "tablist"))
         || (tag == "header" && within.route)
+        || within.bar
     {
-        return Some("a tab, a tab panel and a route's header are projected by navigation");
+        return Some(
+            "a tab, a tab panel, a route's header and its bar items are projected by navigation",
+        );
+    }
+    if matches!(literal(attrs, "role"), Some("dialog" | "alertdialog")) {
+        return Some("a dialog, a popover or an option is presented by the platform, not laid out in a parent");
     }
     None
 }
@@ -155,6 +163,7 @@ pub(crate) fn check(checked: &Checked<'_>) -> Vec<LowerError> {
                     parent: Some(tag),
                     route: said(attrs, "navigationKey") != Some(false),
                     cells: tag == "list" || (within.cells && tag == "section"),
+                    bar: tag == "header" && within.route,
                     svg: (within.svg || tag == "svg") && tag != "foreignObject",
                     ..within.clone()
                 },

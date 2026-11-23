@@ -17,13 +17,11 @@ pub(super) fn create(
     for part in parts {
         super::windows_path::validate_name(part)?;
     }
-    let mut parents = vec![Directory::known(&root.path, root.directory)?];
+    let top = Directory::known(&root.path, root.directory)?;
     if op == FsOp::Mkdir {
-        for part in parts {
-            parents.push(parents.last().unwrap().create_child(part)?);
-        }
-        return Ok(FsResult::Done);
+        return mkdir(top, parts, Directory::create_child).map(|()| FsResult::Done);
     }
+    let mut parents = vec![top];
     let (leaf, ancestors) = parts
         .split_last()
         .map_or((None, &[][..]), |(leaf, rest)| (Some(leaf), rest));
@@ -59,6 +57,39 @@ pub(super) fn create(
         None => file.write_all(data)?,
     }
     Ok(FsResult::Done)
+}
+
+/// Create every component exclusively. A failure removes what this call
+/// made, deepest first, each closed before its parent's removal; only the
+/// components below which another is created are held with `DELETE`.
+fn mkdir(
+    root: Directory,
+    parts: &[String],
+    create: impl Fn(&Directory, &str, bool) -> io::Result<Directory>,
+) -> io::Result<()> {
+    let mut parents = vec![root];
+    for (index, part) in parts.iter().enumerate() {
+        let removable = index + 1 < parts.len();
+        match create(parents.last().unwrap(), part, removable) {
+            Ok(directory) => parents.push(directory),
+            Err(error) => {
+                let mut kept = Vec::new();
+                for (directory, part) in parents.drain(1..).rev().zip(parts[..index].iter().rev()) {
+                    if let Err(left) = directory.delete() {
+                        kept.push(format!("{part}: {left}"));
+                    }
+                }
+                if kept.is_empty() {
+                    return Err(error);
+                }
+                return Err(io::Error::new(
+                    error.kind(),
+                    format!("{error}; left behind {}", kept.join(", ")),
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn atomic(

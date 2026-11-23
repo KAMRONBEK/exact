@@ -27,8 +27,13 @@ pub(crate) struct Portals {
     /// The published child list of each parent a mover is shown in or
     /// declared in.
     lists: HashMap<ViewId, Vec<ViewId>>,
-    /// Problems already journaled: one line per element and value.
+    /// Problems already journaled: one line per element and note.
     said: HashSet<(ViewId, String)>,
+    /// The value each hidden mover was last journaled hiding it.
+    hidden: HashMap<ViewId, String>,
+    /// The surviving movers the last batch detached from where they were
+    /// shown: a destroy in that batch takes none of their subtree.
+    extracted: Vec<ViewId>,
 }
 
 /// One realized node of the final declaration tree, in preorder.
@@ -48,13 +53,13 @@ struct Entry {
     /// Plain structure (D3): it may receive content, and it may move.
     receives: bool,
     movable: bool,
-    /// Its own kind: a plain box, a list; its children are a list's cells;
-    /// it is a route; its HTML element.
-    view_type: bool,
+    /// It lays its children out as ordinary layout children (D3): a box or
+    /// an svg's `foreignObject`, not a list, a table's or a prose list's
+    /// part or a route's projected header.
+    holds: bool,
+    /// It is a list; it is a route.
     list: bool,
-    cells: bool,
     keyed: bool,
-    tag: Option<String>,
 }
 
 struct Walk<'a> {
@@ -113,18 +118,17 @@ impl Walk<'_> {
         // HTML: an empty `popover` is the `auto` state.
         let popover = bound(n, plan, sites, PropId::Popover).is_some();
         let up = parent.map(|p| &self.out[p]);
-        // A parent lays its child out unless it consumes it as a slot (D3):
-        // a parent that is not a plain box, a list's cell (in a wrapper or a
-        // grouped list's section), or a table's or a prose list's part.
-        let plain_parent = step == 1
-            && up.is_some_and(|p| {
-                p.view_type && !p.cells && !p.tag.as_deref().is_some_and(holds_parts)
-            });
+        // A list's cell is in a wrapper (`step` 2) or a grouped list's section.
+        let plain_parent = step == 1 && up.is_some_and(|p| p.holds);
         let part = tag.as_deref().is_some_and(|t| is_part(t) || t == "dialog");
-        let projected = matches!(
-            role.as_deref(),
-            Some("dialog" | "alertdialog" | "tab" | "tabpanel" | "tablist")
-        ) || (tag.as_deref() == Some("header") && up.is_some_and(|p| p.keyed));
+        // A route's header projects its children into the bar, a tablist its
+        // tabs: they are slots. A dialog's and a panel's content is laid out.
+        let bar = tag.as_deref() == Some("header") && up.is_some_and(|p| p.keyed);
+        let projected = bar
+            || matches!(
+                role.as_deref(),
+                Some("dialog" | "alertdialog" | "tab" | "tabpanel" | "tablist")
+            );
         let bears = (plan.node(n.node).bindings.iter()).any(|b| {
             let b = plan.binding(b);
             b.kind == BindingKind::Prop && b.id == PropId::Portal as u16
@@ -150,11 +154,13 @@ impl Walk<'_> {
             portal: bears.then(|| said(PropId::Portal)).flatten(),
             receives,
             movable: plain_parent && !keyed && !popover && !part && !projected,
-            view_type: own == view_type,
+            holds: (own == view_type || own == NodeType::SvgForeignObject as u8)
+                && !cells
+                && !bar
+                && role.as_deref() != Some("tablist")
+                && !tag.as_deref().is_some_and(holds_parts),
             list: own == NodeType::List as u8,
-            cells,
             keyed,
-            tag,
         });
         let root = Some(root.unwrap_or(i));
         let Some(list) = n.list() else {
@@ -215,9 +221,13 @@ impl Hidden {
 impl Tree {
     /// Whether the plan says `portal` anywhere: only then does placement run.
     pub(super) fn portals_for(plan: &Plan) -> Option<Box<Portals>> {
-        (plan.bindings.iter())
-            .any(|b| b.kind == BindingKind::Prop && b.id == PropId::Portal as u16)
-            .then(Box::default)
+        crate::uses::portals(plan).then(Box::default)
+    }
+
+    /// The movers the last placement detached and kept alive: a destroy in
+    /// the same batch does not reach their subtrees.
+    pub(crate) fn extracted(&self) -> &[ViewId] {
+        self.portals.as_ref().map_or(&[], |p| &p.extracted)
     }
 
     /// The declaration parent of a moved or hidden view; `None` for one shown
@@ -414,7 +424,7 @@ impl Portals {
             if let Err(why) = kept {
                 let e = &entries[m];
                 let value = e.portal.clone().unwrap_or_default();
-                if self.said.insert((e.view, value.clone())) {
+                if self.hidden.insert(e.view, value.clone()).as_ref() != Some(&value) {
                     notes.push(format!(
                         "view {}: `portal=\"{value}\"` hides it: {} (LLP 1013.002 D2)",
                         e.view,
@@ -444,14 +454,10 @@ impl Portals {
         // The final list of each parent placement touches: its declared
         // children without the movers, then the movers it receives in
         // declaration preorder.
-        // A bearer's parent's list is placement's only where that parent is a
-        // plain box: a list's or a group's cells are the collection's.
-        let placeable = |e: &Entry| {
-            e.bears
-                && e.step == 1
-                && e.parent
-                    .is_some_and(|p| entries[p].view_type && !entries[p].cells)
-        };
+        // A bearer's parent's list is placement's only where that parent lays
+        // it out: a list's or a group's cells are the collection's.
+        let placeable =
+            |e: &Entry| e.bears && e.step == 1 && e.parent.is_some_and(|p| entries[p].holds);
         let mut finals: HashMap<ViewId, Vec<ViewId>> = HashMap::new();
         let mut touched: Vec<ViewId> = Vec::new();
         for e in entries.iter().filter(|e| placeable(e)) {
@@ -478,17 +484,17 @@ impl Portals {
                 list.push(e.view);
             }
         }
+        let mut arriving: HashMap<usize, Vec<ViewId>> = HashMap::new();
+        for &(d, m) in &incoming {
+            arriving.entry(d).or_default().push(view(m));
+        }
         let authored: HashMap<ViewId, Vec<ViewId>> = declared
             .iter()
             .map(|(&i, list)| (view(i), list.clone()))
             .collect();
         for (&i, list) in &mut declared {
             list.retain(|c| !moved.contains_key(c));
-            list.extend(
-                (incoming.iter())
-                    .filter(|&&(d, _)| d == i)
-                    .map(|&(_, m)| view(m)),
-            );
+            list.extend(arriving.remove(&i).unwrap_or_default());
             finals.insert(view(i), std::mem::take(list));
         }
         let created: HashSet<ViewId> = (ops.iter())
@@ -530,6 +536,7 @@ impl Portals {
                 }
             }
         }
+        self.extracted = leaving.values().flatten().copied().collect();
         let mut dying = Vec::new();
         for (&m, (at, _)) in &self.moved {
             if index.contains_key(&m) {
@@ -546,6 +553,7 @@ impl Portals {
             let Some(list) = self.lists.get(&was) else {
                 continue;
             };
+            let gone: HashSet<ViewId> = gone.into_iter().collect();
             let remaining: Vec<ViewId> =
                 list.iter().copied().filter(|c| !gone.contains(c)).collect();
             state.insert(was, remaining.clone());
@@ -593,6 +601,12 @@ impl Portals {
         finals.retain(|x, _| kept.contains(x));
         self.lists = finals;
         self.said.retain(|(v, _)| index.contains_key(v));
+        // A mover shown again journals its next hiding afresh.
+        (self.hidden).retain(|v, _| {
+            index
+                .get(v)
+                .is_some_and(|i| matches!(edge.get(i), Some(Err(_))))
+        });
     }
 }
 

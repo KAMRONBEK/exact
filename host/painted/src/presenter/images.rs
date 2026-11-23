@@ -109,6 +109,27 @@ impl<D: DataSource> Presenter<D> {
         self.images.retry_due_in().map(|d| d.as_secs_f64() * 1000.0)
     }
 
+    /// Before a window's first present after a show: draw its canvases, then
+    /// wait, at most `bound`, while a picture they or a visible image asked
+    /// for is loading (`Images::awaited`), so the window shows with its
+    /// pictures (LLP 1178 D3). A missing or failing file settles at once;
+    /// one still loading at the bound lands in a later frame.
+    pub fn settle_pictures(&mut self, bound: Duration) -> bool {
+        let start = std::time::Instant::now();
+        self.images.paint_with(self.brush.text.clone());
+        self.draw_and_capture_canvases(false);
+        let mut changed = false;
+        loop {
+            let left = bound.saturating_sub(start.elapsed());
+            let reports = self.images.wait_until(left, |images| !images.awaited());
+            changed |= self.apply_image_results(reports);
+            let awaited = self.host.runner().canvas_images_pending() || self.images.awaited();
+            if !awaited || start.elapsed() >= bound {
+                return changed;
+            }
+        }
+    }
+
     /// Wait for every load in flight (bounded).
     pub fn wait_images(&mut self, timeout: Duration) -> bool {
         self.images.paint_with(self.brush.text.clone());

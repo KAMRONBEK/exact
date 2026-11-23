@@ -18,7 +18,19 @@ use crate::instance::{Activation, Claim, Handed, Instance};
 /// DWM composes a cloaked window without putting it on the desktop. Winit's
 /// visible flag stays clear until the frame is ready because setting it can
 /// activate the window and take keyboard input away from the current app.
+/// How long after a show is asked for its first present waits for the
+/// pictures its draws asked for. On the NucBox (Ryzen AI Max+ 395) a
+/// 3440 × 1440 PNG reads and decodes on a raster worker in 15 ms, and a
+/// freeze overlay's two 2560 × 1440 JPEG stills land 45 to 60 ms after the
+/// show begins; a capture's own PNG pixels take no decode. 100 ms covers those
+/// with room, and is about what the overlay of expo/exact#1315 took to reveal
+/// before its decodes left the presentation thread (93 ms): no reveal waits
+/// longer, and a picture still loading then lands in a later frame.
+pub(super) const REVEAL_PICTURES: std::time::Duration = std::time::Duration::from_millis(100);
+
 pub(super) struct PendingShow {
+    /// When the show was asked for: its pictures' wait counts from here.
+    pub(super) began: std::time::Instant,
     window: Rc<Window>,
     hwnd: windows_sys::Win32::Foundation::HWND,
 }
@@ -31,6 +43,7 @@ impl PendingShow {
             return None;
         };
         let pending = Self {
+            began: std::time::Instant::now(),
             window: window.clone(),
             hwnd: handle.hwnd.get() as _,
         };
