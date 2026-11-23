@@ -3,39 +3,57 @@ import { test } from 'bun:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash, generateKeyPairSync } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { resolve } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { digest, lockClosure, workspaceManifest } from './kept.mjs';
+import { depInfoOf } from './cargo-dep-info.mjs';
 import { cargoOnPath } from './cargo-check.mjs';
-import { ROOT, RustMissing, compilerFrom, fetchToolSet, fromSet, fromSets, hostTriple, publishToolSet, publishWatchedTip, readToolManifest, rustMissing } from './tools.mjs';
+import { ROOT, RustMissing, builtContract, compilerFrom, fetchToolSet, freshCompiler, fromSet, fromSets, hostTriple, keep, publishToolSet, publishWatchedTip, readToolManifest, rustMissing } from './tools.mjs';
 import { DirectoryOrigin, HttpsOrigin, blobPath } from './origin.mjs';
 import { offlineMiss } from './filesystem.mjs';
+import { EXE } from './paths.mjs';
 
 const pin = Bun.TOML.parse(readFileSync(resolve(ROOT, 'rust-toolchain.toml'), 'utf8')).toolchain.channel;
 const sha = (text) => createHash('sha256').update(text).digest('hex');
 
 /** A machine: a HOME whose cache holds the sets `sets` describes, and whether it has Rust (a `cargo` on PATH and the
  * pinned toolchain). */
-function machine(sets, { rust }) {
+function machine(sets, { rust, crates = ['contract'] }) {
   const home = mkdtempSync(resolve(tmpdir(), 'exact-tools-')), bin = resolve(home, 'bin');
+  const cache = resolve(home, '.cache/exact/tools', hostTriple());
   mkdirSync(bin);
   if (rust) {
     writeFileSync(resolve(bin, process.platform === 'win32' ? 'cargo.exe' : 'cargo'), '', { mode: 0o755 });
     mkdirSync(resolve(home, '.rustup/toolchains', `${pin}-${hostTriple()}`), { recursive: true });
   }
   sets.forEach(({ source, inputs, commit }, i) => {
-    const dir = resolve(home, '.cache/exact/tools', hostTriple(), `set${i}`);
+    const dir = resolve(cache, `set${i}`);
     mkdirSync(dir, { recursive: true });
-    writeFileSync(resolve(dir, 'contract'), '');
-    const product = { file: 'contract', crate: 'contract', inputs, closure: lockClosure(ROOT, 'contract'), workspace: sha(JSON.stringify(workspaceManifest(ROOT))) };
-    writeFileSync(resolve(dir, 'manifest.json'), JSON.stringify({ version: 1, triple: hostTriple(), commit, source, built: i, products: { contract: product } }));
+    const products = Object.fromEntries(crates.map(crate => {
+      writeFileSync(resolve(dir, crate), '', { mode: 0o755 });
+      return [crate, { file: crate, crate, inputs, closure: lockClosure(ROOT, crate), workspace: sha(JSON.stringify(workspaceManifest(ROOT))) }];
+    }));
+    writeFileSync(resolve(dir, 'manifest.json'), JSON.stringify({ version: 1, triple: hostTriple(), commit, source, built: i, products }));
   });
   const env = { HOME: home, PATH: bin, CARGO_HOME: resolve(home, '.cargo'), RUSTUP_HOME: resolve(home, '.rustup') };
-  return { env, done: () => rmSync(home, { recursive: true, force: true }) };
+  return { env, cache, bin: (name, i = 0) => resolve(cache, `set${i}`, name), done: () => rmSync(home, { recursive: true, force: true }) };
 }
 
 const ours = ['rust-toolchain.toml', 'contract/syntax/src'].map(file => [file, digest(resolve(ROOT, file))]);
+
+function debugCompiler(target, name, source = resolve(target, 'compiler source.rs'), contents = '') {
+  const debug = resolve(target, 'debug', name + EXE);
+  mkdirSync(dirname(debug), { recursive: true });
+  writeFileSync(source, '', { flag: 'a' });
+  const escape = path => path.replaceAll(' ', '\\ ');
+  writeFileSync(depInfoOf(debug), `${escape(debug)}: ${escape(source)}\n`);
+  writeFileSync(debug, contents, { mode: 0o755 });
+  const built = Date.now() / 1000 + 60;
+  utimesSync(debug, built, built);
+  return debug;
+}
 
 test('publish exposes a verified manifest and complete blobs before updating either lookup', async () => {
   const dir = mkdtempSync(resolve(tmpdir(), 'exact-tools-publish-'));
@@ -212,17 +230,171 @@ test('a set built here is taken over a fresh debug compiler, which answers once 
   const changed = [ours[0], ['contract/syntax/src', 'f'.repeat(64)]];
   for (const [inputs, taken] of [[ours, 'set'], [changed, 'debug']]) {
     const m = machine([{ source: 'built', inputs, commit: 'a'.repeat(40) }], { rust: true });
-    const debug = resolve(m.env.HOME, 'target/debug/contract'), source = resolve(m.env.HOME, 'main.rs');
-    mkdirSync(resolve(debug, '..'), { recursive: true });
-    writeFileSync(source, '');
-    writeFileSync(`${debug}.d`, `${debug}: ${source}\n`);
-    writeFileSync(debug, '');
     try {
-      const set = resolve(m.env.HOME, '.cache/exact/tools', hostTriple(), 'set0', 'contract');
-      assert.equal(compilerFrom('contract', debug, m.env)?.path, taken === 'set' ? set : debug);
+      const debug = debugCompiler(m.env.HOME, 'contract'), set = m.bin('contract');
+      assert.equal(freshCompiler(debug), true);
+      const chosen = compilerFrom('contract', debug, m.env);
+      assert.equal(chosen?.path, taken === 'set' ? set : debug);
+      assert.equal(chosen?.set?.dir ?? null, taken === 'set' ? dirname(set) : null);
     } finally { m.done(); }
   }
 }, 60000);
+
+test('a fresh debug compiler takes precedence for dev flags and over an allowed fetched set', () => {
+  const built = machine([{ source: 'built', inputs: ours }], { rust: true });
+  const fetched = machine([{ source: 'fetched', inputs: ours }], { rust: false });
+  try {
+    const debug = debugCompiler(built.env.HOME, 'contract');
+    for (const flags of [{ RUSTFLAGS: '' }, { CARGO_ENCODED_RUSTFLAGS: '-g' }, { CARGO_PROFILE_DEV_DEBUG: 'true' }]) {
+      const env = { ...built.env, ...flags };
+      assert.deepEqual(compilerFrom('contract', debug, env), { path: debug, set: null }, JSON.stringify(flags));
+      assert.equal(compilerFrom('contract', `${debug}-absent`, env)?.path, built.bin('contract'));
+    }
+    assert.deepEqual(compilerFrom('contract', debug, fetched.env), { path: debug, set: null });
+    const kept = resolve(fetched.env.HOME, 'kept-contract');
+    assert.deepEqual(compilerFrom('contract', `${debug}-absent`, fetched.env, { kept: () => kept }), { path: kept, set: null });
+    assert.equal(compilerFrom('contract', `${debug}-absent`, fetched.env)?.path, fetched.bin('contract'));
+  } finally { built.done(); fetched.done(); }
+});
+
+test.skipIf(process.platform === 'win32')('exact contract forma serve asks for the fresh compiler with unwinding', () => {
+  const m = machine([{ source: 'built', inputs: ours }], { rust: true });
+  try {
+    const debug = debugCompiler(m.env.HOME, 'contract', undefined, '#!/bin/sh\nexit 37\n');
+    writeFileSync(m.bin('contract'), '#!/bin/sh\nexit 38\n');
+    // Supply a private debug path to the selection, leaving the CLI's argument handling intact.
+    const result = spawnSync(process.execPath, ['-e', `
+      import { mock } from 'bun:test';
+      import * as tools from './scripts/tools.mjs';
+      const { compilerFrom, launch } = tools;
+      mock.module('./scripts/tools.mjs', () => ({ ...tools, contractTool({ env, preferDebug }) {
+        const chosen = compilerFrom('contract', ${JSON.stringify(debug)}, env, { preferDebug });
+        return launch(chosen.path, [], undefined, env);
+      } }));
+      const { contract } = await import('./scripts/exact.mjs');
+      console.log(JSON.stringify([await contract(['forma', 'serve', '--stdio']), await contract(['forma', 'check'])]));
+    `], { cwd: ROOT, env: m.env, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), [37, 38]);
+  } finally { m.done(); }
+});
+
+test('a set match is rehashed before it can displace a fresh debug compiler', () => {
+  mkdirSync(resolve(ROOT, 'target'), { recursive: true });
+  const dir = mkdtempSync(resolve(ROOT, 'target', 'exact-input-'));
+  const input = resolve(dir, 'source.rs'), file = `target/${basename(dir)}/source.rs`;
+  writeFileSync(input, 'old');
+  utimesSync(input, 1700000000, 1700000000);
+  const m = machine([{ source: 'built', inputs: [[file, digest(input)]] }], { rust: true });
+  try {
+    const debug = debugCompiler(m.env.HOME, 'contract', input), before = statSync(input);
+    assert.equal(fromSet('contract', 'built', m.env)?.path, m.bin('contract'));
+    writeFileSync(input, 'new');
+    utimesSync(input, before.atime, before.mtime);
+    assert.equal(statSync(input).mtimeMs, before.mtimeMs);
+    assert.equal(statSync(input).size, before.size);
+    assert.equal(compilerFrom('contract', `${debug}-absent`, m.env)?.path, m.bin('contract'));
+    assert.deepEqual(compilerFrom('contract', debug, m.env), { path: debug, set: null });
+  } finally { m.done(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('webCompiler and compilerSet select the same compiler', () => {
+  const m = machine([{ source: 'built', inputs: ours }], { rust: true, crates: ['exact-web-js'] });
+  const target = resolve(m.env.HOME, 'target');
+  try {
+    const debug = debugCompiler(target, 'exact-web-js'), built = m.bin('exact-web-js');
+    const selected = (env = {}) => {
+      const result = spawnSync(process.execPath, ['-e', `
+        import { compilerSet, webCompiler } from './host/web-js/module.mjs';
+        console.log(JSON.stringify([webCompiler().cmd, compilerSet()?.dir ?? null]));
+      `], { cwd: ROOT, env: { ...m.env, CARGO_TARGET_DIR: target, ...env }, encoding: 'utf8' });
+      assert.equal(result.status, 0, result.stderr);
+      return JSON.parse(result.stdout);
+    };
+    assert.deepEqual(selected(), [built, dirname(built)]);
+    assert.deepEqual(selected({ CARGO_PROFILE_DEV_OPT_LEVEL: '1' }), [debug, null]);
+    if (process.platform !== 'win32') {
+      chmodSync(built, 0o644);
+      assert.deepEqual(selected(), [debug, null]);
+    }
+  } finally { m.done(); }
+});
+
+test.skipIf(process.platform === 'win32')('builtContract passes over a set with a non-executable compiler', () => {
+  const m = machine([{ source: 'built', inputs: ours }, { source: 'built', inputs: ours }], { rust: true });
+  try {
+    const newest = m.bin('contract', 1);
+    assert.equal(builtContract(m.env)?.cmd, newest);
+    chmodSync(newest, 0o644);
+    assert.equal(builtContract(m.env)?.cmd, m.bin('contract'));
+  } finally { m.done(); }
+});
+
+test('keep refuses a product when a build input changes across clean revisions', async () => {
+  const m = machine([], { rust: false });
+  const root = resolve(m.env.HOME, 'checkout'), file = 'sources/input.rs', product = 'motion.wasm';
+  mkdirSync(resolve(root, 'sources'), { recursive: true });
+  const git = (...args) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  const commit = message => {
+    git('add', '--all');
+    git('-c', 'user.name=Exact', '-c', 'user.email=exact@example.invalid', '-c', 'commit.gpgSign=false', 'commit', '-qm', message);
+    return git('rev-parse', 'HEAD');
+  };
+  const artifact = resolve(m.env.HOME, product);
+  try {
+    git('init', '-q');
+    writeFileSync(resolve(root, 'Cargo.toml'), '[workspace]\n');
+    writeFileSync(resolve(root, 'Cargo.lock'), '[[package]]\nname = "contract"\nversion = "0.1.0"\n');
+    writeFileSync(resolve(root, file), 'first');
+    const first = commit('first');
+    writeFileSync(resolve(root, file), 'other');
+    const second = commit('second');
+    git('checkout', '-q', '--detach', first);
+    const run = advance => keep(hostTriple(), { root, env: m.env, build() {
+      writeFileSync(artifact, readFileSync(resolve(root, file)));
+      if (advance) git('checkout', '-q', '--detach', second);
+      return { products: { [product]: { file: product, crate: 'contract', inputs: ['sources'] } },
+        files: new Map([[product, artifact]]), metadata: { inputs: [] } };
+    } });
+    const prior = await run(false);
+    assert.equal(readFileSync(resolve(prior.dir, product), 'utf8'), 'first');
+    await assert.rejects(run(true), /sources changed while building the tool set\. No set was kept\./);
+    assert.equal(git('status', '--porcelain'), '');
+    assert.deepEqual(readdirSync(m.cache), [basename(prior.dir)]);
+  } finally { m.done(); }
+});
+
+test.skipIf(process.platform === 'win32')('the gallery takes both compilers from the set when the fast copy is missing', async () => {
+  const { galleryLoop } = await import('../host/web-js/dev-gallery.mjs');
+  const m = machine([{ source: 'built', inputs: ours }], { rust: true, crates: ['contract', 'exact-web-js'] });
+  const root = m.env.HOME, target = resolve(root, 'target'), app = resolve(root, 'app');
+  const build = resolve(root, 'host/web-js/build.mjs');
+  const generator = text => `#!/bin/sh\n/bin/mkdir -p "$4"\nprintf '%s' '${text}' > "$4/app.contract"\nprintf '{}' > "$4/app.json"\n`;
+  const { promise, resolve: reported } = Promise.withResolvers();
+  let loop;
+  try {
+    mkdirSync(dirname(build), { recursive: true });
+    mkdirSync(app);
+    debugCompiler(target, 'contract', undefined, generator('debug'));
+    writeFileSync(m.bin('contract'), generator('set'));
+    const debug = debugCompiler(target, 'exact-web-js');
+    writeFileSync(build, `
+      import { readFileSync } from 'node:fs';
+      import { webCompiler } from ${JSON.stringify(pathToFileURL(resolve(ROOT, 'host/web-js/module.mjs')).href)};
+      console.log(JSON.stringify([readFileSync(process.argv[2] + '/app.contract', 'utf8'), process.env.EXACT_WEB_COMPILER ?? null, webCompiler().cmd]));
+      process.exitCode = 1;
+    `);
+    loop = galleryLoop({ root, app: { dir: app, id: 'selection' }, appDist: resolve(root, 'dist'), client: () => '', log: () => {},
+      env: { ...m.env, CARGO_TARGET_DIR: target, EXACT_WEB_COMPILER: debug } });
+    await loop.handle({ on() {} }, { on() {}, writeHead() {}, write(text) {
+      if (text.startsWith('data: ')) {
+        const { error } = JSON.parse(text.slice(6));
+        if (error) reported(error);
+      }
+    } }, new URL('http://example.test/__dev/gallery/stream'));
+    assert.deepEqual(JSON.parse(await promise), ['set', null, m.bin('exact-web-js')]);
+  } finally { await loop?.stop(); m.done(); }
+});
 
 test('when a cached compiler disappears, the next matching set supplies it', () => {
   const m = machine(['a', 'b'].map(c => ({ source: 'built', inputs: ours, commit: c.repeat(40) })), { rust: false });
@@ -243,7 +415,7 @@ test('web setup accepts a complete matching tool set for a Contract app and keep
     const dir = resolve(m.env.HOME, '.cache/exact/tools', hostTriple(), 'set0'), receipt = resolve(dir, 'manifest.json');
     const manifest = JSON.parse(readFileSync(receipt, 'utf8'));
     for (const file of ['exact-web-js', 'exact-filesystem', 'markdown.wasm', 'motion.wasm', 'markup-editor.wasm', 'textflow.wasm']) {
-      writeFileSync(resolve(dir, file), '');
+      writeFileSync(resolve(dir, file), '', { mode: 0o755 });
       manifest.products[file] = { ...manifest.products.contract, file };
     }
     manifest.metadata = { record: { packages: [], resolve: { nodes: [] } }, inputs: ours };

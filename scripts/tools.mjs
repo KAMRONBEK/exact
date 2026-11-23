@@ -19,7 +19,7 @@
 import { spawnSync } from 'node:child_process';
 import { createHash, createPrivateKey, createPublicKey, sign, verify } from 'node:crypto';
 import { parseArgs } from 'node:util';
-import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { accessSync, chmodSync, constants, copyFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -27,7 +27,7 @@ import { compilerPaths, cargoInputPaths, crateDir, depInfoOf, freshCompiler } fr
 export { freshCompiler } from './cargo-dep-info.mjs';
 import { cargoEnvironment, cargoOnPath } from './cargo-check.mjs';
 import { builtFilesystemHelper, filesystemLock, offlineMiss } from './filesystem.mjs';
-import { digest, lockClosure, seen, workspaceManifest } from './kept.mjs';
+import { digest, lockClosure, seen, snapshotDigests, workspaceManifest } from './kept.mjs';
 import { EXE, within } from './paths.mjs';
 import { canonicalBytes } from './deploy-signing.mjs';
 
@@ -90,29 +90,33 @@ function differs(product, root = ROOT) {
 const glance = (entry, product) => sha(JSON.stringify([entry, product.inputs.map(([file]) => seen(resolve(ROOT, file))), seen(resolve(ROOT, 'Cargo.lock')), seen(resolve(ROOT, 'Cargo.toml'))]));
 const stampOf = (name) => resolve(ROOT, 'target/tools', `${name}.json`);
 
-function productFile(set, product) {
-  const path = resolve(set.dir, product.file);
-  return statSync(path, { throwIfNoEntry: false })?.isFile() ? path : null;
+function productFile(set, name, product) {
+  try {
+    const path = resolve(set.dir, product.file);
+    if (!statSync(path).isFile()) return null;
+    if (process.platform !== 'win32' && EXECUTABLES.includes(name)) accessSync(path, constants.X_OK);
+    return path;
+  } catch { return null; }
 }
 
 /**
  * Product `name` from the newest set in this machine's cache that `source` made (`built` here by `keep`, or
  * `fetched`) and whose inputs are this checkout's bytes: `{ path, set, product }`, or null.
  */
-export function fromSet(name, source, env = process.env) {
-  try {
+export function fromSet(name, source, env = process.env, { verifyInputs = false } = {}) {
+  if (!verifyInputs) try {
     const last = JSON.parse(readFileSync(stampOf(name), 'utf8'));
     const set = { dir: last.entry, manifest: JSON.parse(readFileSync(resolve(last.entry, 'manifest.json'), 'utf8')) };
     const product = set.manifest.products[name];
     if (within(cacheDir(env), set.dir) && set.manifest.source === source && glance(last.entry, product) === last.glance) {
-      const path = productFile(set, product);
+      const path = productFile(set, name, product);
       if (path) return { path, set, product };
     }
   } catch {}
   for (const set of sets(env)) {
     const product = set.manifest.products?.[name];
     if (set.manifest.source !== source || !product) continue;
-    const path = productFile(set, product);
+    const path = productFile(set, name, product);
     if (!path || differs(product)) continue;
     try {
       mkdirSync(dirname(stampOf(name)), { recursive: true });
@@ -150,8 +154,7 @@ export function fetchedTool(name, env = process.env, download = true) {
   return null;
 }
 
-/** The set D5's order takes product `name` from: one built here, else (where this checkout's fresh build or a kept
- * product does not answer first) a fetched one where that is allowed. */
+/** Product `name` from a set built here, then from a fetched set where one may run (LLP 1174 D5). */
 export const fromSets = (name, env = process.env, download = true) => fromSet(name, 'built', env) ?? fetchedTool(name, env, download);
 
 /** Thrown where product `name` would need Cargo and Rust is missing: says why no set matched, the newest set's commit
@@ -164,7 +167,7 @@ export class RustMissing extends Error {
     if (reason) why = reason;
     else if (newest) {
       const product = newest.manifest.products[name], built = short(newest.manifest.commit);
-      const path = productFile(newest, product), at = path && differs(product);
+      const path = productFile(newest, name, product), at = path && differs(product);
       if (!path) why = `the tool set built at ${built} is missing ${product.file}`;
       else why = at ? `${at} differs from the newest tool set's, built at ${built}` : `the tool set built at ${built} that matches was fetched, and EXACT_TOOLS_ORIGIN=none runs none`;
       // Its commit to check out, when that moves nothing of the author's and is not where the checkout is.
@@ -185,17 +188,23 @@ export class RustMissing extends Error {
   }
 }
 
-/** Compiler `name` already built, as `{ path, set }` (`set` null for `debug`): a set built on this machine, else this
- * checkout's fresh `debug` build, else a fetched set where one may run. A built set is optimized (`keep` builds
- * host-dev), about ten times faster than debug with the same output, and matches only while its inputs are these
- * bytes, so an edited compiler still falls through to its debug build. */
-export const compilerFrom = (name, debug, env = process.env) =>
-  fromSet(name, 'built', env) ?? (freshCompiler(debug) ? { path: debug, set: null } : fetchedTool(name, env));
+/** The compiler and its set, if any (LLP 1174 D5). A set built here takes precedence over a fresh debug build when
+ * its inputs match by content. Callers that need unwinding or supply dev build flags take a fresh debug build first.
+ * A kept product comes next where the caller has one, then a fetched set where one may run. */
+export function compilerFrom(name, debug, env = process.env, { preferDebug = false, kept } = {}) {
+  const local = freshCompiler(debug) ? { path: debug, set: null } : null;
+  if (local && (preferDebug || env.RUSTFLAGS !== undefined || env.CARGO_ENCODED_RUSTFLAGS !== undefined ||
+    Object.keys(env).some(key => key.startsWith('CARGO_PROFILE_DEV_') && env[key] !== undefined))) return local;
+  const built = fromSet(name, 'built', env, { verifyInputs: !!local });
+  if (built || local) return built ?? local;
+  const path = kept?.();
+  return path ? { path, set: null } : fetchedTool(name, env);
+}
 
 const CONTRACT = resolve(ROOT, 'target/debug', `contract${EXE}`);
 /** The Contract compiler built already, to `launch`, from where `compilerFrom` takes it. */
-export function builtContract(env = process.env) {
-  const path = compilerFrom('contract', CONTRACT, env)?.path;
+export function builtContract(env = process.env, { preferDebug = false } = {}) {
+  const path = compilerFrom('contract', CONTRACT, env, { preferDebug })?.path;
   return path ? launch(path, [], undefined, env) : null;
 }
 
@@ -210,8 +219,8 @@ export function compilerCargo(verb, env = process.env) {
 
 /** Select a fresh Contract compiler, building with the pinned Cargo when needed (D5).
  * A Rust-less machine receives the diagnostic in the form requested by the caller. */
-export function contractTool({ env = process.env, json = false, file = '' } = {}) {
-  const built = builtContract(env);
+export function contractTool({ env = process.env, json = false, file = '', preferDebug = false } = {}) {
+  const built = builtContract(env, { preferDebug });
   if (built) return built;
   if (rustMissing(env)) { new RustMissing('contract', env).say(json, file); return null; }
   if (!existsSync(CONTRACT)) console.error('exact contract: building the Contract compiler once (about a minute on a cold checkout; `exact new` starts it in the background)…');
@@ -301,13 +310,12 @@ const buildsToolSet = triple => triple === hostTriple() || (hostTriple() === 'aa
 
 /** Build all seven products for one machine. The Mac producer also builds the Linux
  * executables with Zig. The four wasm modules are identical for both machines. */
-async function keep(triple = hostTriple()) {
+async function buildProducts(triple) {
   if (rustMissing()) throw new Error(`tools keep builds the set, with Rust: install it with rustup (https://rustup.rs) and the pinned toolchain ${pin()}`);
   const host = /^host: (.+)$/m.exec(spawnSync('rustc', ['-vV'], { cwd: ROOT, encoding: 'utf8' }).stdout ?? '')?.[1];
   if (host !== hostTriple()) throw new Error(`rustc builds for ${host}, and this machine's tool sets are ${hostTriple()}'s`);
   const cross = triple !== host;
   if (!buildsToolSet(triple)) throw new Error(`cannot build a ${triple} tool set on ${host}`);
-  const commit = spawnSync('git', ['-C', ROOT, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim();
   const target = process.env.CARGO_TARGET_DIR ? resolve(process.env.CARGO_TARGET_DIR) : resolve(ROOT, 'target');
   const env = cargoEnvironment();
   delete env.RUSTUP_TOOLCHAIN;
@@ -355,19 +363,33 @@ async function keep(triple = hostTriple()) {
     products[leaf.name] = { file: leaf.name, crate: leaf.crate, profile: leaf.profile, toolchain: leaf.toolchain, flags: leaf.flags, wasmOpt: leaf.wasmOpt,
       inputs: inputsOf({ depInfo: leaf.depInfo, buildDirs: leaf.buildDirs, skip: [target], recipe: ['host/web-js/module.mjs', 'scripts/cargo-check.mjs', '.cargo/config.toml'] }) };
   }
-  // Only committed sources: a set serves every checkout with these bytes, so it is never an edit in progress.
-  const all = [...new Set(Object.values(products).flatMap(product => product.inputs))];
-  const dirty = spawnSync('git', ['-C', ROOT, 'status', '--porcelain', '--', ...all], { encoding: 'utf8' }).stdout.trim();
-  if (dirty) throw new Error(`tools keep keeps committed sources only, and these inputs are not:\n${dirty}`);
+  return { products, files, metadata: recordMetadata() };
+}
+
+export async function keep(triple = hostTriple(), { root = ROOT, env = process.env, build = buildProducts } = {}) {
+  const commit = gitAt(root, 'rev-parse', 'HEAD');
+  // Cargo names the inputs after it builds. Snapshot tracked files first so a checkout that moves during the build
+  // cannot give its new input hashes to an older compiler (LLP 1174 D5).
+  const before = snapshotDigests(root, gitAt(root, 'ls-files', '--cached', '-z').split('\0').filter(Boolean));
+  const { products, files, metadata } = await build(triple);
+  const workspace = sha(JSON.stringify(workspaceManifest(root)));
   for (const product of Object.values(products)) {
-    product.inputs = product.inputs.map(file => [file, digest(resolve(ROOT, file))]);
-    product.closure = lockClosure(ROOT, product.crate);
-    product.workspace = sha(JSON.stringify(workspaceManifest(ROOT)));
+    product.closure = lockClosure(root, product.crate);
+    product.workspace = workspace;
     product.target = triple;
   }
-  const manifest = { version: 1, triple, commit, source: 'built', built: Date.now(), products, metadata: recordMetadata() };
+  const inputs = [...new Set(['Cargo.toml', 'Cargo.lock', ...Object.values(products).flatMap(product => product.inputs),
+    ...metadata.inputs.map(([file]) => file)])];
+  const after = new Map(inputs.map(file => [file, digest(resolve(root, file))]));
+  const changed = inputs.find(file => after.get(file) !== before(file));
+  if (changed) throw new Error(`${changed} changed while building the tool set. No set was kept.`);
+  // A set serves every checkout with these bytes, so its inputs must be committed.
+  const dirty = gitAt(root, 'status', '--porcelain', '--', ...inputs);
+  if (dirty) throw new Error(`tools keep keeps committed sources only, and these inputs are not:\n${dirty}`);
+  for (const product of Object.values(products)) product.inputs = product.inputs.map(file => [file, after.get(file)]);
+  const manifest = { version: 1, triple, commit, source: 'built', built: Date.now(), products, metadata };
   const id = sha(JSON.stringify(Object.entries(products).map(([name, product]) => [name, product.inputs, product.closure, product.workspace]))).slice(0, 24);
-  const dir = cacheDir(process.env, triple), entry = resolve(dir, id), making = `${entry}.${process.pid}`;
+  const dir = cacheDir(env, triple), entry = resolve(dir, id), making = `${entry}.${process.pid}`;
   rmSync(making, { recursive: true, force: true });
   mkdirSync(making, { recursive: true });
   for (const [name, file] of files) {
@@ -386,7 +408,7 @@ async function keep(triple = hostTriple()) {
   rmSync(entry, { recursive: true, force: true });
   renameSync(making, entry);
   // The newest four sets of this triple: a set is about 100 MB.
-  for (const { dir: old } of sets(process.env, triple).slice(4)) rmSync(old, { recursive: true, force: true });
+  for (const { dir: old } of sets(env, triple).slice(4)) rmSync(old, { recursive: true, force: true });
   console.log(`tools: kept the set for ${short(commit)} in ${entry.replace(homedir(), '~')}`);
   for (const [name, product] of Object.entries(products)) console.log(`  ${name}: ${(product.size / 1e6).toFixed(1)} MB, ${product.inputs.length} inputs`);
   return { dir: entry, manifest };
@@ -630,7 +652,7 @@ async function recordCommit(origin, stream, base, commit, id, newer) {
 function gitAt(tree, ...args) {
   const r = spawnSync('git', ['-C', tree, ...args], { encoding: 'utf8', maxBuffer: 32 << 20 });
   if (r.status !== 0) throw new Error(`git ${args[0]}: ${r.error?.message ?? r.stderr.trim()}`);
-  return r.stdout.trim();
+  return args.includes('-z') ? r.stdout : r.stdout.trim();
 }
 
 function cleanRevision(tree) {

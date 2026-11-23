@@ -24,7 +24,7 @@ import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import nodePath, { basename, dirname, relative, resolve } from 'node:path';
+import nodePath, { basename, dirname, posix, relative, resolve, sep } from 'node:path';
 import { within } from './paths.mjs';
 
 /** Entries kept per group, and groups kept: at 5 MB an entry, under 1 GB. */
@@ -42,8 +42,29 @@ function under(path, name = '') {
   if (!stat.isDirectory()) return [[name, stat, path]];
   return readdirSync(path).sort().flatMap(child => under(resolve(path, child), `${name}/${child}`) ?? []);
 }
+const digestEntries = entries => sha(entries.map(([name, hash]) => `${name}\0${hash}`).join('\n'));
 /** A file's or a directory's bytes, a directory's as the names and bytes of every file under it; null when absent. */
-export const digest = (path) => { const all = under(path); return all && sha(all.map(([name, , file]) => `${name}\0${sha(readFileSync(file))}`).join('\n')); };
+export const digest = (path) => { const all = under(path); return all && digestEntries(all.map(([name, , file]) => [name, sha(readFileSync(file))])); };
+
+/** Capture tracked files and their directories before Cargo identifies which paths a product reads. */
+export function snapshotDigests(root, tracked) {
+  const included = new Set(tracked), hashes = new Map();
+  for (const file of tracked) {
+    for (let dir = posix.dirname(file); !included.has(dir); dir = posix.dirname(dir)) included.add(dir);
+  }
+  function capture(name) {
+    const path = resolve(root, name), stat = statSync(path, { throwIfNoEntry: false });
+    if (!stat) return [];
+    const entries = stat.isDirectory() ? readdirSync(path).sort().flatMap(child => {
+      const below = posix.join(name, child);
+      return included.has(below) ? capture(below).map(([file, hash]) => [`/${child}${file}`, hash]) : [];
+    }) : [['', sha(readFileSync(path))]];
+    hashes.set(name, digestEntries(entries));
+    return entries;
+  }
+  capture('.');
+  return file => hashes.get(file.replaceAll(sep, '/')) ?? null;
+}
 /** What a glance sees of a file or directory: each file's name, modification time and size. */
 export const seen = (path) => under(path)?.map(([name, s]) => `${name}:${s.mtimeMs}:${s.size}`).join('\n') ?? null;
 
