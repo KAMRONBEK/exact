@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { builtSettings, sourceInputChanges } from '../../js/bake/src/__exact_env.mjs';
 import { changedContractReads, contractReadReceipt } from '../../scripts/web-build.mjs';
 import { within } from '../../scripts/paths.mjs';
-import { compilerFrom, toolEnv } from '../../scripts/tools.mjs';
+import { compilerFrom, freshCompiler, toolEnv } from '../../scripts/tools.mjs';
 import { watchDirectoryInputs } from '../web/dev-watch.mjs';
 import { buildFileCards, buildTreeFileAsync as buildTreeFile, copyStaticTreeIfPresent, replaceBuild, sendStaticBody, webContentType } from '../web/serve.mjs';
 import { EXE, frameFixturePath, frameURL } from './module.mjs';
@@ -130,13 +130,13 @@ function previewLoop({ app, root, appDist, base, label, cache, frame, inputs, on
       if (mine !== run) return;
       // The JS target's build, rendering no pages, into its own stage: nothing of the app's build is shared.
       rmSync(stage, { recursive: true, force: true });
-      const started = Date.now(), webCompiler = compiler();
+      const started = Date.now(), webCompiler = env.EXACT_WEB_COMPILER ?? compiler();
       const entry = frame ? [app.dir, '--frame', frame, '--serve-frame'] : [live];
       const buildEnv = { ...env };
       if (webCompiler) buildEnv.EXACT_WEB_COMPILER = webCompiler;
-      else {
-        delete buildEnv.EXACT_WEB_COMPILER;
-        if (!frame) buildEnv.CARGO_TARGET_DIR = resolve(cache, 'cargo');
+      if (!frame && !(webCompiler && freshCompiler(webCompiler)) &&
+        !compilerFrom('exact-web-js', resolve(target, `debug/exact-web-js${EXE}`), env)) {
+        buildEnv.CARGO_TARGET_DIR = resolve(cache, 'cargo');
       }
       const out = await step(process.execPath, [resolve(root, 'host/web-js/build.mjs'), ...entry, '--out', stage, '--render', 'none', '--dev'], { env: buildEnv });
       if (mine !== run) return;

@@ -3,7 +3,7 @@ import { test } from 'bun:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash, generateKeyPairSync } from 'node:crypto';
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -28,14 +28,14 @@ function machine(sets, { rust, crates = ['contract'] }) {
     writeFileSync(resolve(bin, process.platform === 'win32' ? 'cargo.exe' : 'cargo'), '', { mode: 0o755 });
     mkdirSync(resolve(home, '.rustup/toolchains', `${pin}-${hostTriple()}`), { recursive: true });
   }
-  sets.forEach(({ source, inputs, commit }, i) => {
+  sets.forEach(({ source, inputs, commit, verifiedBuild = source === 'built' }, i) => {
     const dir = resolve(cache, `set${i}`);
     mkdirSync(dir, { recursive: true });
     const products = Object.fromEntries(crates.map(crate => {
       writeFileSync(resolve(dir, crate), '', { mode: 0o755 });
       return [crate, { file: crate, crate, inputs, closure: lockClosure(ROOT, crate), workspace: sha(JSON.stringify(workspaceManifest(ROOT))) }];
     }));
-    writeFileSync(resolve(dir, 'manifest.json'), JSON.stringify({ version: 1, triple: hostTriple(), commit, source, built: i, products }));
+    writeFileSync(resolve(dir, 'manifest.json'), JSON.stringify({ version: 1, triple: hostTriple(), commit, source, ...(verifiedBuild ? { verifiedBuild } : {}), built: i, products }));
   });
   const env = { HOME: home, PATH: bin, CARGO_HOME: resolve(home, '.cargo'), RUSTUP_HOME: resolve(home, '.rustup') };
   return { env, cache, bin: (name, i = 0) => resolve(cache, `set${i}`, name), done: () => rmSync(home, { recursive: true, force: true }) };
@@ -257,22 +257,24 @@ test('a fresh debug compiler takes precedence for dev flags and over an allowed 
   } finally { built.done(); fetched.done(); }
 });
 
+test('a set kept without build verification answers only in the absence of fresh debug', () => {
+  const m = machine([{ source: 'built', inputs: ours, verifiedBuild: false }], { rust: true });
+  try {
+    const debug = debugCompiler(m.env.HOME, 'contract');
+    assert.equal(compilerFrom('contract', `${debug}-absent`, m.env)?.path, m.bin('contract'));
+    assert.equal(compilerFrom('contract', debug, m.env)?.path, debug);
+  } finally { m.done(); }
+});
+
 test.skipIf(process.platform === 'win32')('exact contract forma serve asks for the fresh compiler with unwinding', () => {
   const m = machine([{ source: 'built', inputs: ours }], { rust: true });
   try {
     const debug = debugCompiler(m.env.HOME, 'contract', undefined, '#!/bin/sh\nexit 37\n');
     writeFileSync(m.bin('contract'), '#!/bin/sh\nexit 38\n');
-    // Supply a private debug path to the selection, leaving the CLI's argument handling intact.
     const result = spawnSync(process.execPath, ['-e', `
-      import { mock } from 'bun:test';
-      import * as tools from './scripts/tools.mjs';
-      const { compilerFrom, launch } = tools;
-      mock.module('./scripts/tools.mjs', () => ({ ...tools, contractTool({ env, preferDebug }) {
-        const chosen = compilerFrom('contract', ${JSON.stringify(debug)}, env, { preferDebug });
-        return launch(chosen.path, [], undefined, env);
-      } }));
-      const { contract } = await import('./scripts/exact.mjs');
-      console.log(JSON.stringify([await contract(['forma', 'serve', '--stdio']), await contract(['forma', 'check'])]));
+      import { contract } from './scripts/exact.mjs';
+      const debug = ${JSON.stringify(debug)};
+      console.log(JSON.stringify([await contract(['forma', 'serve', '--stdio'], process.env, { debug }), await contract(['forma', 'check'], process.env, { debug })]));
     `], { cwd: ROOT, env: m.env, encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
     assert.deepEqual(JSON.parse(result.stdout), [37, 38]);
@@ -330,9 +332,9 @@ test.skipIf(process.platform === 'win32')('builtContract passes over a set with 
   } finally { m.done(); }
 });
 
-test('keep refuses a product when a build input changes across clean revisions', async () => {
+test('keep verifies an executable across clean revisions and includes ignored children of watched directories', async () => {
   const m = machine([], { rust: false });
-  const root = resolve(m.env.HOME, 'checkout'), file = 'sources/input.rs', product = 'motion.wasm';
+  const root = resolve(m.env.HOME, 'checkout'), file = 'sources/input.rs', product = 'contract';
   mkdirSync(resolve(root, 'sources'), { recursive: true });
   const git = (...args) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   const commit = message => {
@@ -345,55 +347,76 @@ test('keep refuses a product when a build input changes across clean revisions',
     git('init', '-q');
     writeFileSync(resolve(root, 'Cargo.toml'), '[workspace]\n');
     writeFileSync(resolve(root, 'Cargo.lock'), '[[package]]\nname = "contract"\nversion = "0.1.0"\n');
+    writeFileSync(resolve(root, '.gitignore'), '.DS_Store\n');
     writeFileSync(resolve(root, file), 'first');
     const first = commit('first');
     writeFileSync(resolve(root, file), 'other');
     const second = commit('second');
     git('checkout', '-q', '--detach', first);
     const run = advance => keep(hostTriple(), { root, env: m.env, build() {
-      writeFileSync(artifact, readFileSync(resolve(root, file)));
+      copyFileSync(process.platform === 'win32' ? process.execPath : '/usr/bin/true', artifact);
       if (advance) git('checkout', '-q', '--detach', second);
       return { products: { [product]: { file: product, crate: 'contract', inputs: ['sources'] } },
         files: new Map([[product, artifact]]), metadata: { inputs: [] } };
     } });
     const prior = await run(false);
-    assert.equal(readFileSync(resolve(prior.dir, product), 'utf8'), 'first');
+    assert.equal(prior.manifest.verifiedBuild, true);
+    assert.equal(JSON.parse(readFileSync(resolve(prior.dir, 'manifest.json'), 'utf8')).verifiedBuild, true);
+    assert.equal(spawnSync(resolve(prior.dir, product), process.platform === 'win32' ? ['--version'] : []).status, 0);
+    writeFileSync(resolve(root, 'sources/.DS_Store'), 'ignored');
+    const withIgnored = await run(false);
+    assert.deepEqual(withIgnored.manifest.products[product].inputs, [['sources', digest(resolve(root, 'sources'))]]);
     await assert.rejects(run(true), /sources changed while building the tool set\. No set was kept\./);
     assert.equal(git('status', '--porcelain'), '');
-    assert.deepEqual(readdirSync(m.cache), [basename(prior.dir)]);
+    assert.deepEqual(readdirSync(m.cache).sort(), [basename(prior.dir), basename(withIgnored.dir)].sort());
   } finally { m.done(); }
 });
 
-test.skipIf(process.platform === 'win32')('the gallery takes both compilers from the set when the fast copy is missing', async () => {
+test.skipIf(process.platform === 'win32')('the gallery selects compilers against the checkout target before falling back to Cargo', async () => {
   const { galleryLoop } = await import('../host/web-js/dev-gallery.mjs');
   const m = machine([{ source: 'built', inputs: ours }], { rust: true, crates: ['contract', 'exact-web-js'] });
   const root = m.env.HOME, target = resolve(root, 'target'), app = resolve(root, 'app');
   const build = resolve(root, 'host/web-js/build.mjs');
   const generator = text => `#!/bin/sh\n/bin/mkdir -p "$4"\nprintf '%s' '${text}' > "$4/app.contract"\nprintf '{}' > "$4/app.json"\n`;
-  const { promise, resolve: reported } = Promise.withResolvers();
-  let loop;
   try {
     mkdirSync(dirname(build), { recursive: true });
     mkdirSync(app);
     debugCompiler(target, 'contract', undefined, generator('debug'));
     writeFileSync(m.bin('contract'), generator('set'));
     const debug = debugCompiler(target, 'exact-web-js');
+    const override = debugCompiler(resolve(root, 'override'), 'exact-web-js');
     writeFileSync(build, `
       import { readFileSync } from 'node:fs';
       import { webCompiler } from ${JSON.stringify(pathToFileURL(resolve(ROOT, 'host/web-js/module.mjs')).href)};
-      console.log(JSON.stringify([readFileSync(process.argv[2] + '/app.contract', 'utf8'), process.env.EXACT_WEB_COMPILER ?? null, webCompiler().cmd]));
+      console.log(JSON.stringify([readFileSync(process.argv[2] + '/app.contract', 'utf8'), process.env.EXACT_WEB_COMPILER ?? null, webCompiler().cmd, process.env.CARGO_TARGET_DIR]));
       process.exitCode = 1;
     `);
-    loop = galleryLoop({ root, app: { dir: app, id: 'selection' }, appDist: resolve(root, 'dist'), client: () => '', log: () => {},
-      env: { ...m.env, CARGO_TARGET_DIR: target, EXACT_WEB_COMPILER: debug } });
-    await loop.handle({ on() {} }, { on() {}, writeHead() {}, write(text) {
-      if (text.startsWith('data: ')) {
-        const { error } = JSON.parse(text.slice(6));
-        if (error) reported(error);
-      }
-    } }, new URL('http://example.test/__dev/gallery/stream'));
-    assert.deepEqual(JSON.parse(await promise), ['set', null, m.bin('exact-web-js')]);
-  } finally { await loop?.stop(); m.done(); }
+    const preview = async (env = {}, compiler) => {
+      const { promise, resolve: reported } = Promise.withResolvers();
+      const loop = galleryLoop({ root, app: { dir: app, id: 'selection' }, appDist: resolve(root, 'dist'), client: () => '', log: () => {},
+        compiler, env: { ...m.env, EXACT_TOOLS_ORIGIN: 'none', CARGO_TARGET_DIR: target, ...env } });
+      try {
+        await loop.handle({ on() {} }, { on() {}, writeHead() {}, write(text) {
+          if (text.startsWith('data: ')) {
+            const { error } = JSON.parse(text.slice(6));
+            if (error) reported(error);
+          }
+        } }, new URL('http://example.test/__dev/gallery/stream'));
+        return { result: JSON.parse(await promise), cargoTarget: resolve(loop.cache, 'cargo') };
+      } finally { await loop.stop(); }
+    };
+    assert.deepEqual((await preview({ EXACT_WEB_COMPILER: override }, () => debug)).result, ['set', override, override, target]);
+    assert.deepEqual((await preview()).result, ['set', null, m.bin('exact-web-js'), target]);
+    assert.deepEqual((await preview({ RUSTFLAGS: '-g' })).result, ['debug', null, debug, target]);
+    const receipt = resolve(dirname(m.bin('exact-web-js')), 'manifest.json');
+    const manifest = JSON.parse(readFileSync(receipt, 'utf8'));
+    manifest.products['exact-web-js'].inputs = [['rust-toolchain.toml', 'different']];
+    writeFileSync(receipt, JSON.stringify(manifest));
+    assert.deepEqual((await preview()).result, ['set', null, debug, target]);
+    rmSync(depInfoOf(debug));
+    const { result, cargoTarget } = await preview();
+    assert.deepEqual(result, ['set', null, 'cargo', cargoTarget]);
+  } finally { m.done(); }
 });
 
 test('when a cached compiler disappears, the next matching set supplies it', () => {

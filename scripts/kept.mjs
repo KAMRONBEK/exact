@@ -46,7 +46,7 @@ const digestEntries = entries => sha(entries.map(([name, hash]) => `${name}\0${h
 /** A file's or a directory's bytes, a directory's as the names and bytes of every file under it; null when absent. */
 export const digest = (path) => { const all = under(path); return all && digestEntries(all.map(([name, , file]) => [name, sha(readFileSync(file))])); };
 
-/** Capture tracked files and their directories before Cargo identifies which paths a product reads. */
+/** Capture tracked paths before Cargo names its inputs. A watched directory includes every file under it. */
 export function snapshotDigests(root, tracked) {
   const included = new Set(tracked), hashes = new Map();
   for (const file of tracked) {
@@ -55,14 +55,12 @@ export function snapshotDigests(root, tracked) {
   function capture(name) {
     const path = resolve(root, name), stat = statSync(path, { throwIfNoEntry: false });
     if (!stat) return [];
-    const entries = stat.isDirectory() ? readdirSync(path).sort().flatMap(child => {
-      const below = posix.join(name, child);
-      return included.has(below) ? capture(below).map(([file, hash]) => [`/${child}${file}`, hash]) : [];
-    }) : [['', sha(readFileSync(path))]];
-    hashes.set(name, digestEntries(entries));
+    const entries = stat.isDirectory() ? readdirSync(path).sort().flatMap(child =>
+      capture(posix.join(name, child)).map(([file, hash]) => [`/${child}${file}`, hash])) : [['', sha(readFileSync(path))]];
+    if (included.has(name)) hashes.set(name, digestEntries(entries));
     return entries;
   }
-  capture('.');
+  for (const name of new Set(tracked.map(file => file.split('/')[0]))) capture(name);
   return file => hashes.get(file.replaceAll(sep, '/')) ?? null;
 }
 /** What a glance sees of a file or directory: each file's name, modification time and size. */

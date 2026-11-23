@@ -637,7 +637,7 @@ function prebuildCompiler() {
 
 /** `exact contract …` runs this checkout's compiler from anywhere (LLP 1086 D4), with the tool selection in
  * LLP 1174 D5. Cargo builds with the pinned toolchain in this checkout's target directory. */
-export async function contract(args, env = process.env) {
+export async function contract(args, env = process.env, { debug } = {}) {
   // `build --json` is one JSON array on stdout and nothing on stderr: the compiler's diagnostics, then app.ts's.
   const json = args[0] === 'build' && args.includes('--json');
   // A build of an app's `app.contract` refreshes the types its `app.ts` imports (LLP 1116.001 D4.5); of unsaved text
@@ -645,7 +645,7 @@ export async function contract(args, env = process.env) {
   const input = args[0] === 'build' && !args.includes('--stdin') ? args.slice(1).find((arg, i, rest) => !arg.startsWith('-') && rest[i - 1] !== '-o') : null;
   // The Forma server catches compiler panics, which requires the debug profile's unwinding (LLP 1174 D5).
   const preferDebug = args[0] === 'forma' && args[1] === 'serve';
-  const tool = contractTool({ env, json, file: input ?? '', preferDebug });
+  const tool = contractTool({ env, json, file: input ?? '', preferDebug, debug });
   if (!tool || !prepareContractGame(args)) return 1;
   const result = spawnSync(tool.cmd, [...tool.pre, ...args], {stdio: ['inherit', json ? 'pipe' : 'inherit', 'inherit'], env: tool.env, encoding: 'utf8', maxBuffer: 1 << 26});
   if (result.error) throw new Error(`${tool.cmd}: ${result.error.message}${tool.cmd === 'cargo' ? ' (install rustup from https://rustup.rs)' : ''}`);

@@ -626,7 +626,7 @@ export const withoutDev = (text) => text.replace(/^[ \t]*\/\/ dev-only \{.*\n[\s
 
 const COMPILER = resolve(TARGET_DIR, `debug/exact-web-js${EXE}`);
 const compilerKept = () => kept({ crate: 'exact-web-js', product: COMPILER, depInfo: depInfoOf(COMPILER), group: ['debug'], buildDirs: [resolve(TARGET_DIR, 'debug/build')], stamp: resolve(MODULES, 'kept', 'exact-web-js.json') });
-function webCompilerFrom(env) {
+export function webCompilerFrom(env) {
   // The dev loop can lend a fresh copy of its optimized design reader to this build.
   const fast = env.EXACT_WEB_COMPILER;
   if (fast && freshCompiler(fast)) return { path: fast, set: null };

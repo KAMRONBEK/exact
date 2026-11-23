@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { dirname, join, posix, resolve, win32 } from 'node:path';
+import { dirname, join, posix, relative, resolve, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { INPUT_TREE, OUTPUT, suiteBrowser } from '../../scripts/agent-launch.mjs';
 import { shaderWatchRoots } from '../../scripts/app.mjs';
@@ -20,6 +20,8 @@ import { installLock } from '../../scripts/filesystem.mjs';
 import { besidePattern } from '../web/beside.mjs';
 import { appSources } from '../web/serve.mjs';
 import { loopWebDist } from '../../scripts/web-build.mjs';
+import { digest, lockClosure, workspaceManifest } from '../../scripts/kept.mjs';
+import { hostTriple } from '../../scripts/tools.mjs';
 import { engagement } from '../web/engagement.js';
 
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
@@ -779,6 +781,59 @@ test('the JS loop: an edit stops a young build, leaving dist as it was; a value 
     rmSync(dir, { recursive: true, force: true });
   }
 }, 1_200_000);
+
+test.skipIf(process.platform === 'win32')('the design reader observes dev flags and rechecks kept inputs by content', async () => {
+  mkdirSync(join(ROOT, 'target'), { recursive: true });
+  const dir = mkdtempSync(join(ROOT, 'target/exact-reader-choice-')), app = join(dir, 'app'), target = join(dir, 'cargo');
+  const name = 'exact-web-js', debug = join(target, 'debug', name), input = join(dir, 'compiler.rs');
+  const set = join(dir, '.cache/exact/tools', hostTriple(), 'reader');
+  const compiler = marker => `#!/bin/sh
+    [ "$1" = inspect-table ] || exit 1
+    case "$(/bin/cat "$2")" in
+      first) printf '%s' '${JSON.stringify({ plan: sha('first'), marker })}';;
+      second) printf '%s' '${JSON.stringify({ plan: sha('second'), marker })}';;
+    esac > "$3"
+  `;
+  const stamp = 1700000000;
+  const env = { HOME: dir, USERPROFILE: dir, CARGO_TARGET_DIR: target, EXACT_TOOLS_ORIGIN: 'none', EXACT_WEB_COMPILER: '',
+    RUSTFLAGS: undefined, CARGO_ENCODED_RUSTFLAGS: undefined };
+  for (const key of Object.keys(process.env)) if (key.startsWith('CARGO_PROFILE_DEV_')) env[key] = undefined;
+  let loop;
+  try {
+    for (const path of [app, dirname(debug), set]) mkdirSync(path, { recursive: true });
+    writeFileSync(join(app, 'app.json'), JSON.stringify({ name: 'Reader choice', app: { id: 'test.readerchoice', name: 'Reader choice' } }));
+    writeFileSync(join(app, 'app.contract'), 'component App\n  view\n    text "Reader"\n');
+    writeFileSync(input, 'old');
+    utimesSync(input, stamp, stamp);
+    writeFileSync(debug, compiler('debug'), { mode: 0o755 });
+    writeFileSync(`${debug}.d`, `${debug}: ${input}\n`);
+    writeFileSync(join(set, name), compiler('set'), { mode: 0o755 });
+    writeFileSync(join(set, 'manifest.json'), JSON.stringify({ source: 'built', verifiedBuild: true, products: {
+      [name]: { file: name, crate: name, inputs: [[relative(ROOT, input), digest(input)]],
+        closure: lockClosure(ROOT, name), workspace: sha(JSON.stringify(workspaceManifest(ROOT))) },
+    } }));
+    const inspect = async plan => {
+      mkdirSync(loop.dist, { recursive: true });
+      writeFileSync(join(loop.dist, 'app.plan'), plan);
+      const response = await fetch(`${loop.base}/dev-inspect.json`);
+      expect(response.status).toBe(200);
+      return (await response.json()).marker;
+    };
+    loop = await devLoop(app, { ...env, RUSTFLAGS: '-g' });
+    expect(loop.said()).not.toContain("design reader ready (a tool set's)");
+    expect(await inspect('first')).toBe('debug');
+    await loop.stop();
+    loop = await devLoop(app, env);
+    expect(loop.said()).toContain("design reader ready (a tool set's)");
+    expect(await inspect('first')).toBe('set');
+    writeFileSync(input, 'new');
+    utimesSync(input, stamp, stamp);
+    expect(await inspect('second')).toBe('debug');
+  } finally {
+    await loop?.stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+}, 30_000);
 
 test('the JS loop: a value-only design edit while the design reader builds waits for it, then is a batch, no full build', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'exact-reader-wait-'));

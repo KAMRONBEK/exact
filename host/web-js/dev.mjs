@@ -33,8 +33,8 @@ import { pluginOnLoopback } from '../../scripts/forma-remote.mjs';
 import { openRemoteCanvas } from '../../scripts/forma-canvas.mjs';
 import { mapCard, pullMap } from '../../scripts/forma-inspect.mjs';
 import { serveCommands, serveReport, streamFrame } from '../../scripts/forma-builds.mjs';
-import { EXE, depInfoOf, fresh, freshCompiler, webCompiler } from './module.mjs';
-import { RustMissing, fromSets, launch, rustMissing, toolEnv } from '../../scripts/tools.mjs';
+import { EXE, depInfoOf, fresh, freshCompiler, webCompiler, webCompilerFrom } from './module.mjs';
+import { RustMissing, launch, rustMissing, toolEnv } from '../../scripts/tools.mjs';
 import { hostModuleSources } from './glue.mjs';
 import { engagement } from '../web/engagement.js';
 import { schemeHead } from '../web/look.mjs';
@@ -245,13 +245,13 @@ export async function devJs({ app, dist, port, host, origins, gate, lan, allowHo
   // a value-only edit's and a scrub's. Optimised (host-dev), built as the
   // loop starts and again after any edit that is not a design's, so it is
   // the compiler the builds use; until it is, the debug compiler answers.
-  // Where this build is not fresh, a tool set's compiler is the reader
-  // (`set`), and nothing is built (LLP 1174 D5).
+  // While the optimized build is stale, the reader uses the page builder's
+  // compiler selection (LLP 1174 D5).
   const ownTool = resolve(process.env.CARGO_TARGET_DIR ? resolve(process.env.CARGO_TARGET_DIR) : resolve(root, 'target'), `host-dev/exact-web-js${EXE}`);
-  const tool = { path: ownTool, set: false, ready: false, built: null, child: null, reading: null, cleaner: null };
-  // Whether the reader is still what its sources make: its own build by its dep-info, or the set it was taken from.
-  const toolCurrent = () => (tool.set ? fromSets('exact-web-js')?.path === tool.path : fresh(tool.path, depInfoOf(tool.path)));
-  const patcher = { child: null, built: null, asks: new Map(), n: 0 };
+  const tool = { path: ownTool, ready: false, built: null, child: null, reading: null, cleaner: null };
+  const readerCompiler = () => webCompilerFrom(process.env);
+  const toolCurrent = () => tool.path === ownTool ? fresh(ownTool, depInfoOf(ownTool)) : readerCompiler()?.path === tool.path;
+  const patcher = { child: null, path: null, built: null, asks: new Map(), n: 0 };
   const toolExits = new Set(), inspections = new Set();
   const stopGroup = child => {
     const exit = stopBuildTree(child);
@@ -408,16 +408,17 @@ export async function devJs({ app, dist, port, host, origins, gate, lan, allowHo
     tool.ready = false;
     const waited = tool.child || tool.cleaner;
     stopGroup(tool.child);
-    if (!fresh(ownTool, depInfoOf(ownTool))) {
-      const set = fromSets('exact-web-js');
-      if (set || rustMissing()) {
-        Object.assign(tool, { path: set?.path ?? ownTool, set: !!set, ready: !!set, built: null, child: null });
-        console.log(set ? 'design reader ready (a tool set\'s)' : `the design reader did not build (design edits take the full build):\n${new RustMissing('exact-web-js').message}`);
+    const fast = process.env.EXACT_WEB_COMPILER;
+    if ((fast && freshCompiler(fast)) || !fresh(ownTool, depInfoOf(ownTool))) {
+      const selected = readerCompiler();
+      if (selected || rustMissing()) {
+        Object.assign(tool, { path: selected?.path ?? ownTool, ready: !!selected, built: null, child: null });
+        console.log(selected ? `design reader ready${selected.set ? " (a tool set's)" : ''}` : `the design reader did not build (design edits take the full build):\n${new RustMissing('exact-web-js').message}`);
         if (waited) resumeAfterReader();
         return;
       }
     }
-    Object.assign(tool, { path: ownTool, set: false });
+    tool.path = ownTool;
     const started = new Date();
     const child = tool.child = spawn('cargo', ['build', '-q', '--profile', 'host-dev', '-p', 'exact-web-js'], { cwd: root, stdio: ['ignore', 'ignore', 'pipe'], detached: true });
     let err = '';
@@ -973,9 +974,10 @@ for(;;){
   const patcherAsk = (request) => new Promise((done) => {
     if (stopping) return done({ fallback: true });
     if (!toolFresh()) return done({ fallback: true });
-    if (!patcher.child || patcher.built !== tool.built) {
+    if (!patcher.child || patcher.path !== tool.path || patcher.built !== tool.built) {
       stopGroup(patcher.child);
       const child = patcher.child = spawn(tool.path, ['design-serve', resolve(app.dir, 'app.contract')], { cwd: root, env: toolEnv(), stdio: ['pipe', 'pipe', 'ignore'], detached: true });
+      patcher.path = tool.path;
       patcher.built = tool.built;
       let buffered = '';
       child.stdin.on('error', () => {});

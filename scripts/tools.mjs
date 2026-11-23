@@ -103,8 +103,8 @@ function productFile(set, name, product) {
  * Product `name` from the newest set in this machine's cache that `source` made (`built` here by `keep`, or
  * `fetched`) and whose inputs are this checkout's bytes: `{ path, set, product }`, or null.
  */
-export function fromSet(name, source, env = process.env, { verifyInputs = false } = {}) {
-  if (!verifyInputs) try {
+export function fromSet(name, source, env = process.env, { requireVerifiedBuild = false } = {}) {
+  if (!requireVerifiedBuild) try {
     const last = JSON.parse(readFileSync(stampOf(name), 'utf8'));
     const set = { dir: last.entry, manifest: JSON.parse(readFileSync(resolve(last.entry, 'manifest.json'), 'utf8')) };
     const product = set.manifest.products[name];
@@ -116,6 +116,7 @@ export function fromSet(name, source, env = process.env, { verifyInputs = false 
   for (const set of sets(env)) {
     const product = set.manifest.products?.[name];
     if (set.manifest.source !== source || !product) continue;
+    if (requireVerifiedBuild && set.manifest.verifiedBuild !== true) continue;
     const path = productFile(set, name, product);
     if (!path || differs(product)) continue;
     try {
@@ -189,13 +190,14 @@ export class RustMissing extends Error {
 }
 
 /** The compiler and its set, if any (LLP 1174 D5). A set built here takes precedence over a fresh debug build when
- * its inputs match by content. Callers that need unwinding or supply dev build flags take a fresh debug build first.
+ * its inputs were verified across the build and still match by content. Callers that need unwinding or supply dev
+ * build flags take a fresh debug build first.
  * A kept product comes next where the caller has one, then a fetched set where one may run. */
 export function compilerFrom(name, debug, env = process.env, { preferDebug = false, kept } = {}) {
   const local = freshCompiler(debug) ? { path: debug, set: null } : null;
   if (local && (preferDebug || env.RUSTFLAGS !== undefined || env.CARGO_ENCODED_RUSTFLAGS !== undefined ||
     Object.keys(env).some(key => key.startsWith('CARGO_PROFILE_DEV_') && env[key] !== undefined))) return local;
-  const built = fromSet(name, 'built', env, { verifyInputs: !!local });
+  const built = fromSet(name, 'built', env, { requireVerifiedBuild: !!local });
   if (built || local) return built ?? local;
   const path = kept?.();
   return path ? { path, set: null } : fetchedTool(name, env);
@@ -203,8 +205,8 @@ export function compilerFrom(name, debug, env = process.env, { preferDebug = fal
 
 const CONTRACT = resolve(ROOT, 'target/debug', `contract${EXE}`);
 /** The Contract compiler built already, to `launch`, from where `compilerFrom` takes it. */
-export function builtContract(env = process.env, { preferDebug = false } = {}) {
-  const path = compilerFrom('contract', CONTRACT, env, { preferDebug })?.path;
+export function builtContract(env = process.env, { preferDebug = false, debug = CONTRACT } = {}) {
+  const path = compilerFrom('contract', debug, env, { preferDebug })?.path;
   return path ? launch(path, [], undefined, env) : null;
 }
 
@@ -219,11 +221,11 @@ export function compilerCargo(verb, env = process.env) {
 
 /** Select a fresh Contract compiler, building with the pinned Cargo when needed (D5).
  * A Rust-less machine receives the diagnostic in the form requested by the caller. */
-export function contractTool({ env = process.env, json = false, file = '', preferDebug = false } = {}) {
-  const built = builtContract(env, { preferDebug });
+export function contractTool({ env = process.env, json = false, file = '', preferDebug = false, debug = CONTRACT } = {}) {
+  const built = builtContract(env, { preferDebug, debug });
   if (built) return built;
   if (rustMissing(env)) { new RustMissing('contract', env).say(json, file); return null; }
-  if (!existsSync(CONTRACT)) console.error('exact contract: building the Contract compiler once (about a minute on a cold checkout; `exact new` starts it in the background)…');
+  if (!existsSync(debug)) console.error('exact contract: building the Contract compiler once (about a minute on a cold checkout; `exact new` starts it in the background)…');
   // Built before and stale, as after a pull: Cargo runs quietly, so say why the wait (LLP 1156.006.000 D11).
   else console.error('exact contract: rebuilding the Contract compiler, since its sources changed (about a minute)…');
   return compilerCargo('run', env);
@@ -387,7 +389,7 @@ export async function keep(triple = hostTriple(), { root = ROOT, env = process.e
   const dirty = gitAt(root, 'status', '--porcelain', '--', ...inputs);
   if (dirty) throw new Error(`tools keep keeps committed sources only, and these inputs are not:\n${dirty}`);
   for (const product of Object.values(products)) product.inputs = product.inputs.map(file => [file, after.get(file)]);
-  const manifest = { version: 1, triple, commit, source: 'built', built: Date.now(), products, metadata };
+  const manifest = { version: 1, triple, commit, source: 'built', verifiedBuild: true, built: Date.now(), products, metadata };
   const id = sha(JSON.stringify(Object.entries(products).map(([name, product]) => [name, product.inputs, product.closure, product.workspace]))).slice(0, 24);
   const dir = cacheDir(env, triple), entry = resolve(dir, id), making = `${entry}.${process.pid}`;
   rmSync(making, { recursive: true, force: true });
@@ -398,7 +400,7 @@ export async function keep(triple = hostTriple(), { root = ROOT, env = process.e
     // The executables are kept stripped; the profile is not, so its builds stay incremental.
     if (!name.endsWith('.wasm')) {
       chmodSync(kept, 0o755);
-      if (!cross && spawnSync('strip', [kept]).status !== 0) console.warn(`tools: ${name} kept unstripped (strip failed)`);
+      if (triple === hostTriple() && spawnSync('strip', [kept]).status !== 0) console.warn(`tools: ${name} kept unstripped (strip failed)`);
     }
     const bytes = readFileSync(kept);
     products[name].sha256 = sha(bytes);
