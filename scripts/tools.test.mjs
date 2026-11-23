@@ -416,6 +416,7 @@ test.each([
   ['CARGO_BUILD_RUSTFLAGS', '-Cdebug-assertions=on'],
   ['CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS', '-Cdebug-assertions=on'],
   ['CARGO_BUILD_DEP_INFO_BASEDIR', 'sources'],
+  ['RustFlags', '-Cdebug-assertions=on'],
 ])('keep refuses the build override %s before building', async (name, value) => {
   const { cache, commit, run, done } = keepFixture();
   try {

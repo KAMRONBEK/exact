@@ -400,7 +400,8 @@ function dirtyPaths(root) {
 }
 
 export async function keep(triple = hostTriple(), { root = ROOT, env = process.env, build = buildProducts, readMetadata = recordMetadata } = {}) {
-  const override = Object.keys(env).find(name => /^(RUSTFLAGS|CARGO_(ENCODED_RUSTFLAGS|BUILD_RUSTFLAGS|TARGET_.+_RUSTFLAGS|PROFILE_.*|BUILD_DEP_INFO_BASEDIR))$/.test(name));
+  // Any case: Windows reads environment names without it, so Cargo takes `RustFlags` as `RUSTFLAGS`.
+  const override = Object.keys(env).find(name => /^(RUSTFLAGS|CARGO_(ENCODED_RUSTFLAGS|BUILD_RUSTFLAGS|TARGET_.+_RUSTFLAGS|PROFILE_.*|BUILD_DEP_INFO_BASEDIR))$/i.test(name));
   if (override) throw new Error(`tools keep refuses while ${override} is set`);
   const commit = gitAt(root, 'rev-parse', 'HEAD');
   const initiallyDirty = dirtyPaths(root);
@@ -419,8 +420,9 @@ export async function keep(triple = hostTriple(), { root = ROOT, env = process.e
   const hashed = files => files.map(file => [file, hashes.get(file)]);
   for (const product of Object.values(products)) product.inputs = hashed(product.inputs);
   metadata.inputs = hashed(metadata.inputs);
-  if (gitAt(root, 'rev-parse', 'HEAD') !== commit) throw new Error('HEAD changed while building the tool set. No set was kept.');
   committedInputs(root, [...WORKSPACE_INPUTS, ...inputs]);
+  // After the status: a commit made before it leaves the status clean, so only HEAD shows it.
+  if (gitAt(root, 'rev-parse', 'HEAD') !== commit) throw new Error('HEAD changed while building the tool set. No set was kept.');
   const inputPaths = inputs.map(file => resolve(root, file));
   const dirty = initiallyDirty.find(file => {
     const path = resolve(root, file);
