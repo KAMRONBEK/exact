@@ -457,16 +457,21 @@ export function tapWords(args, held = false) {
   // A press point before `drag` (#1332): the drag's start point is its own `from`, and a held contact moves by phases.
   if ((form === 'at' || form === 'down') && rest.includes('drag')) {
     const words = args.slice(1), split = words.indexOf('drag'), press = words.slice(0, split), after = words.slice(split + 1);
-    // The drag's own options end at its first read or leg: a `from` inside a quoted `during` op is not the drag's.
-    const end = after.findIndex(w => w === 'during' || w === 'then' || /^["']/.test(w));
-    const own = end < 0 ? after : after.slice(0, end);
+    // The drag's head: `to <target>`, a quoted target running to its closing quote, or a distance `<dx> <dy>`.
+    let cut = 2;
+    const quote = after[0] === 'to' && /^["']/.test(after[1] ?? '') ? after[1][0] : null;
+    if (quote) while (cut < after.length && !(after[cut - 1].length > 1 && after[cut - 1].endsWith(quote))) cut++;
+    const head = after[0] === 'to' ? after.slice(0, cut) : [after[0] ?? '<dx>', after[1] ?? '<dy>'], tail = after.slice(cut);
+    // The first leg's own options run to `then`; a quoted read is not one of them.
+    const own = [];
+    for (let i = 0, open = null; i < tail.length && (open || tail[i] !== 'then'); i++) {
+      const w = tail[i];
+      if (open) { if (w.endsWith(open)) open = null; } else if (/^["']/.test(w)) { if (w.length < 2 || !w.endsWith(w[0])) open = w[0]; } else own.push(w);
+    }
     const point = (list, name) => list.includes(name) ? list.slice(list.indexOf(name) + 1, list.indexOf(name) + 3) : null;
     const [x = '<x>', y = '<y>'] = point(press, 'at') ?? point(own, 'from') ?? [];
     const held = press.indexOf('modifiers'), modifiers = held < 0 || press[held + 1] === undefined ? [] : press.slice(held, held + 2);
-    const start = [...(own.includes('from') ? [] : ['from', x, y]), ...modifiers];
-    // By a distance, the start goes after it; to a target (`drag to <t>`), after the whole drag.
-    const by = after.length >= 2 && after.slice(0, 2).every(w => Number.isFinite(Number(w)));
-    const drag = by ? [...after.slice(0, 2), ...start, ...after.slice(2)] : [...(after.length ? after : ['<dx>', '<dy>']), ...start];
+    const drag = [...head, ...(own.includes('from') ? [] : ['from', x, y]), ...modifiers, ...tail];
     // A target of several words, or none, goes back in quotes, as the op reads it.
     const target = first === '' || /[\s"\\]/.test(first) ? JSON.stringify(first) : first;
     refuse(`a drag starts at a point with from: \`tap ${[target, 'drag', ...drag].join(' ')}\`; a held contact is \`tap ${[target, 'down', 'at', x, y, ...modifiers].join(' ')}\`, then \`tap hold <ms>\`, \`tap move [by] <x> <y> [over <ms>]\`, \`tap up\``);
