@@ -456,10 +456,15 @@ export function tapWords(args, held = false) {
   if (['up', 'cancel', 'hold', 'move'].includes(form)) refuse(held ? `a held contact's phases take no target: \`tap ${[form, ...rest].join(' ')}\`` : `${form} is a phase of a held contact, which none is: \`tap <target> down\`, then \`tap ${form}${form === 'move' ? ' <x> <y>' : form === 'hold' ? ' <ms>' : ''}\``);
   // A press point before `drag` (#1332): the drag's start point is its own `from`, and a held contact moves by phases.
   if ((form === 'at' || form === 'down') && rest.includes('drag')) {
-    const drag = args.indexOf('drag'), at = args.slice(0, drag).indexOf('at');
-    const [x = '<x>', y = '<y>'] = at < 0 ? [] : args.slice(at + 1, Math.min(at + 3, drag));
-    const [dx = '<dx>', dy = '<dy>', ...more] = args.slice(drag + 1);
-    refuse(`a drag starts at a point with from: \`tap ${first} drag ${[dx, dy, 'from', x, y, ...more].join(' ')}\`; a held contact is \`tap ${first} down at ${x} ${y}\`, then \`tap hold <ms>\`, \`tap move [by] <x> <y> [over <ms>]\`, \`tap up\``);
+    const words = args.slice(1), drag = words.indexOf('drag'), press = words.slice(0, drag);
+    const at = press.indexOf('at'), held = press.indexOf('modifiers');
+    const [x = '<x>', y = '<y>'] = at < 0 ? [] : press.slice(at + 1, at + 3);
+    const modifiers = held < 0 ? [] : press.slice(held, held + 2);
+    const [dx = '<dx>', dy = '<dy>', ...more] = words.slice(drag + 1);
+    // A target of several words goes back in quotes, as the op reads it.
+    const target = /[\s"\\]/.test(first) ? JSON.stringify(first) : first;
+    const start = more.includes('from') ? [] : ['from', x, y];
+    refuse(`a drag starts at a point with from: \`tap ${[target, 'drag', dx, dy, ...start, ...modifiers, ...more].join(' ')}\`; a held contact is \`tap ${[target, 'down', 'at', x, y, ...modifiers].join(' ')}\`, then \`tap hold <ms>\`, \`tap move [by] <x> <y> [over <ms>]\`, \`tap up\``);
   }
   if (form.startsWith('{')) { try { return [first, JSON.parse(args.slice(1).join(' '))]; } catch (e) { refuse(e.message); } }
   switch (form) {
