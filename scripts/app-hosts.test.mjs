@@ -537,3 +537,32 @@ test("exact new says its table is the web's", async () => {
     expect(made.stdout).toMatch(/\nFor the web \(bun exact\.mjs web, test web, verify\), this machine still needs \(exact setup --check shows the whole table\):\nMISSING rustup/);
   } finally { rmSync(scratch, { recursive: true, force: true }); }
 }, 120_000);
+
+test.skipIf(!['darwin', 'linux'].includes(process.platform))('a relative LLVM override lets exact new finish and setup --check print every iOS tool', async () => {
+  const { resolve } = await import('node:path');
+  const { tmpdir } = await import('node:os');
+  const scratch = fs.realpathSync(fs.mkdtempSync(resolve(tmpdir(), 'exact-relative-llvm-')));
+  try {
+    const bin = resolve(scratch, 'bin'), override = 'LLVM tools/bin';
+    fs.mkdirSync(bin);
+    fs.symlinkSync(process.execPath, resolve(bin, 'bun'));
+    const preload = resolve(scratch, 'linux.mjs');
+    // Load Rolldown's native binding before selecting the Linux CLI path on macOS.
+    fs.writeFileSync(preload, `await import(${JSON.stringify(Bun.resolveSync('rolldown', import.meta.dir))});\nObject.defineProperty(process, 'platform', { value: 'linux' });\n`);
+    const env = { HOME: scratch, PATH: bin, CARGO_HOME: resolve(scratch, 'cargo'), RUSTUP_HOME: resolve(scratch, 'rustup'),
+      XDG_CACHE_HOME: resolve(scratch, 'cache'), EXACT_APPLE_SDK: resolve(scratch, 'sdk'), EXACT_APPLE_LLVM_BIN: override, EXACT_FEEDBACK: '0' };
+    const exact = (...args) => childProcess.spawnSync(process.execPath,
+      ['--no-env-file', '--preload', preload, resolve(import.meta.dir, 'exact.mjs'), ...args],
+      { cwd: scratch, env, encoding: 'utf8', timeout: 120_000 });
+    const made = exact('new', 'web-only');
+    const setup = exact('setup', '--check', '--platform', 'ios');
+    expect(setup.stdout).toMatch(/^MISSING Apple cross SDK:/m);
+    expect(setup.stdout).toMatch(/^MISSING Swift for Apple cross compilation:/m);
+    expect(setup.stdout).toMatch(/^MISSING LLVM Apple tools:/m);
+    expect(setup.stdout).toContain(`EXACT_APPLE_LLVM_BIN must be an absolute path. Set it to ${resolve(scratch, override)}.`);
+    expect(setup.stdout).toMatch(/^MISSING Apple codesign:/m);
+    expect(made.status).toBe(0);
+    expect(made.stdout).toContain('This machine lacks the Apple cross SDK and its tools');
+    expect(fs.existsSync(resolve(scratch, 'web-only/app.contract'))).toBe(true);
+  } finally { fs.rmSync(scratch, { recursive: true, force: true }); }
+}, 240_000);

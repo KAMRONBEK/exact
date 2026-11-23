@@ -14,7 +14,6 @@ export const CROSS_IOS_ROWS = ['Apple cross SDK', 'Swift for Apple cross compila
 /** Linux's build prerequisites; checking them never installs or changes the SDK. `sdks` are the cross SDKs the build
  *  needs: a device build's is iphoneos alone, and it builds without the simulator's. */
 export function appleCrossReport(env = process.env, execute = spawnSync, sdks = ['iphoneos', 'iphonesimulator']) {
-  const bin = appleLlvmBin(env);
   const row = (name, have, want, ok, fix) => ({ name, have: have || 'missing', want, ok, fix, required: false, need: 'iOS on Linux/WSL' });
   const output = (command, args) => {
     const result = execute(command, args, { env, encoding: 'utf8' });
@@ -28,16 +27,23 @@ export function appleCrossReport(env = process.env, execute = spawnSync, sdks = 
       [sdk.runtime, resolve(sdk.tools, 'ld64.lld'), resolve(sdk.tools, 'llvm-lib')].every(existsSync));
   } catch (error) { sdk = error.message; }
   const swift = /Swift version ([\d.]+)/.exec(output('swift', ['--version']))?.[1];
-  const llvm = bin ? name => `${bin}/${name}` : name => name;
-  const version = /LLVM version (\d+)/i.exec(output(llvm('llvm-lipo'), ['--version']))?.[1];
-  const missing = ['dsymutil', 'llvm-ar', 'llvm-otool', 'llvm-nm', 'llvm-size', 'llvm-strip', 'llvm-install-name-tool']
-    .filter(tool => !output(llvm(tool), ['--version']));
+  const llvmRow = (() => {
+    const name = CROSS_IOS_ROWS[2], want = 'LLVM 23 or newer';
+    let bin;
+    try { bin = appleLlvmBin(env); }
+    catch (error) { return row(name, 'relative path', want, false, error.message); }
+    const llvm = bin ? name => `${bin}/${name}` : name => name;
+    const version = /LLVM version (\d+)/i.exec(output(llvm('llvm-lipo'), ['--version']))?.[1];
+    const missing = ['dsymutil', 'llvm-ar', 'llvm-otool', 'llvm-nm', 'llvm-size', 'llvm-strip', 'llvm-install-name-tool']
+      .filter(tool => !output(llvm(tool), ['--version']));
+    return row(name, missing.length ? `missing: ${missing.join(', ')}` : version, want, Number(version) >= 23 && !missing.length,
+      'install LLVM 23 from https://apt.llvm.org; put its bin directory on PATH and set EXACT_APPLE_LLVM_BIN to that directory');
+  })();
   const signer = /apple-codesign ([\d.]+)/.exec(output(env.EXACT_APPLE_CODESIGN ?? 'rcodesign', ['--version']))?.[1];
   return [
     row(CROSS_IOS_ROWS[0], sdk, 'Xcode 27.1 Darwin SDK', valid, 'xtool sdk install --slim /path/to/Xcode_27.1.xip'),
     row(CROSS_IOS_ROWS[1], swift, 'Swift 6.4', /^6\.4\./.test(swift ?? ''), 'install Swift 6.4.2 from https://swift.org/install/linux'),
-    row(CROSS_IOS_ROWS[2], missing.length ? `missing: ${missing.join(', ')}` : version, 'LLVM 23 or newer', Number(version) >= 23 && !missing.length,
-      'install LLVM 23 from https://apt.llvm.org; put its bin directory on PATH and set EXACT_APPLE_LLVM_BIN to that directory'),
+    llvmRow,
     row(CROSS_IOS_ROWS[3], signer, 'rcodesign 0.29.0', signer === '0.29.0', 'install apple-codesign 0.29.0 from https://github.com/indygreg/apple-platform-rs/releases'),
   ];
 }

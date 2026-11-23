@@ -1405,21 +1405,30 @@ pub(crate) fn prepare_apple_simulator_link_archives(
     out_dir: &Path,
     archives: &[LinkArchive],
 ) -> Result<Vec<PreparedLinkArchive>, String> {
-    let llvm_bin = env::var_os("EXACT_APPLE_LLVM_BIN");
-    let lipo = apple_lipo_for(cfg!(target_os = "macos"), llvm_bin.as_deref());
+    let llvm_bin = apple_simulator_arch(target).and_then(|_| env::var_os("EXACT_APPLE_LLVM_BIN"));
+    let lipo = apple_lipo_for(cfg!(target_os = "macos"), llvm_bin.as_deref())?;
     prepare_apple_simulator_link_archives_with_lipo(install, target, out_dir, archives, &lipo)
 }
 
 /// Xcode's `lipo` on a Mac. Elsewhere LLVM's, from `EXACT_APPLE_LLVM_BIN` or
 /// `PATH`, as Exact's Apple toolchain finds it.
-pub(crate) fn apple_lipo_for(is_macos: bool, llvm_bin: Option<&OsStr>) -> PathBuf {
+pub(crate) fn apple_lipo_for(is_macos: bool, llvm_bin: Option<&OsStr>) -> Result<PathBuf, String> {
     if is_macos {
-        return PathBuf::from("lipo");
+        return Ok(PathBuf::from("lipo"));
     }
-    match llvm_bin.filter(|bin| !bin.is_empty()) {
-        Some(bin) => Path::new(bin).join("llvm-lipo"),
-        None => PathBuf::from("llvm-lipo"),
+    let Some(bin) = llvm_bin.filter(|bin| !bin.is_empty()).map(Path::new) else {
+        return Ok(PathBuf::from("llvm-lipo"));
+    };
+    if !bin.is_absolute() {
+        let remedy = match std::path::absolute(bin) {
+            Ok(path) => format!("Set it to {}.", path.display()),
+            Err(error) => format!("Cannot resolve {}: {error}.", bin.display()),
+        };
+        return Err(format!(
+            "EXACT_APPLE_LLVM_BIN must be an absolute path. {remedy}"
+        ));
     }
+    Ok(bin.join("llvm-lipo"))
 }
 
 pub(crate) fn prepare_apple_simulator_link_archives_with_lipo(

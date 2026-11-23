@@ -256,7 +256,22 @@ test('Linux Apple tools reject a relative LLVM override before launching process
   expect(() => appleCargo('cargo', args, options, 'linux')).toThrow(error);
   expect(() => appleCommand('cargo', args, options, 'linux')).toThrow(error);
   expect(() => appleCommand('lipo', ['-archs', 'App'], options, 'linux')).toThrow(error);
-  expect(() => appleCrossReport(options.env, () => { throw new Error('unexpected tool launch'); })).toThrow(error);
+}));
+
+test('a relative LLVM override fails only its Apple setup row', () => fixture(({ env }) => {
+  const bin = 'LLVM tools/bin', calls = [];
+  const rows = appleCrossReport({ ...env, EXACT_APPLE_LLVM_BIN: bin }, command => {
+    calls.push(command);
+    return { status: 0, stdout: { swift: 'Swift version 6.4.2', rcodesign: 'apple-codesign 0.29.0' }[command] ?? '' };
+  }, ['iphonesimulator']);
+  expect(rows.map(row => row.name)).toEqual(CROSS_IOS_ROWS);
+  expect(rows[0]).toMatchObject({ have: '26.4', ok: false });
+  expect(rows[1]).toMatchObject({ have: '6.4.2', ok: true });
+  expect(rows[2]).toMatchObject({
+    ok: false, required: false, fix: expect.stringContaining(`EXACT_APPLE_LLVM_BIN must be an absolute path. Set it to ${resolve(bin)}.`),
+  });
+  expect(rows[3]).toMatchObject({ have: '0.29.0', ok: true });
+  expect(calls).toEqual(['swift', 'rcodesign']);
 }));
 
 test.each([

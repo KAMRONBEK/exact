@@ -508,16 +508,27 @@ fn checked_command(command: &mut Command, purpose: &str) -> std::process::Output
 
 #[test]
 fn apple_lipo_selection_depends_on_host_and_override() {
-    let llvm = Path::new("llvm").join("bin");
+    let relative = Path::new("LLVM tools").join("bin");
+    let llvm = std::path::absolute(&relative).expect("absolute override");
     assert_eq!(
-        apple_lipo_for(false, Some(llvm.as_os_str())),
+        apple_lipo_for(false, Some(llvm.as_os_str())).unwrap(),
         llvm.join("llvm-lipo")
     );
+    assert_eq!(
+        apple_lipo_for(false, Some(relative.as_os_str())).unwrap_err(),
+        format!(
+            "EXACT_APPLE_LLVM_BIN must be an absolute path. Set it to {}.",
+            llvm.display()
+        )
+    );
     for llvm_bin in [None, Some(OsStr::new(""))] {
-        assert_eq!(apple_lipo_for(false, llvm_bin), Path::new("llvm-lipo"));
+        assert_eq!(
+            apple_lipo_for(false, llvm_bin).unwrap(),
+            Path::new("llvm-lipo")
+        );
     }
     assert_eq!(
-        apple_lipo_for(true, Some(llvm.as_os_str())),
+        apple_lipo_for(true, Some(relative.as_os_str())).unwrap(),
         Path::new("lipo")
     );
 }
