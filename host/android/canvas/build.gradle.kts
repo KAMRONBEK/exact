@@ -54,6 +54,7 @@ android {
             "../../../packages/local-auth/android", "../../../packages/local-auth/test",
             "../../../packages/local-network/android", "../../../packages/local-network/test",
             "../../../packages/passkeys/android", "../../../packages/passkeys/test",
+            "../../../packages/nfc/android", "../../../packages/nfc/test",
             "../../../packages/notifications/android", "../../../packages/notifications/test",
             "../../../packages/payments/android", "../../../packages/payments/test",
             "../../../packages/photos/android", "../../../packages/photos/test",
