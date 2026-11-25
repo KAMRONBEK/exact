@@ -6,8 +6,8 @@
 //! with Google explicitly enabled by `prefer` to exercise ticket handling.
 //! Apple and combined requests are likewise enabled only by individual tests.
 
-#[cfg(target_os = "macos")]
 use crate::source::{boxed, Source};
+#[cfg(target_os = "macos")]
 use exact_runner::HoldAnswer;
 use exact_runner::{
     Answer, CallOrigin, DataError, DataSource, Dispatch, Outcome, Reply, Request, Response, Runner,
