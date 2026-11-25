@@ -310,7 +310,10 @@ impl Scanner<'_> {
                 '<' => self.autolink(i, hi, &mut autolink_end),
                 '!' if i + 1 < hi && self.ch(i + 1) == '[' => self.bracket(i + 1, hi, true, depth),
                 '[' => self.bracket(i, hi, false, depth),
-                'h' if i == lo || self.ch(i - 1).is_whitespace() || self.ch(i - 1) == '(' => {
+                // Past depth 0 is a link's label, where GFM links no bare URL.
+                'h' if depth == 0
+                    && (i == lo || self.ch(i - 1).is_whitespace() || self.ch(i - 1) == '(') =>
+                {
                     self.bare_url(i, hi)
                 }
                 '*' | '_' | '~' => {
