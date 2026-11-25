@@ -25,6 +25,7 @@ fn hidden(source: &str, reveal: Option<Range>) -> Vec<String> {
 
 mod code_spans;
 mod commands;
+mod titles;
 use commands::run;
 
 #[test]
