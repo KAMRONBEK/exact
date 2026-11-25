@@ -220,6 +220,7 @@ mod overlay;
 mod owner_segments;
 mod package_designs;
 mod package_icons;
+mod package_sends;
 mod packages;
 mod page_transition;
 mod pan;
