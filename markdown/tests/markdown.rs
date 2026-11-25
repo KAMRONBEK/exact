@@ -893,6 +893,44 @@ fn pieces_flatten_a_document_into_runs_one_engine_paints() {
 }
 
 #[test]
+fn a_blank_line_between_items_is_any_line_the_block_pass_calls_blank() {
+    let drawn = |source: &str| -> Vec<(String, f32)> {
+        pieces(source)
+            .into_iter()
+            .map(|p| (p.text, p.scale))
+            .collect()
+    };
+    let gaps = |source: &str| drawn(source).iter().filter(|p| p.1 == 0.5).count();
+
+    let loose = drawn("- a\n\n- b");
+    assert_eq!(gaps("- a\n\n- b"), 1);
+    for source in [
+        "- a\r\n\r\n- b",
+        "- a\n \n- b",
+        "- a\n\t\n- b",
+        "- a\r\n  \r\n- b",
+        "- a\n\n\n- b",
+    ] {
+        assert_eq!(drawn(source), loose, "{source:?}");
+    }
+
+    let tight = drawn("- a\n- b");
+    assert_eq!(gaps("- a\n- b"), 0);
+    assert_eq!(drawn("- a\r\n- b"), tight);
+    // White space at an item's end is not a blank line.
+    assert_eq!(gaps("- a  \r\n- b"), 0);
+
+    let mixed = "1. one\n   more\n2. two\n\n- [ ] three\n  - four";
+    assert_eq!(gaps(mixed), 1);
+    assert_eq!(gaps(&mixed.replace('\n', "\r\n")), 1);
+
+    // A quote's blank line is its markers alone.
+    assert_eq!(gaps("> - a\n> - b"), 0);
+    assert_eq!(gaps("> - a\n>\n> - b"), 1);
+    assert_eq!(gaps("> - a\r\n> \r\n> - b"), 1);
+}
+
+#[test]
 fn a_list_item_hangs_its_marker_in_its_indent_as_the_browser_does() {
     // LLP 1045 D4: a list item's paragraph starts 40 px in per level (the
     // UA sheet's `padding-inline-start`), its marker outside, its end at the
