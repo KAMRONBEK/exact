@@ -331,6 +331,37 @@ fn lists_tasks_quotes_and_rules() {
     assert!(spans(source, None).contains(&("1.".into(), MARKER)));
 }
 
+/// CommonMark 0.31.2 §5.2: 1 to 4 columns of spaces or tabs follow a list
+/// marker. Before indented code, the marker takes one.
+#[test]
+fn spaces_and_tabs_after_a_list_marker_are_not_text() {
+    use ParagraphKind::{Body, Bullet, Ordered, Rule, Task};
+    for (source, kind, text) in [
+        ("-\titem", Bullet, "• item"),
+        ("- \titem", Bullet, "• item"),
+        ("-   item", Bullet, "• item"),
+        ("-    item", Bullet, "• item"),
+        ("  -\titem", Bullet, "◦ item"),
+        ("> -\titem", Bullet, "▎ • item"),
+        ("1.\titem", Ordered, "1. item"),
+        ("1.  item", Ordered, "1. item"),
+        ("-  [ ] task", Task(false), "☐ task"),
+        ("-\t[x] done", Task(true), "☑ done"),
+        ("- [x]\tdone", Task(true), "☑ done"),
+        ("-     code", Bullet, "•     code"),
+        ("-\t  code", Bullet, "•   code"),
+        ("-     [ ] code", Bullet, "•     [ ] code"),
+        ("-   ", Bullet, "• "),
+        ("-item", Body, "-item"),
+        ("- [x]done", Bullet, "• [x]done"),
+        ("-\t-\t-", Rule, "──────────"),
+    ] {
+        assert_eq!(style(source, None).paragraphs[0].kind, kind, "{source:?}");
+        let drawn: String = pieces(source).iter().map(|p| p.text.as_str()).collect();
+        assert_eq!(drawn, text, "{source:?}");
+    }
+}
+
 #[test]
 fn a_fenced_block_is_a_group_revealed_together() {
     let source = "before\n\n```rust\nlet a = **not bold**;\n\n# not a heading\n```\nafter";
