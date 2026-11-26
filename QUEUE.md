@@ -224,7 +224,6 @@
 - A virtualized reorder grip made from a labelled box containing text exposes no “Move later” action. Inspect an eight-row string-keyed `reorderGroup` list with `AXUIElementCopyActionNames` on macOS or `tree --ax` on iOS.
 - A numeric key on an ordinary virtualized reorder list compiles, but the grip cannot lift. Use `key=rows.indexOf(name)` with eight strings and drag the first grip.
 - On the wasm web target, drag Account, lift it with Space, move up and press Escape. After settling, Space, Down and Enter on Privacy send no drop. The ordinary virtualized list on `2677907d5` reproduces this in Chromium.
-- A popover written directly inside another popover still refuses its own native rows. Put a `button appearance="auto"` directly in the inner popover to reproduce `lower-button-context`. The same inner popover beside the outer one compiles.
 - Reconcile the current LLP count with its ceiling. On main, `bun scripts/gate.mjs` reports 16 current LLPs against a cap of 15.
 - Check hyphens before digits in authored data attributes against LLP 1075.003 §3.3. Building a text node with `data-v-2="x"` reports `syntax-expected-expression`.
 - Decide whether a settings list may spell `listStyle="inset-grouped"` alone when it has no drop handler. Removing only `reorderdrop` from the eight-row fixture with that spelling makes the compiler require `appearance="auto"` (LLP 1084 D1).

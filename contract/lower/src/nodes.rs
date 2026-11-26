@@ -1218,8 +1218,8 @@ impl Lowerer<'_> {
             native_button || t.node_type == NodeType::Pressable,
             expanded,
         );
-        let menu_row =
-            self.menu_parent.is_some() && menu_parent != Some(menu_rows::Parent::Section);
+        // A nested popover supplies its own rows; it is no row of its parent's.
+        let menu_row = self.menu_parent.is_some() && menu_parent.is_none();
         Ok(ElementStep {
             id,
             children,

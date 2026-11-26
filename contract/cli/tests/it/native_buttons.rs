@@ -631,6 +631,25 @@ fn it_goes_where_a_button_goes_and_admits_dialog_and_popover_invokers() {
     }
 }
 
+#[test]
+fn a_nested_popover_supplies_its_own_native_rows() {
+    for body in [
+        "column popover=\"auto\"\n  button appearance=\"auto\" press=go\n    text \"Outer\"\ncolumn popover=\"auto\"\n  button appearance=\"auto\" press=go\n    text \"Inner\"",
+        "column popover=\"auto\"\n  column popover=\"auto\"\n    button appearance=\"auto\" press=go\n      text \"Inner\"\n  button appearance=\"auto\" press=go\n    text \"Outer\"",
+        "column popover=\"auto\"\n  column role=\"group\"\n    column popover=\"auto\"\n      column role=\"group\"\n        button appearance=\"auto\" press=go\n          text \"Inner\"",
+        "column popover=\"auto\"\n  if busy\n    column popover=\"manual\"\n      column popover=\"auto\"\n        button appearance=\"auto\" press=go\n          text \"Inner\"",
+    ] {
+        contract::compile(&app(body)).unwrap_or_else(|e| panic!("{body}: {e}"));
+    }
+    for body in [
+        "column popover=\"auto\"\n  column popover=\"auto\"\n    row\n      button appearance=\"auto\" press=go\n        text \"Too deep\"",
+        "column popover=\"auto\"\n  column popover=\"auto\"\n    button press=go\n      button appearance=\"auto\" press=go\n        text \"Nested button\"",
+    ] {
+        let (id, message) = refused(body);
+        assert_eq!(id, "lower-button-context", "{body}: {message}");
+    }
+}
+
 /// LLP 1069.011.000 D1: every button has a face — a custom one read as a
 /// native one is — and only a button has one.
 #[test]
