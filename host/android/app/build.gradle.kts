@@ -765,6 +765,14 @@ abstract class CheckModuleRoster : Test() {
     @get:Classpath abstract val classes: ListProperty<Directory>
 }
 
+tasks.withType<Test>().configureEach {
+    // Stay on SDK 35 so Robolectric runs on JDK 17 unless the app declares `minimumOS` 16 (SDK 36).
+    systemProperty("robolectric.enabledSdks", maxOf(35, minimumApi).toString())
+    // Robolectric's FileDescriptorInterceptor reflects on jdk.internal.access during sandbox setup.
+    val openAccess = "--add-opens=java.base/jdk.internal.access=ALL-UNNAMED"
+    if (openAccess !in jvmArgs.orEmpty()) jvmArgs(openAccess)
+}
+
 androidComponents.onVariants(androidComponents.selector().withBuildType("release")) { variant ->
     val receipt = out.resolve("rust/bake/compat.json")
     val inputs = if (receipt.isFile) (JsonSlurper().parse(receipt) as Map<*, *>)["inputs"] as? Map<*, *> else null
@@ -778,8 +786,7 @@ androidComponents.onVariants(androidComponents.selector().withBuildType("release
             filter.includeTestsMatching("dev.exact.app.ModuleRosterTest")
             systemProperty("exact.module.tags", tags.joinToString(","))
             systemProperty("exact.module.development", developmentApk.toString())
-            // API 36's shared memory uses the JDK file descriptor.
-            jvmArgs(unit.jvmArgs.orEmpty() + "--add-opens=java.base/jdk.internal.access=ALL-UNNAMED")
+            jvmArgs(unit.jvmArgs.orEmpty().filterNot { it == "--add-opens=java.base/jdk.internal.access=ALL-UNNAMED" })
             testLogging { showStandardStreams = true; exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL }
         }
         variant.artifacts.forScope(ScopedArtifacts.Scope.ALL).use(checkRoster).toGet(ScopedArtifact.CLASSES, CheckModuleRoster::jars, CheckModuleRoster::classes)
