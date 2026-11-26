@@ -701,17 +701,23 @@ export async function main(argv, injected = {}) {
   }
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const flush = stream => new Promise(ok => stream.write('', ok));
+  const finish = async code => {
+    await flush(process.stdout);
+    await flush(process.stderr);
+    process.exit(code);
+  };
   (await import('./tool-drive.mjs'))
     .toolDrive('agent', process.argv.slice(2))
     .then(main)
     .then(
-      code => process.exit(code),
+      code => finish(code),
       e => {
         if (refusalMessage(e.reply)) console.error(refusalMessage(e.reply));
         else console.error(e.message);
         if (process.env.EXACT_AGENT_DEBUG || process.argv.includes('--json')) console.error(e.stack);
         if (e.steps && !refusalMessage(e.reply)) console.error(render('type', { steps: e.steps }));
-        process.exit(e.stale ? 3 : 1);
+        return finish(e.stale ? 3 : 1);
       },
     );
 }

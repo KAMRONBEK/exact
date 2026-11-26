@@ -97,7 +97,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1]
+        shard: [0, 1, 2, 3]
     env:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER: "clang"
@@ -177,7 +177,7 @@ jobs:
                 .filter(f => f.endsWith(".test.mjs") && f !== "package-libraries-link.test.mjs")
                 .sort()
                 .map(f => "./scripts/" + f);
-              for (const f of all.filter((_, i) => i % 2 === shard)) console.log(f);
+              for (const f of all.filter((_, i) => i % 4 === shard)) console.log(f);
             '
           )
           cargo build -q -p contract --bin contract

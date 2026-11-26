@@ -1343,7 +1343,7 @@ test('game web, release and unwired gpu-dev bakes never open registry generation
       let calls=0, lints=0, receipts=0;
       const builds=[];
       mock.module(${JSON.stringify(resolve(import.meta.dir,'../game/app/crates.mjs'))},()=>({keptGameCrates(){calls++;return {take(){calls++;},keep(){calls++;}};}}));
-      mock.module(${JSON.stringify(resolve(import.meta.dir,'../game/app/shells.mjs'))},()=>({gameDefaults(){},prepareGame(){},lintGame(){lints++;}}));
+      mock.module(${JSON.stringify(resolve(import.meta.dir,'../game/app/shells.mjs'))},()=>({gameCargoEnv(e){return e;},gameDefaults(){},prepareGame(){},lintGame(){lints++;}}));
       const appPath=${JSON.stringify(resolve(import.meta.dir,'app.mjs'))}, checkPath=${JSON.stringify(resolve(import.meta.dir,'cargo-check.mjs'))};
       // Each stub is written into the module that defines its function, and the check refuses a run without both.
       const stubbed=new Set();
