@@ -514,13 +514,21 @@ impl Resolver<'_, '_> {
                                 .unwrap_or(Input::None)
                         })
                     }
-                    Some(name) if !name.is_empty() => names
-                        .iter()
-                        .rev()
-                        .find(|(n, _)| *n == name)
-                        .map_or(Input::None, |(_, i)| Input::Result(*i)),
-                    // The previous result, or the source for the first.
-                    _ => {
+                    name => {
+                        if let Some((_, i)) =
+                            name.and_then(|name| names.iter().rev().find(|(n, _)| *n == name))
+                        {
+                            return Input::Result(*i);
+                        }
+                        if let Some(
+                            "FillPaint" | "StrokePaint" | "BackgroundImage" | "BackgroundAlpha",
+                        ) = name
+                        {
+                            return Input::None;
+                        }
+                        // The previous result, or the source for the first; a
+                        // name no earlier primitive gave counts as no name
+                        // (Filter Effects 1, the `in` attribute).
                         if chain.primitives.len() > base {
                             chain.last_index().map_or(source, Input::Result)
                         } else {

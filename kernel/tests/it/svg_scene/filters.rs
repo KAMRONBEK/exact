@@ -210,6 +210,88 @@ fn filters_resolve_into_one_chain() {
     assert!(f.region.0 <= 5.0 && f.region.2 >= 60.0, "{:?}", f.region);
 }
 
+/// Filter Effects 1, the `in` attribute: a name no earlier primitive gave,
+/// a forward one included, is no name, so the previous result or, for the
+/// first primitive, `SourceGraphic`. `FillPaint` stays transparent black
+/// unless an earlier primitive took it as its `result`.
+#[test]
+fn an_unknown_input_name_takes_the_previous_result() {
+    use exact_kernel::svg::filter::Input;
+    use NodeType::*;
+    let mut d = Doc::new();
+    let svg = d.node(
+        Svg,
+        &[(StyleId::Width, "100"), (StyleId::Height, "100")],
+        &[],
+    );
+    let filter = d.node(SvgFilter, &[], &[(PropId::Id, "f")]);
+    let fe = |d: &mut Doc, props: &[(PropId, &str)]| d.node(SvgFe, &[], props);
+    let first = fe(&mut d, &[(PropId::Fe, "feOffset"), (PropId::In, "later")]);
+    let blur = fe(
+        &mut d,
+        &[(PropId::Fe, "feGaussianBlur"), (PropId::Result, "blur")],
+    );
+    let offset = fe(&mut d, &[(PropId::Fe, "feOffset"), (PropId::In, "blurr")]);
+    let comp = fe(
+        &mut d,
+        &[
+            (PropId::Fe, "feComposite"),
+            (PropId::In, "blur"),
+            (PropId::In2, "nope"),
+        ],
+    );
+    let merge = fe(
+        &mut d,
+        &[(PropId::Fe, "feMerge"), (PropId::Result, "later")],
+    );
+    let a = fe(&mut d, &[(PropId::Fe, "feMergeNode"), (PropId::In, "nope")]);
+    let b = fe(&mut d, &[(PropId::Fe, "feMergeNode"), (PropId::In, "blur")]);
+    d.children(merge, &[a, b]);
+    let paint = fe(
+        &mut d,
+        &[(PropId::Fe, "feOffset"), (PropId::In, "FillPaint")],
+    );
+    let named = fe(
+        &mut d,
+        &[(PropId::Fe, "feFlood"), (PropId::Result, "FillPaint")],
+    );
+    let reads = fe(
+        &mut d,
+        &[(PropId::Fe, "feOffset"), (PropId::In, "FillPaint")],
+    );
+    d.children(
+        filter,
+        &[first, blur, offset, comp, merge, paint, named, reads],
+    );
+    let rect = d.node(
+        SvgRect,
+        &[
+            (StyleId::Width, "50"),
+            (StyleId::Height, "20"),
+            (StyleId::Filter, "url(#f)"),
+        ],
+        &[],
+    );
+    d.children(svg, &[filter, rect]);
+    let k = d.kernel(&[svg], 400.0);
+    let s = resolve(&k, svg);
+    let p = &find(&s.items, rect)
+        .unwrap()
+        .filter
+        .as_ref()
+        .unwrap()
+        .primitives;
+    assert_eq!(p[0].inputs[0], Input::SourceGraphic, "forward name, first");
+    assert_eq!(p[2].inputs[0], Input::Result(1), "a typo");
+    assert_eq!(p[3].inputs, [Input::Result(1), Input::Result(2)], "in2");
+    assert_eq!(
+        p[4].op,
+        exact_kernel::svg::filter::Op::Merge(vec![Input::Result(3), Input::Result(1)])
+    );
+    assert_eq!(p[5].inputs[0], Input::None, "FillPaint");
+    assert_eq!(p[7].inputs[0], Input::Result(6), "a result named FillPaint");
+}
+
 /// Filter Effects 1 §5: each function consumes the previous one's result,
 /// so the region covers what the last function spreads from it.
 #[test]
