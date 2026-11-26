@@ -328,6 +328,12 @@ impl<'a> Layout<'a> {
                 if t.kind == TokenKind::Punct("-") {
                     self.prefixes.insert(t.span);
                 }
+                // A substitute's key keeps its `=` and value tight, as an attribute's.
+                if matches!(step, crate::Step::PreferExtension { .. })
+                    && next.kind == TokenKind::Punct("=")
+                {
+                    self.attributes.insert(t.span);
+                }
                 if matches!(step, crate::Step::Size { .. } | crate::Step::Resize { .. })
                     && matches!(t.kind, TokenKind::Number(_))
                 {
