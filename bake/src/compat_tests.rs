@@ -1093,6 +1093,28 @@ fn a_bundle_needs_the_runtime_of_the_newest_option_it_names() {
     let needs = |bundle: &[u8]| super::typescript_runtime_of(bundle, "");
     assert_eq!(needs(b"export const answer = () => 'idle';"), 0);
     assert_eq!(needs(b"fetch(u)"), 0);
+    assert_eq!(needs(b"new FormData()"), 19);
+    assert_eq!(needs(b"crypto.subtle.sign('HMAC', k, b)"), 19);
+    assert_eq!(
+        needs(b"crypto.subtle.encrypt({name: 'AES-GCM', iv}, k, b)"),
+        19
+    );
+    assert_eq!(
+        needs(b"crypto.subtle.deriveBits({name: 'PBKDF2'}, k, 256)"),
+        19
+    );
+    assert_eq!(
+        needs(b"crypto.subtle.deriveBits({name: 'HKDF'}, k, 256)"),
+        19
+    );
+    assert_eq!(
+        needs(b"crypto.subtle.verify('RSASSA-PKCS1-v1_5', k, s, b)"),
+        19
+    );
+    assert_eq!(
+        needs(b"crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify'])"),
+        19
+    );
     assert_eq!(needs(b"export const turnBudgetsJson = '{}';"), 16);
     assert_eq!(needs(b"fetch(u, {exactPrefetch: true})"), 13);
     assert_eq!(
