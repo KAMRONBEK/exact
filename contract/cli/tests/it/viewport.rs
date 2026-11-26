@@ -660,6 +660,13 @@ fn bottom_toolbar_warns_only_for_a_proven_visit_under_native_tabs() {
     ] {
         check(&route.replace(toolbar, &block), &[]);
     }
+    check(
+        &route.replace(
+            toolbar,
+            &format!("{toolbar}                  if last == \"\"\n                    {row}\n                      spacer\n"),
+        ),
+        names,
+    );
     // Detail itself is pushed, but its Section parent starts a presented stack.
     let presented = route.replace("              else\n                Page", "              else if e.name == \"section\"\n                column navigationKey=`${e.id}` navigationPresentation=\"modal\"\n                  text \"Section\"\n              else\n                Page");
     check(&presented, &["typography", "swift", "single"]);
@@ -677,6 +684,7 @@ fn bottom_toolbar_warns_only_for_a_proven_visit_under_native_tabs() {
     for host in [
         r#"{"app":{"id":"dev.test.tabs","name":"Tabs"},"host":{"ios":{"deviceFamily":["ipad"]}}}"#,
         r#"{"app":{"id":"dev.test.tabs","name":"Tabs"},"host":{"web":{}}}"#,
+        r#"{"app":{"id":"dev.test.tabs","name":"Tabs"},"host":{"android":{}}}"#,
     ] {
         std::fs::write(&manifest, host).unwrap();
         check(route, &[]);
