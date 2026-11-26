@@ -347,6 +347,9 @@ pub struct Store {
     /// A selected entry rejected while opening, retained until the host asks
     /// for the launch candidate so it can publish the fallback note/status.
     launch_refusal: Option<(String, String)>,
+    /// Non-fatal reason this launch opened at entry zero (foreign codec,
+    /// demoted entry, or reader-mode entry drop; LLP 1156.008.000 D2).
+    launch_note: Option<String>,
     /// The selection this process refused at boot ([`Store::entry_refused`]).
     refused: Option<String>,
 }
@@ -425,12 +428,15 @@ impl Store {
             view: None,
             sunset: None,
             launch_refusal: None,
+            launch_note: None,
             refused: None,
         };
         let mut rewrite = false;
         match read_record(&store.record_path()) {
             RecordFile::Foreign => {
                 store.frozen = true;
+                store.launch_note =
+                    Some("store record uses a newer codec; booted entry zero".into());
                 store.record = Record::fresh(&store.embedded);
                 return Ok(store);
             }
@@ -490,7 +496,7 @@ impl Store {
         if store.record.failures >= FAILURES_ALLOWED {
             if let Some(bad) = store.record.selected.take() {
                 store.record.bad.retain(|s| *s != bad);
-                store.record.bad.push(bad);
+                store.record.bad.push(bad.clone());
                 let extra = store.record.bad.len().saturating_sub(BAD_REMEMBERED);
                 store.record.bad.drain(..extra);
                 store.record.failures = 0;
@@ -504,6 +510,10 @@ impl Store {
                 store.view = store.validate(store.record.selected.clone());
                 if store.view.is_none() {
                     store.record.selected = None;
+                    store.launch_note = Some(format!(
+                        "demoted entry {} after {FAILURES_ALLOWED} failed boots; booted entry zero",
+                        &bad[..bad.len().min(12)]
+                    ));
                 }
             }
         }
@@ -538,7 +548,11 @@ impl Store {
                         store._running_lock = Some(Arc::new(lock));
                         store.view = Some(view);
                     }
-                    Err(_) => {
+                    Err(reason) => {
+                        store.launch_note = Some(format!(
+                            "reader mode dropped entry {}: {reason}",
+                            &entry[..entry.len().min(12)]
+                        ));
                         store.record.selected = None;
                         store.view = None;
                     }
@@ -752,8 +766,14 @@ impl Store {
             view: self.view.clone(),
             sunset: self.sunset.clone(),
             launch_refusal: self.launch_refusal.clone(),
+            launch_note: self.launch_note.clone(),
             refused: self.refused.clone(),
         }
+    }
+
+    /// Non-fatal reason this launch fell back to entry zero, if any.
+    pub fn launch_note(&self) -> Option<&str> {
+        self.launch_note.as_deref()
     }
 
     pub(crate) fn download(

@@ -550,7 +550,7 @@ Ports    none. Runs to completion.`,
       ['--app', 'the app-scope hatch, in place of a word'],
       ['--window', 'the window-scope hatch, in place of a word'],
     ],
-    body: `<word> is lowercase letters and digits joined by "-" (avatar); mark a node with
+    body: `<word> is a lowercase letter followed by lowercase letters, digits or "-" (avatar, v-2); mark a node with
 hatch="<word>". Writes only missing files, which are yours from then on: docs/reference.md
 "Access hatches".
 Ports    none. Runs to completion.`,

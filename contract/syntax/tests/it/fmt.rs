@@ -482,3 +482,9 @@ fn numeric_path_indices_stay_tight() {
         "test \"indexed path\"\n  expect state rows.0.id == \"a\"\n  expect state rows.0.1 == 2\n"
     );
 }
+
+#[test]
+fn a_package_substitute_keeps_its_json_value() {
+    let src = "test \"t\" on linux\n  prefer extension device.powerState={\"lowPowerMode\":true} // on\n  clock settle\n  prefer extension serial.ports=[1, 2]\n  clock settle\n  prefer extension device.powerState=clear\n";
+    assert_eq!(preserved(src), src);
+}

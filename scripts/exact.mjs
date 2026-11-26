@@ -919,11 +919,11 @@ export function add(args, say = console.log) {
 export function hatch(args, say = console.log) {
   const scope = args.includes('--app') ? 'app' : args.includes('--window') ? 'window' : 'element';
   const names = args.filter(a => !a.startsWith('--')), word = scope === 'element' ? names.shift() : null;
-  if (scope === 'element' && !/^[a-z][a-z0-9]*(-[a-z][a-z0-9]*)*$/.test(word ?? '')) throw new Error('hatch: name a word, lowercase letters and digits joined by "-" (exact hatch avatar), or --app, or --window');
+  if (scope === 'element' && !/^[a-z][a-z0-9-]*$/.test(word ?? '')) throw new Error('hatch: name a word, a lowercase letter followed by lowercase letters, digits or "-" (exact hatch avatar), or --app, or --window');
   const app = resolveApp(names[0]), dir = app.dir, manifestPath = resolve(dir, 'app.json');
   const manifest = existsSync(manifestPath) ? app.manifest : {};
   const title = String(manifest.app?.name ?? manifest.name ?? app.name).replace(/[\r\n\u2028\u2029]+/g, ' ');
-  const camel = (word ?? scope).replace(/-([a-z0-9])/g, (_, c) => c.toUpperCase()), Camel = camel[0].toUpperCase() + camel.slice(1);
+  const camel = (word ?? scope).replace(/-([a-z])/g, (_, c) => c.toUpperCase()).replaceAll('-', '_'), Camel = camel[0].toUpperCase() + camel.slice(1);
   const wrote = [], todo = [];
   const write = (path, text) => { if (existsSync(path)) return false; mkdirSync(resolve(path, '..'), { recursive: true }); writeFileSync(path, text); wrote.push(path); return true; };
   // A line added above a marker in a file this verb wrote; in a module of the app's own there is none, and the line is shown.
@@ -1142,6 +1142,7 @@ pub type ExactHatches = AppHatches;
     if (scope === 'element') {
       mark(main, '// exact:functions', `/// The \`${word}\` hatch: built (\`element.is_new()\`) and changed (a \`data-*\` word or the box's size moved).
 /// What it gives up here: nothing beyond the call.
+#[allow(non_snake_case)]
 fn ${snake}_hatch<H: Hatches>(element: &Element, _context: &mut Context<'_, H>) {
     if element.is_new() {
         // element.overlay().draw(|c, w, h| { c.set_fill_style_str("#f59e0b"); c.fill_rect(0.0, 0.0, w, h); });
@@ -1150,6 +1151,7 @@ fn ${snake}_hatch<H: Hatches>(element: &Element, _context: &mut Context<'_, H>) 
 }
 
 /// The node has left: stop what the hatch started for it.
+#[allow(non_snake_case)]
 fn ${snake}_hatch_ended<H: Hatches>(_element: &Element, _context: &mut Context<'_, H>) {}
 `, 'add its functions to your hatches file');
       mark(main, '// exact:elementEnded', `            ${JSON.stringify(word)} => ${snake}_hatch_ended(element, context),`, 'call it from your element_ended');

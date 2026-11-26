@@ -8,7 +8,7 @@ import {fileURLToPath} from 'node:url';
 import {bakedEntryAssets, classifyArtifacts, nativeManifestMetadata} from './app.mjs';
 import {spawnSync as realSpawnSync} from 'node:child_process';
 import {canonicalBytes, classify} from './deploy.mjs';
-import {publishedModule, publishStream, streamHead} from './publisher.mjs';
+import {publicSnapshot, publishedModule, publishStream, streamHead} from './publisher.mjs';
 import {admitHead, authenticatedReleaseFloor, cohortFiles, latestRecord, recoverCohort} from './deploy-heads.mjs';
 import {DirectoryOrigin, streamPath} from './origin.mjs';
 import {createHash, generateKeyPairSync, sign} from 'node:crypto';
@@ -1441,4 +1441,33 @@ test('older cohorts reject bundles that add, change, or remove plan-bound requir
   const widget = { name: 'plans/card.plan', requires: { iconFillRules: ['evenodd'], atomFace: ['source', 'label'] } };
   expect(classifyArtifacts(makeCandidate({}, [widget]), makeCohort({})).bundle).toBe(false);
   expect(classifyArtifacts(makeCandidate({}, [widget]), makeCohort({ iconFillRules: ['evenodd'], atomFace: ['source', 'label'] })).bundle).toBe(true);
+});
+
+test('public release records omit machine identity and dirty file paths (LLP 1156.008.000 D1)', async () => {
+  const root = fs.mkdtempSync(resolve(tmpdir(), 'exact-d1-record-'));
+  try {
+    const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+    const raw = publicKey.export({ type: 'spki', format: 'der' }).subarray(-32).toString('base64');
+    const origin = new DirectoryOrigin(resolve(root, 'origin'));
+    const compat = { id: 'a'.repeat(64), target: 'aarch64-apple-ios', inputs: { platform: 'ios', store: { L: 'A' }, keys: { test: raw }, formatVersion: 4, kernelSchema: '0'.repeat(16) } };
+    const app = { id: 'com.exact.d1', name: 'd1', displayName: 'd1', dir: root, target: resolve(root, 'target'), manifest: { deploy: { signing: { keys: { test: raw } } } } };
+    const signer = { keyId: 'test', sign: head => ({ keyId: 'test', ed25519: sign(null, canonicalBytes(head), privateKey).toString('base64') }) };
+    const bundle = { plan: { bytes: Buffer.from('plan'), sha256: sha256(Buffer.from('plan')), formatVersion: 4, kernelSchema: '0'.repeat(16) }, assets: [] };
+    const dirtySnapshot = {
+      id: '1'.repeat(40), commit: '2'.repeat(40), dirty: true, repo: '/Users/dev/secret-app',
+      changes: ['?? .env.local', 'M  credentials.json', '?? __pycache__/a.pyc'],
+      sources: [{ roles: ['app'], commit: '2'.repeat(40), workingSha256: '3'.repeat(64), repo: '/Users/dev/secret-app', changes: ['?? .env.local'] }],
+    };
+    const build = { version: 1, compat, graph: { version: 1, artifacts: [], sources: {} }, binary: { sha256: 'b'.repeat(64) } };
+    await publishStream({ origin, app, signer, row: { channel: 'prod', compatibilityId: compat.id, platform: 'ios', action: 'bundle' }, bundle, compat, build, release: 'r-public', snapshot: dirtySnapshot, opts: {}, log() {} });
+    const text = (await origin.get(`${streamPath({ channel: 'prod', compatibilityId: compat.id })}/releases/r-public.json`)).toString('utf8');
+    const record = JSON.parse(text);
+    expect(record.by).toBeUndefined();
+    expect(record.host).toBeUndefined();
+    expect(record.head.keyId).toBe('test');
+    expect(record.envelope.stream.seq).toBe(1);
+    expect(record.snapshot).toEqual({ id: '1'.repeat(40), commit: '2'.repeat(40), dirty: true, sources: [{ roles: ['app'], commit: '2'.repeat(40), workingSha256: '3'.repeat(64) }] });
+    for (const leaked of ['.env.local', 'credentials.json', '__pycache__', '/Users/dev/secret-app']) expect(text).not.toContain(leaked);
+    expect(publicSnapshot(null)).toEqual({});
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

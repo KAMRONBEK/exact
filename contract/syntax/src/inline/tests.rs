@@ -5,7 +5,7 @@
 use super::subst::substituted;
 use crate::ast::{BinOp, Expr};
 use crate::Span;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 const NAMES: [&str; 4] = ["a", "b", "o", "p"];
 
@@ -509,6 +509,53 @@ fn shared_prop_reads_preserve_substitution_under_branches_and_binders() {
         );
     }
     assert!(shared > 100, "{shared} repeated prop reads were bound");
+}
+
+#[test]
+fn derive_alias_chains_stop_at_values_and_non_derive_names() {
+    let env = BTreeMap::from([("p".to_owned(), V::Num(7.0))]);
+    for (terminal, expected) in [("p", 7.0), ("7", 7.0), ("p + p", 14.0)] {
+        let mut src = String::from("component C\n  props\n    p: number\n");
+        for i in 0..256 {
+            src.push_str(&format!("  derive d{i} = d{}\n", i + 1));
+        }
+        src.push_str(&format!(
+            "  derive d256 = {terminal}\n  view\n    text d0\n"
+        ));
+        let file = crate::parse(&src).unwrap();
+        let resolved = super::resolved_derives(&file.components[0]).unwrap();
+        assert_eq!(resolved.len(), 257);
+        for (_, body) in resolved {
+            assert_eq!(run(&body, &env, &BTreeMap::new()), Ok(V::Num(expected)));
+        }
+    }
+}
+
+#[test]
+fn prop_sharing_keeps_the_prop_as_its_value() {
+    let span = Span::default();
+    let prop = Expr::Ident("p".into(), span);
+    let names = BTreeSet::from(["p".to_owned()]);
+    assert_eq!(super::derives::share_props(&prop, &names), prop);
+    let sum = Expr::Binary(
+        BinOp::Add,
+        Box::new(prop.clone()),
+        Box::new(prop.clone()),
+        span,
+    );
+    let shared = super::derives::share_props(&sum, &names);
+    let Expr::Let {
+        name, value, body, ..
+    } = shared
+    else {
+        panic!("{shared:?}");
+    };
+    assert_eq!(*value, prop);
+    let bound = Expr::Ident(name, span);
+    assert_eq!(
+        *body,
+        Expr::Binary(BinOp::Add, Box::new(bound.clone()), Box::new(bound), span)
+    );
 }
 
 #[test]

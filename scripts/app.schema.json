@@ -59,7 +59,7 @@
     "data": {
       "type": "array",
       "description": "The app's data-* words (LLP 1075.003 Q2), without the `data-`: real attributes on the web, read by the app module's hatches on Apple through typed keys the build writes from this list (ExactDataKey). A data-* attribute in the Contract that this list lacks is bake-undeclared-data.",
-      "items": {"type": "string", "pattern": "^[a-z][a-z0-9]*(-[a-z][a-z0-9]*)*$"}
+      "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"}
     },
     "hatches": {
       "description": "The app's hatch words (LLP 1075.003.000 Q1): a node marked hatch=\"word\" hands its platform object (a UIView or NSView and its kind's UIKit or AppKit object, or a DOM element) to the app module's element hatch, which compares it with typed keys the build writes from this list (ExactHatchKey). A hatched node leaves the host's fast path. A hatch word in the Contract that this list lacks is bake-undeclared-hatch. Either a list of words, each handled on every platform the app builds, or an object giving each word the platforms whose module handles it, as {\"avatar\": [\"ios\", \"macos\", \"web\"]} (LLP 1075.003.000.001 §5): a platform the word does not name shows the node and never calls a hatch for it, and its typed keys leave the word out.",
@@ -1367,7 +1367,7 @@
   "additionalProperties": false,
   "$defs": {
     "moduleTag": {"type": "string", "pattern": "^(?!(?:annotation-xml|color-profile|font-face(?:-src|-uri|-format|-name)?|missing-glyph)$)[a-z][a-z0-9_]*(-[a-z][a-z0-9_]*)+$"},
-    "hatchWord": {"type": "string", "pattern": "^[a-z][a-z0-9]*(-[a-z][a-z0-9]*)*$"},
+    "hatchWord": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
     "hatchPlatform": {"enum": ["ios", "tvos", "macos", "web", "linux", "windows", "android"]},
     "plistValue": {"description": "A property-list value: a string, number, boolean, array or dictionary.", "type": ["string", "number", "boolean", "array", "object"], "items": {"$ref": "#/$defs/plistValue"}, "additionalProperties": {"$ref": "#/$defs/plistValue"}},
     "darkLaunchImage": {"type": "object", "required": ["src"], "additionalProperties": false, "properties": {"src": {"type": "string", "description": "The dark PNG, relative to the app directory.", "pattern": "\\.png$"}}},
