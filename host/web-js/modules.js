@@ -657,8 +657,10 @@ export function modules(rows, bound = {}, views = {}, events = {}) {
       if (refused) { say(`${name}: refused: ${refused}`); return { error: refused }; }
       const state = lists.state(row, sub.list.state);
       const entries = lists.get(state) ?? [], value = args[sub.list.key] ?? null, ref = nextTicket(), kind = sub.list.kind;
-      const same = e => e.fields[sub.list.key] === value && e.fields.kind === kind, replaced = value == null ? null : entries.find(same)?.ref;
-      const kept = value == null ? entries : entries.filter(e => !same(e));
+      // Notifications read an empty tag as no tag; other lists can name an entry "".
+      const keyed = value != null && !(sub.list.launch === "notification" && value === "");
+      const same = e => e.fields[sub.list.key] === value && e.fields.kind === kind, replaced = keyed ? entries.find(same)?.ref : null;
+      const kept = keyed ? entries.filter(e => !same(e)) : entries;
       const entry = { ref, row, fields };
       if (replaced != null) entries.find(e => e.ref === replaced)?.cancelShow?.();
       kept.push(entry);
@@ -690,7 +692,8 @@ export function modules(rows, bound = {}, views = {}, events = {}) {
     if (unlist) {
       for (const state of listOf(row)) {
         lists.set(state, (lists.get(state) ?? []).filter(e => {
-          const keep = e.fields[unlist] !== args[unlist] || (unkind != null && e.fields.kind !== unkind);
+          const keep = (e.row.sub.list.launch === "notification" && args[unlist] === "")
+            || e.fields[unlist] !== args[unlist] || (unkind != null && e.fields.kind !== unkind);
           if (!keep) e.cancelShow?.();
           return keep;
         }));
