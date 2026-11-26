@@ -151,7 +151,7 @@ pub(crate) fn css_text_in(
                 );
             }
             (StyleId::Transition, RowValue::Transitions(t)) => {
-                let (mut text, spring_skipped) = transition_css(t);
+                let (mut text, _) = transition_css(t);
                 // Transition the authored base below the press's animation stack.
                 for (compose, property, name, bases) in [
                     (
@@ -197,12 +197,6 @@ pub(crate) fn css_text_in(
                 }
                 if !text.is_empty() {
                     push_text!(&mut out, "transition:{};", text);
-                }
-                if spring_skipped {
-                    skipped.push(Skipped {
-                        row: id,
-                        reason: "spring transitions are lowered to keyframes by the host, not to CSS `transition`",
-                    });
                 }
             }
             // @ref LLP 1055 D5/D7 — the browser runs it; the rule it names

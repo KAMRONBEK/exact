@@ -271,7 +271,7 @@ fn style_rows_lower_to_css_by_their_names() {
 
 #[test]
 #[allow(clippy::field_reassign_with_default)]
-fn the_transition_row_lowers_to_css_transition_and_springs_are_named() {
+fn the_transition_row_delegates_springs_without_reporting_them_as_skipped() {
     use exact_motion::{
         Easing, LinearStop, SpringConfig, StepPosition, TimingFunction, Transition,
         TransitionProperty, Transitions,
@@ -304,7 +304,7 @@ fn the_transition_row_lowers_to_css_transition_and_springs_are_named() {
         css,
         "opacity 0.25s ease-in-out 0s,all 0.5s cubic-bezier(0.4,0,0.2,1) 0s,translate 0s ease 0s"
     );
-    assert!(spring, "the spring is reported, not silently dropped");
+    assert!(spring, "the host must play the spring");
     assert_eq!(
         easing_css(&Easing::Steps {
             count: 4,
@@ -335,8 +335,7 @@ fn the_transition_row_lowers_to_css_transition_and_springs_are_named() {
     s.mask.set(exact_kernel::StyleId::Transition);
     let (css, skipped) = css_text(&s, &[]);
     assert!(css.starts_with("transition:opacity 0.25s"));
-    assert_eq!(skipped.len(), 1);
-    assert!(skipped[0].reason.contains("spring"));
+    assert!(skipped.is_empty(), "{skipped:?}");
 }
 
 #[test]

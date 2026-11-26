@@ -319,6 +319,34 @@ impl Em<'_> {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn delegated_spring_transitions_are_not_reported_as_skipped() {
+        let mut warnings = Vec::new();
+        for transition in [
+            "translate -exact-spring()",
+            "translate -exact-spring(),\n      opacity -exact-spring()",
+        ] {
+            let plan = contract::compile(&format!(
+                r#"component App
+  view
+    column
+      view translate="100px 0px" transition=(
+        {literal}
+      )
+      view translate="200px 0px" transition=(
+        {literal}
+      )
+"#,
+                literal = serde_json::to_string(transition).unwrap(),
+            ))
+            .unwrap();
+            let emitted = crate::emit::emit(&plan, false, false).unwrap();
+            assert!(emitted.motion, "{transition}");
+            warnings.extend(emitted.warnings);
+        }
+        assert!(warnings.is_empty(), "{warnings:?}");
+    }
+
+    #[test]
     fn computed_transitions_register_motion_without_guessing_their_values() {
         for (declarations, transition, motion) in [
             ("", "\"translate 400ms ease\"", false),
