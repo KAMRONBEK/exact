@@ -174,7 +174,6 @@
 - Android currently shortens the layout viewport for `interactive-widget="resizes-visual"`. Focus a field and compare `exactViewport().height` before and after the keyboard opens. A separate visual viewport would let the layout keep its height (LLP 1078, #1567).
 - On Apple, call `native.later({ extension: "absent", op: "ping" })` beside a Swift module. ExactExtensions returns an error record as a successful reply when no package accepts the call.
 - With an app module installed, call `native.call({extension: "missing", sync: "read"})`. The runner returns `{"error":"NotSupportedError"}` as the synchronous answer for a missing package form.
-- Return `{"exact:answer":"true"}` from an Android package. Extensions.call decodes the string as the Boolean `true`.
 - Call a package through raw `native.later` with `admit: {status: "permission", field: "state"}` and a status of `prompt`. Apple and Android return a successful `person-required` record. The generated package binding rejects it as `NotAllowedError`.
 - An Android native module that emits `submit`, `key` or `hover` on a node with the matching handler never reaches it. Compare those callbacks with the iOS module event roster in LLP 1024.
 - Check an Android in-list reorder grip inside a height-drag handle with vertical scrolling allowed. The ancestor still claims the vertical axis at down. Compare a quick swipe there with one on the grip alone.
