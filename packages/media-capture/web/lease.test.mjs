@@ -206,3 +206,40 @@ test('overlapping applyConstraints camera moves obey lease ordering on late reso
     Object.defineProperty(globalThis, 'navigator', { configurable: true, value: saved });
   }
 });
+
+// A microphone turned off while its idle track reopens: the off was answered, then the new browser track arrived
+// enabled and its consumer heard the microphone. The reopened track takes the track's enabled.
+test('a microphone turned off while it reopens captures nothing', async () => {
+  const made = [];
+  let delay = 0;
+  const saved = globalThis.navigator;
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { mediaDevices: {
+    getUserMedia: async () => {
+      await Bun.sleep(delay);
+      const t = { label: 'Fake microphone', enabled: true, readyState: 'live', getSettings: () => ({}), stop() { this.readyState = 'ended'; } };
+      made.push(t);
+      return { getAudioTracks: () => [t], getTracks: () => [t] };
+    },
+  } } });
+  try {
+    const { implementation } = await import('./index.js');
+    const added = [];
+    const impl = implementation({ changed() {}, agent: false, log() {}, tracks: { add: (row) => added.push(row), held: () => false } });
+    const opened = await impl.getUserMedia({ audio: true });
+    const id = opened.tracks[0].id, owner = added.find((row) => row.id === id).owner;
+    // Used once, so idle; then a consumer starts it while the device opens slowly, and the app turns it off.
+    owner.subscribe(id, {}, { start: true })();
+    delay = 50;
+    let source = null;
+    const leave = owner.subscribe(id, { live: (s) => { source = s; } }, { start: true });
+    expect((await impl.setTrackEnabled({ track: id, enabled: false })).enabled).toBe(false);
+    await Bun.sleep(100);
+    expect(source).toBe(made.at(-1));
+    expect(source.enabled).toBe(false);
+    await impl.setTrackEnabled({ track: id, enabled: true });
+    expect(source.enabled).toBe(true);
+    leave();
+  } finally {
+    Object.defineProperty(globalThis, 'navigator', { configurable: true, value: saved });
+  }
+});
