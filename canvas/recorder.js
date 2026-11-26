@@ -412,7 +412,15 @@ function ellipseSegs(cx, cy, rx, ry, rotation, start, end, anticlockwise) {
   const at = (t) => { const x = rx * Math.cos(t), y = ry * Math.sin(t); return [cx + x * cosR - y * sinR, cy + x * sinR + y * cosR]; };
   const tangent = (t) => { const x = -rx * Math.sin(t), y = ry * Math.cos(t); return [x * cosR - y * sinR, x * sinR + y * cosR]; };
   const first = at(s), out = [];
-  if (rx === 0 || ry === 0) { const last = at(e); out.push(["L", last[0], last[1]]); return [first, out]; }
+  if (rx === 0 || ry === 0) {
+    // Blink's `DegenerateEllipse`: lines through each quarter turn the sweep
+    // crosses (geom.rs `quarter_turns`), so the flat ellipse reaches its ends.
+    if (rx !== ry && e !== s) {
+      const step = e > s ? 1 : -1, k0 = e > s ? Math.floor(s / HALF_PI) + 1 : Math.ceil(s / HALF_PI) - 1;
+      for (let k = k0; e > s ? k * HALF_PI < e : k * HALF_PI > e; k += step) { const p = at(k * HALF_PI); out.push(["L", p[0], p[1]]); }
+    }
+    const last = at(e); out.push(["L", last[0], last[1]]); return [first, out];
+  }
   const sweep = e - s;
   if (sweep === 0) return [first, out];
   const n = Math.max(1, Math.ceil(Math.abs(sweep) / HALF_PI - 1e-9));
