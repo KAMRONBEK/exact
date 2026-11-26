@@ -56,13 +56,21 @@ pub(crate) fn css_text_in(
     bound_press: exact_kernel::StyleMask,
 ) -> (String, Vec<Skipped>) {
     let authored = |out: &mut String, id| {
-        use exact_kernel::style::relative::Unit;
-        let Some((unit, n)) = style
-            .relative
-            .get(id)
-            .filter(|(unit, _)| relative || matches!(unit, Unit::Em | Unit::Viewport(_)))
-        else {
+        use exact_kernel::style::relative::{LengthSpec, Unit};
+        let Some(spec) = style.relative.get_spec(id) else {
             return false;
+        };
+        let (unit, n) = match spec {
+            LengthSpec::Math(c) => {
+                c.css(out);
+                return true;
+            }
+            LengthSpec::Scaled(unit, n)
+                if relative || matches!(unit, Unit::Em | Unit::Viewport(_)) =>
+            {
+                (*unit, *n)
+            }
+            LengthSpec::Scaled(..) => return false,
         };
         match unit {
             Unit::Rem => {

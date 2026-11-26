@@ -561,3 +561,183 @@ fn rem_in_a_calculation_or_a_grid_track_follows_the_root_size() {
         "at 20 px"
     );
 }
+
+#[test]
+fn line_height_length_math_updates_on_viewport_and_root_font_changes_and_inherits() {
+    use exact_kernel::LineHeight;
+
+    let mut kernel = Kernel::with_monospace();
+    let ops = vec![
+        Op::CreateView {
+            id: 1,
+            node_type: NodeType::View,
+        },
+        Op::SetStyle {
+            id: 1,
+            patch: style(&[(StyleId::LineHeight, "clamp(20px, 4vw, 32px)")]),
+        },
+        Op::CreateView {
+            id: 2,
+            node_type: NodeType::Text,
+        },
+        Op::CreateView {
+            id: 3,
+            node_type: NodeType::Text,
+        },
+        Op::SetStyle {
+            id: 3,
+            patch: style(&[(StyleId::LineHeight, "calc(1rem + 4px)")]),
+        },
+        Op::SetChildren {
+            id: 1,
+            children: vec![2, 3],
+        },
+        Op::AttachRoot { id: 1 },
+    ];
+    kernel.apply(0, 1, &ops).unwrap();
+
+    let line_height =
+        |kernel: &Kernel, id: u32| match kernel.node(id).unwrap().computed(StyleId::LineHeight) {
+            RowValue::LineHeight(lh) => lh,
+            other => panic!("unexpected line-height {other:?}"),
+        };
+
+    // Viewport width 400 -> 4vw = 16 -> clamped to 20px; inherited by child 2.
+    kernel
+        .compute_layout(1, Offer::definite(400.0, 800.0))
+        .unwrap();
+    assert_eq!(line_height(&kernel, 1), LineHeight::Length(20.0));
+    assert_eq!(line_height(&kernel, 2), LineHeight::Length(20.0));
+    assert_eq!(line_height(&kernel, 3), LineHeight::Length(20.0));
+
+    // Viewport width 700 -> 4vw = 28px; child 2 inherits the updated computed length.
+    kernel
+        .compute_layout(1, Offer::definite(700.0, 800.0))
+        .unwrap();
+    assert_eq!(line_height(&kernel, 1), LineHeight::Length(28.0));
+    assert_eq!(line_height(&kernel, 2), LineHeight::Length(28.0));
+
+    // Viewport width 1200 -> 4vw = 48 -> clamped to 32px.
+    kernel
+        .compute_layout(1, Offer::definite(1200.0, 800.0))
+        .unwrap();
+    assert_eq!(line_height(&kernel, 1), LineHeight::Length(32.0));
+    assert_eq!(line_height(&kernel, 2), LineHeight::Length(32.0));
+
+    // Root font size 24 -> calc(1rem + 4px) = 28px.
+    kernel.set_root_font_size(24.0).unwrap();
+    let receipt = kernel.apply(0, 2, &[]).unwrap();
+    assert!(receipt.layout_invalidated);
+    kernel
+        .compute_layout(1, Offer::definite(1200.0, 800.0))
+        .unwrap();
+    assert_eq!(line_height(&kernel, 3), LineHeight::Length(28.0));
+}
+
+#[test]
+fn line_height_equal_pixel_math_replacements_and_infinite_viewport_censor() {
+    use exact_kernel::LineHeight;
+
+    let mut kernel = Kernel::with_monospace();
+    kernel
+        .apply(
+            0,
+            1,
+            &[
+                Op::CreateView {
+                    id: 1,
+                    node_type: NodeType::Text,
+                },
+                Op::SetStyle {
+                    id: 1,
+                    patch: style(&[(StyleId::LineHeight, "20px")]),
+                },
+                Op::CreateView {
+                    id: 2,
+                    node_type: NodeType::Text,
+                },
+                Op::SetStyle {
+                    id: 2,
+                    patch: style(&[(StyleId::LineHeight, "calc(infinity * 1vw)")]),
+                },
+                Op::CreateView {
+                    id: 3,
+                    node_type: NodeType::Text,
+                },
+                Op::SetStyle {
+                    id: 3,
+                    patch: style(&[(StyleId::LineHeight, "calc(-infinity * 1vw)")]),
+                },
+                Op::AttachRoot { id: 1 },
+                Op::AttachRoot { id: 2 },
+                Op::AttachRoot { id: 3 },
+            ],
+        )
+        .unwrap();
+    let lh = |kernel: &Kernel, id: u32| match kernel.node(id).unwrap().computed(StyleId::LineHeight)
+    {
+        RowValue::LineHeight(v) => v,
+        other => panic!("{other:?}"),
+    };
+    // Unset viewport: 0 * infinity -> NaN -> censored to 0px.
+    assert_eq!(lh(&kernel, 2), LineHeight::Length(0.0));
+    assert_eq!(lh(&kernel, 3), LineHeight::Length(0.0));
+    // Positive viewport: +infinity -> LARGEST (2^25 px), -infinity -> clamped to 0px.
+    kernel
+        .compute_layout(2, Offer::definite(400.0, 800.0))
+        .unwrap();
+    assert_eq!(lh(&kernel, 2), LineHeight::Length(33_554_432.0));
+    assert_eq!(lh(&kernel, 3), LineHeight::Length(0.0));
+
+    // Equal-pixel replacement at 16px root: 20px -> calc(1rem + 4px) -> root 24px => 28px.
+    kernel
+        .apply(
+            0,
+            2,
+            &[Op::SetStyle {
+                id: 1,
+                patch: style(&[(StyleId::LineHeight, "calc(1rem + 4px)")]),
+            }],
+        )
+        .unwrap();
+    kernel.set_root_font_size(24.0).unwrap();
+    kernel.apply(0, 3, &[]).unwrap();
+    assert_eq!(lh(&kernel, 1), LineHeight::Length(28.0));
+
+    // Equal-pixel replacement between two math expressions at 16px root:
+    // calc(1rem + 4px) -> calc(0.5rem + 12px) -> root 24px => 24px.
+    kernel.set_root_font_size(16.0).unwrap();
+    kernel.apply(0, 4, &[]).unwrap();
+    assert_eq!(lh(&kernel, 1), LineHeight::Length(20.0));
+    kernel
+        .apply(
+            0,
+            5,
+            &[Op::SetStyle {
+                id: 1,
+                patch: style(&[(StyleId::LineHeight, "calc(0.5rem + 12px)")]),
+            }],
+        )
+        .unwrap();
+    kernel.set_root_font_size(24.0).unwrap();
+    kernel.apply(0, 6, &[]).unwrap();
+    assert_eq!(lh(&kernel, 1), LineHeight::Length(24.0));
+
+    // Equal-pixel replacement back from Math to plain px at 16px root: stops following root.
+    kernel.set_root_font_size(16.0).unwrap();
+    kernel.apply(0, 7, &[]).unwrap();
+    assert_eq!(lh(&kernel, 1), LineHeight::Length(20.0));
+    kernel
+        .apply(
+            0,
+            8,
+            &[Op::SetStyle {
+                id: 1,
+                patch: style(&[(StyleId::LineHeight, "20px")]),
+            }],
+        )
+        .unwrap();
+    kernel.set_root_font_size(24.0).unwrap();
+    kernel.apply(0, 9, &[]).unwrap();
+    assert_eq!(lh(&kernel, 1), LineHeight::Length(20.0));
+}

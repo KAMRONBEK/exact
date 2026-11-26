@@ -307,7 +307,7 @@ impl StaticStyle {
                 self.props.clear(StyleMask::of(id));
                 self.unknown.clear(id);
             } else if self.props.set_dynamic(id, &value).is_ok()
-                && self.props.relative.get(id).is_none()
+                && self.props.relative.get_spec(id).is_none()
             {
                 self.unknown.clear(id);
             }

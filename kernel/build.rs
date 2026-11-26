@@ -1097,7 +1097,7 @@ fn generate(schema: &Schema, digest: u64) -> String {
     .unwrap();
     writeln!(
         w,
-        "            let relative = (self.relative.get(id), patch.relative.get(id));"
+        "            let relative = (self.relative.get_spec(id), patch.relative.get_spec(id));"
     )
     .unwrap();
     // A row written the same relative way is unchanged, whatever pixels

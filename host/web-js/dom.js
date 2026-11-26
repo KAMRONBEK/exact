@@ -343,11 +343,12 @@ function combineCssType(a, b, mixLenPct) {
   if (mixLenPct && a !== 'num' && b !== 'num') return 'lenpct';
   return null;
 }
+const CSS_CONST_RE = /^(?:e|pi|-?infinity|nan)(?![a-z0-9_(-])/i;
 function cssMathType(token, mixLenPct) {
   let i = 0;
   const skip = () => { while (i < token.length && /\s/.test(token[i])) i++; };
-  const parseSum = () => {
-    let left = parseProd();
+  const parseSum = depth => {
+    let left = parseProd(depth);
     if (!left) return null;
     for (;;) {
       const wsBefore = i;
@@ -355,7 +356,7 @@ function cssMathType(token, mixLenPct) {
       const c = token[i];
       if ((c === '+' || c === '-') && i > wsBefore && i + 1 < token.length && /\s/.test(token[i + 1])) {
         i++;
-        left = combineCssType(left, parseProd(), mixLenPct);
+        left = combineCssType(left, parseProd(depth), mixLenPct);
         if (!left) return null;
       } else {
         i = wsBefore;
@@ -363,8 +364,8 @@ function cssMathType(token, mixLenPct) {
       }
     }
   };
-  const parseProd = () => {
-    let left = parseAtom();
+  const parseProd = depth => {
+    let left = parseAtom(depth);
     if (!left) return null;
     for (;;) {
       const wsBefore = i;
@@ -372,7 +373,7 @@ function cssMathType(token, mixLenPct) {
       const c = token[i];
       if (c === '*' || c === '/') {
         i++;
-        const right = parseAtom();
+        const right = parseAtom(depth);
         if (!right) return null;
         if (c === '/') {
           if (right !== 'num') return null;
@@ -384,23 +385,28 @@ function cssMathType(token, mixLenPct) {
       }
     }
   };
-  const parseAtom = () => {
+  const parseAtom = depth => {
     skip();
-    const m = CSS_TOKEN_RE.exec(token.slice(i));
+    const rest = token.slice(i);
+    const k = CSS_CONST_RE.exec(rest);
+    if (k) { i += k[0].length; return 'num'; }
+    const m = CSS_TOKEN_RE.exec(rest);
     if (!m) return null;
     if (m[1]) {
       i += m[0].length;
       return m[2] ? 'len' : m[3] ? 'pct' : 'num';
     }
     if (m[5] === '(') {
+      if (depth >= 32) return null;
       i++;
-      const t = parseSum();
+      const t = parseSum(depth + 1);
       skip();
       if (!t || token[i] !== ')') return null;
       i++;
       return t;
     }
     if (m[4]) {
+      if (depth >= 32) return null;
       const fn = m[4].toLowerCase();
       const isSame = CSS_MATH_SAME.has(fn), isNum = CSS_MATH_NUM.has(fn);
       if (!isSame && !isNum) return null;
@@ -412,16 +418,21 @@ function cssMathType(token, mixLenPct) {
         if (mode && CSS_ROUND_MODES.has(mode[1].toLowerCase())) i += mode[0].length;
       }
       for (;;) {
-        const arg = parseSum();
-        if (!arg) return null;
-        if (isNum) {
-          if (fn === 'sign' || fn === 'atan2') {
-            acc = count === 0 ? arg : combineCssType(acc, arg, mixLenPct);
+        skip();
+        const none = fn === 'clamp' && count !== 1 && /^none(?=\s*[,)])/i.exec(token.slice(i));
+        if (none) { i += none[0].length; }
+        else {
+          const arg = parseSum(depth + 1);
+          if (!arg) return null;
+          if (isNum) {
+            if (fn === 'sign' || fn === 'atan2') {
+              acc = acc === null ? arg : combineCssType(acc, arg, mixLenPct);
+              if (!acc) return null;
+            } else if (arg !== 'num') return null;
+          } else {
+            acc = acc === null ? arg : combineCssType(acc, arg, mixLenPct);
             if (!acc) return null;
-          } else if (arg !== 'num') return null;
-        } else {
-          acc = count === 0 ? arg : combineCssType(acc, arg, mixLenPct);
-          if (!acc) return null;
+          }
         }
         count++;
         skip();
@@ -433,16 +444,25 @@ function cssMathType(token, mixLenPct) {
         || fn === 'tan' || fn === 'asin' || fn === 'acos' || fn === 'atan' || fn === 'sign') && count !== 1) return null;
       if ((fn === 'pow' || fn === 'atan2' || fn === 'mod' || fn === 'rem') && count !== 2) return null;
       if ((fn === 'log' || fn === 'round') && (count < 1 || count > 2)) return null;
-      if (fn === 'clamp' && count !== 3) return null;
+      if (fn === 'clamp' && (count !== 3 || !acc)) return null;
       return isNum ? 'num' : acc;
     }
     return null;
   };
   const head = /^([a-z0-9-]+)\(/i.exec(token);
   if (!head || (!CSS_MATH_SAME.has(head[1].toLowerCase()) && !CSS_MATH_NUM.has(head[1].toLowerCase()))) return null;
-  const t = parseAtom();
+  const t = parseAtom(0);
   skip();
   return t && i === token.length ? t : null;
+}
+function hasBalancedSubstitution(clean) {
+  if (!/(?:^|[^a-z0-9_-])(?:var\(\s*--[a-z0-9_-]|env\(\s*[a-z_-])/i.test(clean) || /[;{}]/.test(clean)) return false;
+  let depth = 0;
+  for (let i = 0; i < clean.length; i++) {
+    if (clean[i] === '(') depth++;
+    else if (clean[i] === ')' && --depth < 0) return false;
+  }
+  return depth === 0;
 }
 function cssSupports(prop, value) {
   if (typeof prop !== 'string' || typeof value !== 'string') return false;
@@ -451,6 +471,7 @@ function cssSupports(prop, value) {
   if (p === 'line-height') {
     if (/^(?:normal|unset|inherit|initial|revert|revert-layer)$/i.test(clean)) return true;
     if (CSS_NUM_RE.test(clean) || CSS_PCT_RE.test(clean) || CSS_LEN_RE.test(clean)) return true;
+    if (hasBalancedSubstitution(clean)) return true;
     return cssMathType(clean, true) !== null;
   }
   if (p === 'translate') {

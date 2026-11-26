@@ -399,13 +399,36 @@ test('build-time prerender succeeds without a CSS global for bound line-height, 
 
 component App
   state leading = "24px"
+  state calcLh = "calc(12px + 12px)"
+  state clampLh = "clamp(20px, 4vw, 32px)"
+  state minLh = "min(24px, 30px)"
+  state remCalcLh = "calc(1rem + 4px)"
+  state commentCalcLh = "calc(1px/**/ + 1px)"
+  state escapeCalcLh = "calc(1\\\\70 x + 1px)"
+  state lhUnitCalc = "calc(1lh + 4px)"
+  state chUnitCalc = "calc(1ch + 4px)"
+  state clampNoneLh = "clamp(none, 24px, 32px)"
+  state eofCalcLh = "calc((20px"
+  state eofMinLh = "min(20px, 30px"
+  state eofClampNoneLh = "clamp(none, 24px, none"
+  state badNbspCalcLh = "\\u{00a0}calc(20px)"
+  state badBomCalcLh = "\\u{feff}calc(20px)"
+  state clampNonePos = "clamp(none, 10px, 20px) 5px"
   state badPercent = "150%"
   state badComment = "1.5/**/"
   state badUpperPx = "24PX"
   state badInitial = "initial"
   state badNormalComment = "normal/**/"
-  state badCalcLh = "calc(12px + 12px)"
-  state badMinLh = "min(24px, 30px)"
+  state badNumCalcLh = "calc(1 + 0.5)"
+  state badPctCalcLh = "calc(100% + 4px)"
+  state badEmCalcLh = "calc(1.5em + 4px)"
+  state badPiEmCalcLh = "calc(pi * 1em)"
+  state badClampNoneEm = "clamp(none, 1em, none)"
+  state badSyntaxCalcLh = "calc(10px +)"
+  state badEnvCalcLh = "calc(10px + env(safe-area-inset-top))"
+  state badVarCalcLh = "calc(10px + var(--x))"
+  state badTooManyLh = "calc(${Array(33).fill('1px').join(' + ')})"
+  state badTooDeepLh = "calc(${'('.repeat(32)}1px${')'.repeat(32)})"
   state pos = "10px 20px"
   state mathPos = "calc(10px + 20px) 5px"
   state adjPos = "calc(10px)calc(20px)"
@@ -429,13 +452,39 @@ component App
             feGaussianBlur stdDeviation=1
         rect width=10 height=10 filter=(filtered ? "url(#mask-box)" : "none") testId="filtered"
       text "ok" testId="ok" line-height=leading
+      text "calc-lh" testId="calc-lh" line-height=calcLh
+      text "clamp-lh" testId="clamp-lh" line-height=clampLh
+      text "min-lh" testId="min-lh" line-height=minLh
+      text "rem-calc-lh" testId="rem-calc-lh" line-height=remCalcLh
+      text "comment-calc-lh" testId="comment-calc-lh" line-height=commentCalcLh
+      text "escape-calc-lh" testId="escape-calc-lh" line-height=escapeCalcLh
+      text "lh-unit-calc" testId="lh-unit-calc" line-height=lhUnitCalc
+      text "ch-unit-calc" testId="ch-unit-calc" line-height=chUnitCalc
+      text "clamp-none-lh" testId="clamp-none-lh" line-height=clampNoneLh
+      text "eof-calc-lh" testId="eof-calc-lh" line-height=eofCalcLh
+      text "eof-min-lh" testId="eof-min-lh" line-height=eofMinLh
+      text "eof-clamp-none-lh" testId="eof-clamp-none-lh" line-height=eofClampNoneLh
+      text "bad-nbsp-calc-lh" testId="bad-nbsp-calc-lh" line-height=badNbspCalcLh
+      text "bad-bom-calc-lh" testId="bad-bom-calc-lh" line-height=badBomCalcLh
+      view press=noop testId="clamp-none-moved" translate=clampNonePos scale=zoom
+        :active
+          translate = offset
+          -exact-press-scale = 0.96
       text "bad-percent" testId="bad-percent" line-height=badPercent
       text "bad-comment" testId="bad-comment" line-height=badComment
       text "bad-upper" testId="bad-upper" line-height=badUpperPx
       text "bad-initial" testId="bad-initial" line-height=badInitial
       text "bad-normal-comment" testId="bad-normal-comment" line-height=badNormalComment
-      text "bad-calc-lh" testId="bad-calc-lh" line-height=badCalcLh
-      text "bad-min-lh" testId="bad-min-lh" line-height=badMinLh
+      text "bad-num-calc-lh" testId="bad-num-calc-lh" line-height=badNumCalcLh
+      text "bad-pct-calc-lh" testId="bad-pct-calc-lh" line-height=badPctCalcLh
+      text "bad-em-calc-lh" testId="bad-em-calc-lh" line-height=badEmCalcLh
+      text "bad-pi-em-calc-lh" testId="bad-pi-em-calc-lh" line-height=badPiEmCalcLh
+      text "bad-clamp-none-em" testId="bad-clamp-none-em" line-height=badClampNoneEm
+      text "bad-syntax-calc-lh" testId="bad-syntax-calc-lh" line-height=badSyntaxCalcLh
+      text "bad-env-calc-lh" testId="bad-env-calc-lh" line-height=badEnvCalcLh
+      text "bad-var-calc-lh" testId="bad-var-calc-lh" line-height=badVarCalcLh
+      text "bad-too-many-lh" testId="bad-too-many-lh" line-height=badTooManyLh
+      text "bad-too-deep-lh" testId="bad-too-deep-lh" line-height=badTooDeepLh
       view press=noop testId="moved" translate=pos scale=zoom
         :active
           translate = offset
@@ -466,7 +515,25 @@ component App
     const page = readFileSync(resolve(dist, 'index.html'), 'utf8');
     const styleOf = (id) => new RegExp(`data-testid="${id}"[^>]*style="([^"]*)"`).exec(page)?.[1] ?? '';
     expect(styleOf('ok')).toContain('line-height:24px');
-    for (const id of ['bad-percent', 'bad-comment', 'bad-upper', 'bad-initial', 'bad-normal-comment', 'bad-calc-lh', 'bad-min-lh']) {
+    expect(styleOf('calc-lh')).toContain('line-height:calc(12px + 12px)');
+    expect(styleOf('clamp-lh')).toContain('line-height:clamp(20px, 4vw, 32px)');
+    expect(styleOf('min-lh')).toContain('line-height:min(24px, 30px)');
+    expect(styleOf('rem-calc-lh')).toContain('line-height:calc(1rem + 4px)');
+    expect(styleOf('comment-calc-lh')).toContain('line-height:calc(1px + 1px)');
+    expect(styleOf('escape-calc-lh')).toContain('line-height:calc(1px + 1px)');
+    expect(styleOf('lh-unit-calc')).toContain('line-height:calc(16px + 4px)');
+    expect(styleOf('ch-unit-calc')).toContain('line-height:calc(8px + 4px)');
+    expect(styleOf('clamp-none-lh')).toContain('line-height:clamp(none, 24px, 32px)');
+    expect(styleOf('eof-calc-lh')).toContain('line-height:calc((20px))');
+    expect(styleOf('eof-min-lh')).toContain('line-height:min(20px, 30px)');
+    expect(styleOf('eof-clamp-none-lh')).toContain('line-height:clamp(none, 24px, none)');
+    expect(styleOf('clamp-none-moved')).toContain('--exact-translate-x:clamp(none, 10px, 20px)');
+    for (const id of [
+      'bad-percent', 'bad-comment', 'bad-upper', 'bad-initial', 'bad-normal-comment',
+      'bad-num-calc-lh', 'bad-pct-calc-lh', 'bad-em-calc-lh', 'bad-pi-em-calc-lh',
+      'bad-clamp-none-em', 'bad-syntax-calc-lh', 'bad-env-calc-lh', 'bad-var-calc-lh',
+      'bad-too-many-lh', 'bad-too-deep-lh', 'bad-nbsp-calc-lh', 'bad-bom-calc-lh',
+    ]) {
       expect(styleOf(id), id).toContain('line-height:unset');
     }
     expect(styleOf('moved')).toContain('--exact-translate-x:10px');
