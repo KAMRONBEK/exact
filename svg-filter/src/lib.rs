@@ -22,8 +22,8 @@ pub enum Input {
     SourceAlpha,
     /// A primitive's result, by index.
     Result(u16),
-    /// Transparent black (a name no earlier primitive gave, `FillPaint`,
-    /// `StrokePaint`).
+    /// Transparent black (`FillPaint`, `StrokePaint`, `BackgroundImage`,
+    /// `BackgroundAlpha`).
     None,
 }
 
