@@ -4326,7 +4326,7 @@ posts in the shade. A channel controls their settings. Apple's
 own tag and use one more tag for the summary. For example, an app that declares
 the `field_trip` channel can pass its current count with each post.
 
-```contract
+```text
   action specimen(title: string, tag: string, count: number)
     showNotification(title=title, tag=tag, android.channelId="field_trip", android.group="field-trip")
     showNotification(title="Field trip", body=`${count} specimens`, tag="trip-summary", android.channelId="field_trip", android.group="field-trip", android.groupSummary=true)
