@@ -5376,10 +5376,13 @@ A task has one `every(ms, action)`, `after(ms, action)`,
  The action is parameterless. Millisecond intervals
 are whole-number literals of at least 1. The frame form has no delta-time argument and does not
 catch up missed display frames. For deterministic tests, use the driver's clock.
-The clock moves in advances, and one advance commits at most 4,096 timer actions
+The clock moves in advances, and one advance runs at most 4,096 timer actions
 and `then`s (`TIMER_FIRE_LIMIT`), those that change nothing included; the rest is
 refused, what committed is kept, and the clock stays at the last one's time. A
 fast `every` under a long `clock +N` can reach it: tick slower or move the clock in steps.
+A firing whose action changes nothing commits nothing: it wrote no state a new value, and
+sent, refreshed and commanded nothing. Where a binding, derive or resource argument reads
+`performanceNow()`, every firing commits and shows the time.
 
 Use `change(action)` for work that must follow an input change, such as reading
 layout or issuing a host command:

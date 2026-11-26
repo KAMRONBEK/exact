@@ -73,6 +73,11 @@ impl<D: DataSource> Runner<D> {
     /// Before a commit, including every resource field a refusal restores.
     pub(super) fn checkpoint(&mut self) -> Checkpoint {
         self.start_commit();
+        self.started_checkpoint()
+    }
+
+    /// [`Self::checkpoint`] of a commit already started.
+    fn started_checkpoint(&mut self) -> Checkpoint {
         self.derives_evaluated = 0;
         self.copied_at_checkpoint = self.store.copied_bytes();
         let store = self.store.checkpoint();
@@ -333,6 +338,60 @@ impl<D: DataSource> Runner<D> {
         result
     }
 
+    /// A task's firing: [`Self::run_action`], or `None` and no commit when
+    /// the firing is idle ([`Self::changes_nothing`]). The body runs once
+    /// either way, at the firing's sample of the clock.
+    pub(super) fn run_task(
+        &mut self,
+        action: ActionsId,
+        args: &[Value],
+        frames: &[Frame],
+    ) -> Result<Option<CommitReceipt>, RunnerError> {
+        let was_poisoned = self.poisoned;
+        self.start_commit();
+        let outcome = self.action_outcome(action, args, frames);
+        if matches!(&outcome, Ok(outcome) if self.changes_nothing(outcome)) {
+            // As a commit's end does: the next beat follows the body's time.
+            self.sample();
+            return Ok(None);
+        }
+        let checkpoint = self.started_checkpoint();
+        let result = outcome.and_then(|outcome| self.commit_outcome(outcome, frames, None));
+        self.conclude(checkpoint, &result, was_poisoned);
+        self.arm_then(result.is_ok());
+        self.arm_next(result.is_ok());
+        result.map(Some)
+    }
+
+    /// Whether committing `outcome` would change nothing a settlement, the
+    /// view or a host reads. It sends, commands and refreshes nothing, writes
+    /// no row's slot, and writes a root slot only a value equivalent to the
+    /// one it holds, which settlement already reads as unchanged; a write to
+    /// a mutation's slot also ends its request, so it is never idle. Nothing
+    /// evaluated at a commit may read the clock: the commit would show it
+    /// (a task's gate and key cannot, `analyze-task-gate-clock`).
+    fn changes_nothing(&self, outcome: &vm::Outcome) -> bool {
+        // Every field: one added later is read here before it is idle.
+        let vm::Outcome {
+            value: _,
+            writes,
+            row_writes,
+            commands,
+            sends,
+            refreshes,
+            store_dependent: _,
+        } = outcome;
+        sends.is_empty()
+            && commands.is_empty()
+            && refreshes.is_empty()
+            && row_writes.is_empty()
+            && writes.iter().all(|(slot, value)| {
+                crate::compare::equivalent(&self.slots[*slot as usize], value)
+                    && !self.plan.mutations.iter().any(|m| m.slot.0 == *slot)
+            })
+            && !self.sites.deps().reads_clock
+    }
+
     /// Arm the `then` action of each mutation answered in the commit just
     /// made, if it stood. It runs as its own commit when the host next
     /// advances the clock, which it does at once for a due time already
@@ -367,6 +426,17 @@ impl<D: DataSource> Runner<D> {
         frames: &[Frame],
         edit: Option<field::InputEdit>,
     ) -> Result<CommitReceipt, RunnerError> {
+        let outcome = self.action_outcome(action, &args, frames)?;
+        self.commit_outcome(outcome, frames, edit)
+    }
+
+    /// What the action's body asks for at `args`; nothing is applied.
+    fn action_outcome(
+        &mut self,
+        action: ActionsId,
+        args: &[Value],
+        frames: &[Frame],
+    ) -> Result<vm::Outcome, RunnerError> {
         if self.poisoned {
             return Err(RunnerError::Poisoned);
         }
@@ -438,15 +508,23 @@ impl<D: DataSource> Runner<D> {
             }
             None => None,
         };
-        let outcome = {
-            // The frames in force at the view the event hit (LLP 1017 P4c):
-            // a row action reads and writes its row through them.
-            let mut env = self.env(&args, frames);
-            env.geometry = geometry.as_ref();
-            vm::eval(self.plan.code(row.body), &env, &allowed).map_err(|t| {
-                RunnerError::from(t).evaluated(|| format!("action {:?}", self.plan.str(row.name)))
-            })?
-        };
+        // The frames in force at the view the event hit (LLP 1017 P4c):
+        // a row action reads and writes its row through them.
+        let mut env = self.env(args, frames);
+        env.geometry = geometry.as_ref();
+        vm::eval(self.plan.code(row.body), &env, &allowed).map_err(|t| {
+            RunnerError::from(t).evaluated(|| format!("action {:?}", self.plan.str(row.name)))
+        })
+    }
+
+    /// Commit what an action's body asked for: its sends, its writes,
+    /// settlement and the update.
+    fn commit_outcome(
+        &mut self,
+        outcome: vm::Outcome,
+        frames: &[Frame],
+        edit: Option<field::InputEdit>,
+    ) -> Result<CommitReceipt, RunnerError> {
         let rewrite = edit.and_then(|edit| self.reconciled_input(edit, frames, &outcome));
         // Sends (LLP 1016 §4): each asks the source now. An answer lands in
         // the mutation's slot inside this commit; a request goes to the host

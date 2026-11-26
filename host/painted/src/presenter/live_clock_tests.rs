@@ -851,6 +851,48 @@ fn native_actions_publish_their_visible_changes_through_the_normal_commit_path()
 }
 
 #[test]
+fn a_native_callback_whose_action_changes_nothing_services_no_commit() {
+    // The first two firings write nothing; the third shows a new value.
+    let source = TICKER
+        .replace(
+            "    ticks = ticks + 1",
+            "    if performanceNow() >= 3000\n      ticks = ticks + 1",
+        )
+        .replace("text \"x\"", "text `${ticks}`");
+    let (mut p, _) = Presenter::boot_with(
+        &crate::test_plan(&source),
+        NoData,
+        (400., 400.),
+        1.,
+        PathBuf::from("."),
+        PainterChoice::Cpu,
+    )
+    .unwrap();
+    let wall = Rc::new(Cell::new(0.0));
+    let read = wall.clone();
+    p.use_native_timers(true);
+    p.set_live_clock(Some(Rc::new(move || read.get())));
+    p.frame();
+    for at in [1000.0, 2000.0, 3000.0] {
+        wall.set(at);
+        let timer = p.host().runner().native_timers()[0].clone();
+        let (seq, layouts) = (p.host().runner().seq(), p.host.layout_calls);
+        p.hatches.stale = false;
+        assert!(p
+            .fire_native_timer(p.native_timer_generation(), &timer, at)
+            .is_none());
+        let committed = usize::from(at == 3000.0);
+        assert_eq!(p.host().runner().seq() - seq, committed as u64, "{at}");
+        assert_eq!(p.host.layout_calls - layouts, committed, "{at}");
+        assert_eq!(p.hatches.stale, committed == 1, "the commit service: {at}");
+        assert_eq!(p.dirty(), committed == 1, "{at}");
+        assert!(!p.wants_display_frames() && !p.needs_animation_frame());
+        assert_eq!(p.host().runner().native_timers()[0].due_ms, at + 1000.0);
+    }
+    assert_eq!(ticks(&p), 1.0);
+}
+
+#[test]
 fn native_commands_run_without_a_presentation() {
     let source = TICKER
         .replace(

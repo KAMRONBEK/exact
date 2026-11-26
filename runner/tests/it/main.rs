@@ -24,6 +24,7 @@ mod frames_agent;
 mod gate_settlement;
 mod geometry_facts;
 mod height_binding;
+mod idle_timers;
 mod incremental;
 mod keep_mounted;
 mod keep_sent;

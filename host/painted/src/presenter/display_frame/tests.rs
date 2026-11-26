@@ -736,7 +736,7 @@ fn timer_primed(source: &str) -> Fixture {
     (p, paints, fail)
 }
 #[test]
-fn timer_demand_paused_due_receipt_does_not_repaint() {
+fn timer_demand_paused_due_timer_does_not_repaint() {
     let plan = contract::compile(IDLE_TIMER).unwrap();
     let mut runner = exact_runner::Runner::boot(
         plan,
@@ -748,10 +748,12 @@ fn timer_demand_paused_due_receipt_does_not_repaint() {
     .unwrap();
     let due = runner.advance_timed(250.);
     assert!(due.error.is_none());
-    assert_eq!(due.receipts.len(), 1, "due timer really executes");
-    let r = &due.receipts[0].receipt;
-    assert!(r.created.is_empty() && r.destroyed.is_empty() && r.touched.is_empty());
-    assert!(!r.layout_invalidated);
+    assert!(due.receipts.is_empty(), "an idle firing commits nothing");
+    assert_eq!(
+        runner.timer_due_ms(),
+        Some(500.),
+        "due timer really executes"
+    );
     let (mut p, paints, _) = timer_primed(IDLE_TIMER);
     let epoch = p.host.kernel().epoch();
     assert!(p.advance(250.).is_none());

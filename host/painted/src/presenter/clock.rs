@@ -183,6 +183,11 @@ impl<D: DataSource> Presenter<D> {
             .host
             .runner_mut()
             .fire_native_timer(timer.index, timer.generation, now_ms);
+        // An idle firing, or a callback the runner no longer owes: nothing
+        // committed, so there is nothing to lay out, service or paint.
+        if a.receipts.is_empty() && a.error.is_none() {
+            return None;
+        }
         let (e, paint) = self.host.advanced(a);
         self.dirty |= paint;
         let after = self.finish_commit();
