@@ -1298,7 +1298,11 @@ with the mouse anyway). A finger's drag the browser takes to scroll an
 ancestor ends in `panrelease` and a `pan cancelled` journal line naming the
 `touch-action` that keeps it. `during "op" …`: each quoted op is a read
 (`tree`, `layout`, `state`, `logs`, `screenshot`) or `clock`, run while the finger
-is down, after its leg's move and before its hold. The gesture takes its `press`,
+is down, after its leg's move and before its hold. A test file runs these reads
+and compares nothing, and refuses an `expect` there; a drive returns them in its
+reply's `during` list (`bun exact.mjs agent macos 'tap knob drag 0 40 mouse hold
+300 during "state"'`), which is how to inspect what a drag shows while it is held.
+The gesture takes its `press`,
 `over` and `hold` on the test's clock, so `performanceNow()` in the app's pointer
 actions reads them: a move's samples are a frame apart on the clock, the first
 one frame after the press (500 ms of press reads 515 on the web before a 200 ms
