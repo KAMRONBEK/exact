@@ -586,20 +586,22 @@ import { claimVariant, resolveVariant, selectedVariant, variantProblems } from '
 import { REMOVED_DOMAINS, appleLinkDomains, androidLinkFilters, linkProblems, protocolHandlerProblems, isWebScheme, rawAppleDomains } from './links.mjs';
 export { DOCUMENT_UTIS, isWebScheme, ownDocumentType };
 
-// Check both launch pictures wherever a build reads the manifest.
+// Check both launch pictures wherever a build reads the manifest: each is a PNG
+// file inside the app directory, a link out of it refused like a path (#1595).
 function launchImageProblems(manifest, dir) {
-  return ['ios', 'android'].flatMap((host) => {
-    const launch = manifest.host?.[host]?.launchImage;
-    if (launch === true) return [`host.${host}.launchImage: true is not a picture; false shows no icon, { "src", "width" } a picture`];
-    if (launch?.src && !existsSync(resolve(dir, launch.src))) return [`host.${host}.launchImage: ${launch.src}, the launch screen's picture, does not exist`];
-    const dark = launch?.color_scheme_dark?.src;
-    if (!dark) return [];
-    const path = resolve(dir, dark), key = `host.${host}.launchImage.color_scheme_dark`;
-    if (isAbsolute(dark) || !under(dir, path) || (existsSync(path) && !under(realpathSync(dir), realpathSync(path)))) {
-      return [`${key}: ${dark} must name a PNG inside the app directory`];
+  const picture = (key, src) => {
+    const path = resolve(dir, src);
+    if (isAbsolute(src) || !under(dir, path) || (existsSync(path) && !under(realpathSync(dir), realpathSync(path)))) {
+      return [`${key}: ${src} must name a PNG inside the app directory`];
     }
-    if (!existsSync(path)) return [`${key}: ${dark}, the launch screen's picture, does not exist`];
-    return statSync(path).isFile() ? [] : [`${key}.src: ${dark} must be a PNG file`];
+    if (!existsSync(path)) return [`${key}: ${src}, the launch screen's picture, does not exist`];
+    return statSync(path).isFile() ? [] : [`${key}.src: ${src} must be a PNG file`];
+  };
+  return ['ios', 'android'].flatMap((host) => {
+    const launch = manifest.host?.[host]?.launchImage, key = `host.${host}.launchImage`, dark = launch?.color_scheme_dark?.src;
+    if (launch === true) return [`${key}: true is not a picture; false shows no icon, { "src", "width" } a picture`];
+    const base = launch?.src ? picture(key, launch.src) : [];
+    return base.length || !dark ? base : picture(`${key}.color_scheme_dark`, dark);
   });
 }
 

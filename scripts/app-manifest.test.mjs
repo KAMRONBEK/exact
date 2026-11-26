@@ -1058,6 +1058,19 @@ test('host.android.launchImage takes a PNG in the app up to the starting window\
     // A native input: the Android binary's record names it, so an update cannot change it.
     assert.deepEqual(nativeManifestMetadata(manifest, 'android').host.launchImage, { src: 'logo.png', width: 192 });
     for (const host of ['ios', 'android']) {
+      // The base picture is held to the dark one's rule: an existing file outside the app, or reached through a link
+      // out of it, is refused (#1595).
+      const outside = resolve(dir, '..', `${basename(dir)}-outside.png`);
+      writeFileSync(outside, 'png');
+      symlinkSync(outside, resolve(dir, 'linked.png'));
+      try {
+        assert.throws(() => read({ src: `../${basename(outside)}`, width: 128 }, host), new RegExp(`host\\.${host}\\.launchImage: \\.\\./.*-outside\\.png must name a PNG inside the app directory`));
+        assert.throws(() => read({ src: outside, width: 128 }, host), /launchImage: .* must name a PNG inside the app directory/);
+        assert.throws(() => read({ src: 'linked.png', width: 128 }, host), /launchImage: linked\.png must name a PNG inside the app directory/);
+      } finally { rmSync(outside); rmSync(resolve(dir, 'linked.png')); }
+      mkdirSync(resolve(dir, 'folder.png'));
+      assert.throws(() => read({ src: 'folder.png', width: 128 }, host), /launchImage\.src: folder\.png must be a PNG file/);
+      rmSync(resolve(dir, 'folder.png'), { recursive: true });
       const launch = { src: 'logo.png', width: 128, color_scheme_dark: { src: 'night.png' } };
       assert.throws(() => read(launch, host), /launchImage.color_scheme_dark: night.png.*does not exist/);
       assert.throws(() => read({ ...launch, color_scheme_dark: { src: '../outside.png' } }, host), /inside the app directory/);

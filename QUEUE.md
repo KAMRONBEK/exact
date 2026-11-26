@@ -137,7 +137,6 @@
 - Generate an Android adaptive icon and TV banner. Truncate the banner after its PNG header, rebuild, restore its bytes, and rebuild again. The old icon resource cache key accepts a directory missing the banner (#1614).
 - Omit the light launch colour on a maskable gradient with a transparent cut-out and expose the adaptive icon's full 108 dp during launch. Its top-left RGB meets the other edges in a visible square. LLP 1163 D6 preserves those resources for now (#1614).
 - Build an Android app with `ORG_GRADLE_PROJECT_manifestFragment` set to a raw XML fragment, then add a bound package with manifest entries and rebuild. The first APK accepts the raw fragment outside the allow-list and the second replaces it (#1466).
-- Set either host's base `launchImage.src` to an existing `../outside.png`. The manifest accepts it despite documenting a PNG inside the app directory (#1595).
 - In a compact UIKit split, open the list’s detail, replace its bottom action row with a single spacer, then remove that row without popping. Check toolbar visibility on both nested navigation controllers. On iPadOS 26.5 the list controller’s toolbar stayed visible after removal (#1422).
 
 - Measure the cost of refusing a Forma proposal after an unchanged prefix under load. On the M5 Max, the parent of the bottom-toolbar change took 103 ms against the 80 ms budget in `a_refusal_after_an_unchanged_prefix_stays_within_the_budget`.
