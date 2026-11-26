@@ -7816,6 +7816,17 @@ Native inline runs, moving presentation geometry, rotated roots and SVG clip ref
 percentage margins follow Chrome (LLP 1001). See LLP 1005's intersection
 visibility deviation; other native hosts remain unqualified.
 
+### Reporting a pinch
+
+| Host | Input delivered to `pinch` and `pinchrelease` |
+| --- | --- |
+| iOS and iPadOS | UIKit's simultaneous pinch recognizer. A drifting pair scrolls the list as it pinches. Lifting the pair leaves the list at its release offset; a surviving or later finger that moves again can still fling. An iPad trackpad pinch reaches this recognizer (unverified on hardware). |
+| Android, Web JS, Web wasm, macOS, painted Linux and Windows, terminal | Both bindings compile and stay silent. Android and touch-web recognizers are queued on `fable/pinch-report-1804`. |
+
+Use `wheel` with `ctrlKey` for trackpad magnification on macOS and the web.
+On other desktops the same handler can consume a Control-held wheel where
+the host delivers one. [Grid example](contract-for-agents.md#changing-a-grids-columns)
+
 ### Scroll drags and swipes
 
 `scrolldragstart` and `scrolldragend` on a scroller bracket the reader's drag
