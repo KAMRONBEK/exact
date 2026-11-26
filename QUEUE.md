@@ -2288,7 +2288,6 @@ and the Linux headless CPU renderer without claiming display frame timing.
 
 - iPad directory inference (LLP 1127 D19). A list with `grid-template-columns="repeat(auto-fill, minmax(160px, 1fr))"` has one column at 200 points and several at 800. Both report zero width before the first layout. Decide at the width the person will see.
 - iPad directory inference (LLP 1127 D19). Distinguish a dashboard's short list below its statistics from a settings directory with a heading, search and two buttons above its scrolling list. The initial tree does not give their laid-out sizes.
-- Preserve Shift on modified printable keys in the terminal decoder. With a button declaring `Meta+Shift+O`, the terminal drive `key Meta+Shift+O` misses it. A button declaring `Meta+O` takes the same press (#1617).
 - Decide whether comparing disjoint enum types should warn. A function taking `x: enum<"pen", "text">` and `y: enum<"copy", "save">` compiles `x == y`.
 - Check inference across child action props. A child declaring `pick(x)` and forwarding `run=pick` to another child that calls `run(mode)` with an enum state gets `type-cannot-infer` for `x` even when that is its only caller.
 - Skip an empty anchor when moving through a painted menu by arrow key. Between two buttons in a `column role="menu"`, put `link href="" tabindex=0` and press ArrowDown on the first button. Painted focuses the link and Chromium focuses the next button.
