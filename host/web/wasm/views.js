@@ -1,5 +1,5 @@
 import { symbolBox, symbolSize, symbolPlaceholder, syncSymbolPlaceholder, symbolFit, tintFit } from "../symbol-geometry.js";
-import { downForDrag, elementOf, lightDomDragPath, observeDragInput, pressedAt } from "../drag-input.js";
+import { downForDrag, dragPathFrom, elementOf, observeDragInput, pressedAt } from "../drag-input.js";
 import { picker, track, iframeLoading, localAssetURL, host, agentMode, pageFacts, pageNative, loadAfterPaint, moduleReady, views, writeIn, now, afterNativePaint, log, retiredViews, lists, root, encoder, readOut, imageProbes, inflight, IMAGE_ERROR, CORS_ERROR, heldValues, composing, loadDecorations, markupPending, scrollDocs, followScroll, pendingScrolls, DATA_LIMIT, authoredDisabled, holdWake, holdOrientation } from "../glue.js";
 import { resolveShortcuts, pageGivenFiles, commitGuestOrigin, frameURL, refuseURL, fieldText, replaceFieldText, valuedControl, renderMarkup, editMenu, inertAncestor, contextAt, liveById, navigates, navigableURL, dataURL, settleValue, fitVisualViewport } from "../navigation.js";
 import { send } from "./commit.js";
@@ -404,7 +404,7 @@ function waitingDrag(event) {
   const target = event.target;
   if (target.matches?.('[draggable="true" i]') && !waitingView(target)) return;
   if (target.localName === "img") {
-    const path = lightDomDragPath(event);
+    const path = dragPathFrom(waitingInput, event);
     if (path.length) {
       if (waits(path)) event.preventDefault();
       return;
