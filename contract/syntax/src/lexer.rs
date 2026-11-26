@@ -314,11 +314,19 @@ impl Lexer {
                             next_line = i + 1 + json.bytes().filter(|&c| c == b'\n').count();
                             out.push(Token {
                                 kind: TokenKind::Punct("="),
-                                span: col_of(equal),
+                                span: Span {
+                                    end_col: col_of(equal + 1).col,
+                                    ..col_of(equal)
+                                },
                             });
+                            // A value spanning lines ends its span on the first.
+                            let first = json.lines().next().map_or(0, str::len);
                             out.push(Token {
                                 kind: TokenKind::Json(json.into()),
-                                span: col_of(start),
+                                span: Span {
+                                    end_col: col_of(start + first).col,
+                                    ..col_of(start)
+                                },
                             });
                             break;
                         }
