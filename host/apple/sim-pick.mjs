@@ -49,7 +49,8 @@ export async function pickSimulatorInteractive(candidates, {
   };
   render();
   return new Promise((done) => {
-    const wasRaw = Boolean(stdin.isRaw);
+    // A caller already reading keys (the dev loop's controls) keeps reading once the choice is made.
+    const wasRaw = Boolean(stdin.isRaw), wasFlowing = stdin.readableFlowing === true;
     if (stdin.isTTY && typeof stdin.setRawMode === 'function') stdin.setRawMode(false);
     stdin.resume();
     stdin.setEncoding('utf8');
@@ -58,7 +59,7 @@ export async function pickSimulatorInteractive(candidates, {
       stdin.off('data', onData);
       stdin.off('end', onEnd);
       if (stdin.isTTY && typeof stdin.setRawMode === 'function' && wasRaw) stdin.setRawMode(true);
-      else stdin.pause();
+      else if (!wasFlowing) stdin.pause();
       done(choice);
     };
     const onEnd = () => finish(null);
