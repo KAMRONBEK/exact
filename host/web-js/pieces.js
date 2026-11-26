@@ -474,6 +474,7 @@ export function mde(e) {
   let cur = e, obs = null, dead = false;
   onEnd(() => {
     dead = true;
+    e._exactEditor = null;
     obs?.disconnect();
     obs = null;
     cur?.exactMarkup?.destroy();
@@ -492,6 +493,7 @@ export function mde(e) {
         replaceRowNode(cur, n);
         replaced(cur, n);
         cur = n;
+        e._exactEditor = n;
         Ids.set(n, id);
         Views.set(id, n);
         e.$markup = n.exactMarkup;
@@ -535,6 +537,15 @@ export function mde(e) {
             // before the editor applies its own key default
             t === 'keydown',
           );
+        // Forward clipboard events with the original trusted ClipboardEvent so
+        // live clipboardData items/files survive and stopPropagation/preventDefault
+        // act on the real event (LLP 1156.008.000 D5.1).
+        for (const t of ['paste', 'copy', 'cut'])
+          n.addEventListener(t, ev => {
+            const handlers = e._exactClipboard?.[t];
+            if (!handlers?.length) return;
+            for (const h of handlers) h(ev);
+          });
         obs?.disconnect();
         obs = new MutationObserver(ms => {
           for (const m of ms) {

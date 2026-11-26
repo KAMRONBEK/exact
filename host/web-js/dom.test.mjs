@@ -531,3 +531,93 @@ test('JS router reconstructs structural-prefix ancestors positionally (LLP 1156.
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('onFocus follows replaced Markdown editor and onClipboard stores original-event handler (LLP 1156.008.000 D5.1)', async () => {
+  const dir = mkdtempSync(resolve(tmpdir(), 'exact-d51-'));
+  try {
+    stageRuntime(dir, ['rt.js', 'clock.js', 'resources.js', 'tree.js', 'events.js', 'pieces.js', 'mount.js', 'strings.js', 'elements.js', 'shape.js', 'overlay.js', 'held.js', 'roster.js', 'budget.js', 'rows.js', 'router.js', 'route-pattern.js', 'schedule.js', 'document.js', 'pointer.js', 'focus.js']);
+    const { onFocus, onClipboard } = await import(resolve(dir, 'events.js'));
+    const listeners = {};
+    const textarea = {
+      isConnected: false,
+      _exactEditor: { isConnected: true },
+      addEventListener: (t, fn) => { (listeners[t] ??= []).push(fn); },
+    };
+    let focused = 0;
+    onFocus(textarea, 'focus', () => { focused++; }, (t, fn) => textarea.addEventListener(t, fn));
+    listeners.focus[0]();
+    expect(focused).toBe(1);
+    textarea._exactEditor.isConnected = false;
+    listeners.focus[0]();
+    expect(focused).toBe(1);
+
+    let pastedText = null, stopped = false;
+    onClipboard(textarea, 'paste', ([text]) => { pastedText = text; }, (t, fn) => textarea.addEventListener(t, fn));
+    const originalEvent = {
+      clipboardData: { getData: k => (k === 'text/plain' ? 'hello world' : '') },
+      stopPropagation: () => { stopped = true; },
+    };
+    textarea._exactClipboard.paste[0](originalEvent);
+    expect(pastedText).toBe('hello world');
+    expect(stopped).toBe(true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('zoom.js measures non-HTMLElement (<svg>) children using applied zoom scale (LLP 1156.008.000 D5.2)', async () => {
+  const dir = mkdtempSync(resolve(tmpdir(), 'exact-d52-'));
+  const prevDoc = globalThis.document, prevEl = globalThis.Element, prevHtml = globalThis.HTMLElement;
+  const prevCS = globalThis.getComputedStyle, prevRO = globalThis.ResizeObserver;
+  try {
+    stageRuntime(dir, ['rt.js', 'clock.js', 'resources.js', 'tree.js', 'events.js', 'pieces.js', 'mount.js', 'strings.js', 'elements.js', 'shape.js', 'overlay.js', 'held.js', 'roster.js', 'budget.js', 'rows.js', 'router.js', 'route-pattern.js', 'schedule.js', 'document.js', 'zoom.js']);
+    class FakeElement {
+      constructor(tag) {
+        this.tag = tag; this.style = { setProperty() {}, getPropertyValue: () => '' }; this.children = []; this.isConnected = true;
+        this.clientWidth = 200; this.clientHeight = 200; this.scrollLeft = 0; this.scrollTop = 0;
+      }
+      setAttribute() {}
+      addEventListener() {}
+      dispatchEvent() {}
+      append(...nodes) { this.children.push(...nodes); }
+      get firstElementChild() { return this.children[0] ?? null; }
+      get nextElementSibling() { return null; }
+      scrollTo({ left, top }) { this.scrollLeft = left; this.scrollTop = top; }
+    }
+    class FakeHTMLElement extends FakeElement {}
+    globalThis.Element = FakeElement;
+    globalThis.HTMLElement = FakeHTMLElement;
+    globalThis.ResizeObserver = class { observe() {} };
+    globalThis.document = {
+      createElement: tag => new FakeHTMLElement(tag),
+      head: { appendChild: el => ({ sheet: { cssRules: [], insertRule() {} } }) },
+    };
+    const { zoom } = await import(resolve(dir, 'zoom.js'));
+    const { After, PropHooks } = await import(resolve(dir, 'rt.js'));
+    const container = new FakeHTMLElement('div');
+    const layer = zoom(container);
+    const svg = new FakeElement('svg'); // Element, not HTMLElement
+    layer.getBoundingClientRect = () => ({ left: 10, top: 20, width: 200 * container.$zoomApplied, height: 200 * container.$zoomApplied });
+    svg.getBoundingClientRect = () => ({ left: 10 + 15 * container.$zoomApplied, top: 20 + 25 * container.$zoomApplied, width: 100 * container.$zoomApplied, height: 80 * container.$zoomApplied });
+    layer.append(svg);
+    globalThis.getComputedStyle = el => el === container
+      ? { display: 'block', paddingLeft: '0px', paddingTop: '0px', paddingRight: '0px', paddingBottom: '0px', touchAction: 'auto', scrollBehavior: 'auto', getPropertyValue: k => (k === '--exact-max-zoom' ? '4' : k === '--exact-min-zoom' ? '1' : '') }
+      : { marginRight: '0px', marginBottom: '0px' };
+    const settleAfter = After.at(-1);
+    settleAfter();
+    expect(container.$zoomApplied).toBe(1);
+    expect(container.$zoomLayers.sizer.style.width).toBe('115px');
+    expect(container.$zoomLayers.sizer.style.height).toBe('105px');
+    PropHooks.scrollZoom(container, 2);
+    settleAfter();
+    expect(container.$zoomApplied).toBe(2);
+    // At zoom 2, dividing by applied scale (1 before draw, then 2 on next settle) keeps untransformed size 100x80.
+    settleAfter();
+    expect(container.$zoomLayers.sizer.style.width).toBe('115px');
+    expect(container.$zoomLayers.sizer.style.height).toBe('105px');
+  } finally {
+    globalThis.document = prevDoc; globalThis.Element = prevEl; globalThis.HTMLElement = prevHtml;
+    globalThis.getComputedStyle = prevCS; globalThis.ResizeObserver = prevRO;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
