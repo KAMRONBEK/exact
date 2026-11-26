@@ -1436,8 +1436,23 @@ a general async workflow or a per-reply event log.
 A long poll (`/changes?since=…&wait=…`) is a stream too: add
 `exactLongPoll: { cursor: 'since', from: 'seq' }` beside `exactStream`, and the
 host asks again with each reply's cursor, skipping heartbeats and backing off
-on failures (`docs/reference.md`, LLP 1016.000 D8). Re-read on each event with
-`resource view = load() with live.seq`. A native app has 16 network stream slots. Long polls, event feeds, WebSockets, listeners and running uploads each use one. Use one poll carrying changes for all open documents. Desktop apps have 16 additional slots for streaming children.
+on failures (`docs/reference.md`, LLP 1016.000 D8). Refresh the snapshot when
+an event advances the counter. Here `live.seq` starts at zero.
+
+```text
+  resource view = load() as shape Snapshot else empty()
+  task reloadOnEvent when live.seq > 0 key=live.seq
+    change(reload)
+  action reload
+    refresh view
+```
+
+With `load() with live.seq`, an event can keep an identical request already
+in flight and record its older reply as current. A forced refresh replaces
+the in-flight read, so a read slower than the gap between events lands only
+after events pause.
+
+A native app has 16 network stream slots. Long polls, event feeds, WebSockets, listeners and running uploads each use one. Use one poll carrying changes for all open documents. Desktop apps have 16 additional slots for streaming children.
 
 A bidirectional WebSocket uses a resource's TypeScript
 `fetch(url, { exactStream(event, socket) { … } })` (LLP 1016.000 D7).
