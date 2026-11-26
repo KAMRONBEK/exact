@@ -272,6 +272,10 @@ class PlayerTest {
         val clip = RectF(0f, 0f, 200f, 100f)
         assertTrue(graph.transform(frame, matrix, clip))
         assertEquals(RectF(0f, 225f, 100f, 275f), clip)
+        val slots = Slots(player) { true }
+        slots.node(9)
+        slots.set(9, IntBuffer.wrap(identity), 0, identity.size, player)
+        assertTrue("an image arriving keeps the iframe in the page", graph.transform(frame, matrix))
     }
 
     /** A box's CSS filter (ops 53 and 54): its drawing goes into a node at the region's device bounds, which carries

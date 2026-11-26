@@ -80,8 +80,8 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
     private val rows = HashMap<Int, android.graphics.RenderNode>()
     /** Rows the last stream freed: dropped when the next stream arrives, as the last one may be replayed again. */
     private val freeing = ArrayList<Int>()
-    /** Rows being recorded on the worker, and the row each replaces (drawn meanwhile; 0 for none). */
-    private val pending = HashMap<Int, Int>()
+    /** Rows being recorded on the worker, and the optional predecessor drawn until it is ready. */
+    private val pending = HashMap<Int, Int?>()
     /** Rows freed while being recorded, and replaced rows freed while still drawn for one being recorded. */
     private val cancelled = HashSet<Int>()
     private val stale = HashSet<Int>()
@@ -141,8 +141,8 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
     private val timer = Runnable { if (running && prefetch && Native.owed()) Native.refine(-1, 0f); pump() }
     /** step or pump took this frame's stream: onDraw replays it without asking again. */
     private var taken = false
-    /** The last take was a move: no new drawing, only the groups' translations. */
-    private var moved = false
+    /** The last owner publication changed only retained nodes or their translations. */
+    private var rootRetained = false
     /** An ownerless async boot ([Native.startAsync]), or a cold owner boot that holds the first draw. */
     var booting = false
     // The first app frame dismisses the starting window even if the reader has nothing to draw yet.
@@ -198,8 +198,6 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
     /** Each kept row's node, named (a row recorded again in place keeps its predecessor's name). */
     private val tokens = HashMap<Int, Int>()
     private var nextToken = 1
-    /** The last stream applied changed only nodes the view's drawing references: no need to draw the view again. */
-    private var quiet = false
 
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
         val parent = parent as? View ?: return
@@ -402,7 +400,7 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
     /** A frame that draws what moved, with nothing recorded again. */
     internal fun tick() { ticker?.invalidate() }
     /** The view's own drawing is recorded again from the last stream (what it names changed). */
-    internal fun again() { rootSig = null; invalidate() }
+    internal fun again() { invalidate() }
 
     override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent): Boolean =
         keys?.down(event)?.also { if (it) pump() } ?: super.onKeyDown(keyCode, event)
@@ -471,7 +469,7 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
     internal fun publish(): Boolean {
         if (!started || worker.isShutdown) return false
         if (!takeOwned()) return false
-        if (moved || quiet) ticker?.invalidate() else invalidate()
+        if (rootRetained) ticker?.invalidate() else invalidate()
         return true
     }
 
@@ -551,7 +549,7 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
             if (ops != null) {
                 if (p.move) { move = p; applyMoveTracks(ops) } else {
                     move = null; painted = true; feedNext = p.feed; applyStream(ops); feedBaseX = 0f; feedBaseY = 0f
-                    allQuiet = allQuiet && retained(ops)
+                    if (!retained(ops, recordGroups = allQuiet)) allQuiet = false
                 }
                 feed = p.feed
             }
@@ -567,38 +565,40 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
         }
         if (any) { placeScrolled(); textSelection.refresh() }
         if (coverTrace && painted) traceNewRows()
-        moved = !painted
-        quiet = painted && allQuiet && move == null
+        rootRetained = allQuiet
         // The root display list stands. All of its changed children have published their new placements.
-        if (quiet) { nativeOrigins.publishing = false; natives?.placeFrames() }
+        if (painted && rootRetained) { nativeOrigins.publishing = false; natives?.placeFrames() }
         timerApplied = publication
         if (any) { ingestBegan = began; ingestEnded = System.nanoTime() }
         timerReport()
         return any
     }
 
-    /** After [applyStream]: whether [stream]'s top level is the last one's, its changed groups then recorded again
-     * here (the view's drawing stands). Otherwise the next [onDraw] replays it all. */
-    private fun retained(stream: IntBuffer): Boolean {
-        if (!retain) return false
-        val root = structure.read(stream) { id -> tokens[id] ?: -id }
-        val last = rootSig
-        rootSig = if (structure.opaque) null else root
-        val same = last != null && !structure.opaque && root.contentEquals(last)
-        if (same) {
+    /** Compare the root and group recordings after a publication or row completion. Once a paint in this drain
+     * needs a root draw, [onDraw] records the latest groups with it. */
+    private fun retained(stream: IntBuffer, recordGroups: Boolean = true): Boolean {
+        val root = structure.read(stream, { main.native(it)?.uniqueId ?: 0L }, ::rowToken)
+        val same = retain && !structure.opaque && root.contentEquals(rootSig)
+        rootSig = root
+        if (same && recordGroups) {
             for (g in structure.groups) {
                 val id = g[0]
                 if (structure.groupSigs[id]?.contentEquals(groupSigs[id]) == true) continue
-                val node = groups[id] ?: return false.also { rootSig = null }
-                android.os.Trace.beginSection("exact group again")
-                val c = node.beginRecording()
-                main.replay(c, stream, g[1], g[2], into = node)
-                node.endRecording()
-                android.os.Trace.endSection()
+                if (!recordGroup(stream, g, "exact group again")) return false
             }
         }
         groupSigs.clear(); groupSigs.putAll(structure.groupSigs)
         return same
+    }
+
+    private fun rowToken(id: Int) = tokens[id] ?: pending[id]?.let { tokens[it] } ?: -id
+
+    private fun recordGroup(stream: IntBuffer, range: IntArray, trace: String): Boolean {
+        val node = groups[range[0]] ?: return false
+        android.os.Trace.beginSection(trace)
+        main.recordGroup(stream, range, node)
+        android.os.Trace.endSection()
+        return true
     }
 
     /** After a stream, and each move of the reader's own, which may make none ([Owner]): the feed, the scrollers' rows,
@@ -741,7 +741,6 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
         return feedBaseY - residual
     }
 
-
     /** near=0: a row out of view when exact2 painted it records on the worker however soon the scroll brings it in.
      * Otherwise a new row within [Structure.NEAR_S] of travel of the view (where the stream draws it, in the direction of the
      * scroll) records here, as one in view does: on the worker it was drawn a frame or more after it came into view
@@ -883,53 +882,32 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
         return null
     }
 
-    /** New rows recorded on the worker that a group may draw (nothing drawn in their place until then), and those
-     * done since the last frame. */
-    private val awaited = HashSet<Int>()
-    private val done = HashSet<Int>()
+    /** A deferred placement can now draw its fallback or completed row. */
+    private var rowsReady = false
+    private var rowPainted = false
     private var regrouping = false
     private val regroup = (context as Activity).intent.getStringExtra("regroup") != "0"
-    /** Before the frame: the last stream's groups that draw a row done since, recorded again (the view's drawing
-     * references them: it stands). */
+    /** Record each group that draws a completed row. A placement outside a group belongs to the view. */
     private val regroupFrame = android.view.Choreographer.FrameCallback {
         regrouping = false
         if (worker.isShutdown) return@FrameCallback
-        val b = ops
-        if (b != null && done.isNotEmpty()) {
-            var i = 0
-            var from = -1
-            var id = 0
-            val n = b.limit()
-            var again = false
-            while (i < n) {
-                val op = b.get(i)
-                val j = structure.end(b, i)
-                when (op) {
-                    20 -> { from = j; id = b.get(i + 1); again = false }
-                    17 -> if (from >= 0 && done.contains(b.get(i + 1))) again = true
-                    21 -> {
-                        val g = groups[id]
-                        if (again && g != null) {
-                            android.os.Trace.beginSection("exact group rows done")
-                            val c = g.beginRecording()
-                            main.replay(c, b, from, i, into = g)
-                            g.endRecording()
-                            android.os.Trace.endSection()
-                        }
-                        from = -1
-                    }
-                }
-                i = j
-            }
-            ticker?.invalidate()
+        if (!rowsReady) return@FrameCallback
+        rowsReady = false
+        val painted = rowPainted
+        rowPainted = false
+        val stream = ops ?: return@FrameCallback
+        var pageChanged = structure.updateRows(::rowToken)
+        if (!pageChanged) for (g in structure.groups) {
+            if (g[0] in structure.changedGroups && !recordGroup(stream, g, "exact group rows done")) pageChanged = true
         }
-        done.clear()
+        if (pageChanged) invalidate() else if (painted || structure.changedGroups.isNotEmpty()) tick()
     }
 
+    private enum class Change { NONE, MOVE, GROUP, ROOT }
     private var pendingStream: IntBuffer? = null
-    /** A new stream, if exact2 has one: made ready to replay. Whether there was one. */
-    private fun take(vsync: Boolean = false): Boolean {
-        if (!running) return false
+    /** Take the next ownerless stream and report which recording changed. */
+    private fun take(vsync: Boolean = false): Change {
+        if (!running) return Change.NONE
         val stream = pendingStream ?: run {
             android.os.Trace.beginSection("exact native frame")
             val fresh = Native.frame(vsync)
@@ -941,7 +919,7 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
         }
         if (stream != null && natives?.prepare(stream, structure) { post { pump() } } == false) {
             pendingStream = stream
-            return false
+            return Change.NONE
         }
         pendingStream = null
         // The fields first: the stream that came with them draws their nodes; a statement may come with none.
@@ -951,16 +929,22 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
         // exact2 runs on this thread (owner=0): its bindings are checked here, as the owner checks them after a turn.
         Formas.turned()
         Native.chrome()?.let(chrome)
-        stream ?: return false
+        stream ?: return Change.NONE
         val told = Native.scrollers()
-        moved = stream.limit() > 0 && stream.get(0) == 22
-        if (moved) { applyMove(stream); applyMoveTracks(stream) } else applyStream(stream)
+        val move = stream.limit() > 0 && stream.get(0) == 22
+        val change = if (move) {
+            applyMove(stream); applyMoveTracks(stream); Change.MOVE
+        } else {
+            applyStream(stream)
+            if (retained(stream)) Change.GROUP else Change.ROOT
+        }
         told?.let { scrolling.told(it) }
         scrolling.place()
         fields?.place()
         Formas.placed()
         textSelection.refresh()
-        return true
+        if (change == Change.GROUP) { nativeOrigins.publishing = false; natives?.placeFrames() }
+        return change
     }
 
     /** The last stream, its scrollers' rows moved: nothing new to make. */
@@ -1029,15 +1013,22 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
         }
     }
 
-    /** After a scroll step: a move draws through the ticker, a new stream through this view. The rows the scroll
+    /** A scroll step draws retained changes through the ticker and a changed root through this view. The rows it
      * brings near mount after this frame is handed off (prefetch=0: inside the scroll, as exact2 does by default). */
     fun step() {
-        if (take()) { if (moved) ticker?.invalidate() else { taken = true; invalidate() } }
+        drawTaken(take())
         schedule()
         // Every third step: the window leads the view by a quarter second of travel, so this keeps it filled, and
         // rows mount (and retire) in fewer, larger passes, each one paint. (Mounting a row or two between every
         // frame, as RecyclerView's GapWorker does, painted every frame and cost more: xheavy 12k 83 vs 91 fps.)
         if (prefetch && ++steps % 3 == 0) { removeCallbacks(refiner); post(refiner) }
+    }
+    private fun drawTaken(change: Change) {
+        when (change) {
+            Change.NONE -> Unit
+            Change.GROUP, Change.MOVE -> tick()
+            Change.ROOT -> { taken = true; invalidate() }
+        }
     }
     private var steps = 0
     private val prefetch = (context as Activity).intent.getStringExtra("prefetch") != "0"
@@ -1050,7 +1041,9 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
     internal fun pump(vsync: Boolean = false) {
         if (owner != null) return // the owner publishes what a key or a reply changed
         if (!running) { if (wakes != null) schedule(); return }
-        if (take(vsync)) { if (moved) ticker?.invalidate() else { taken = true; invalidate() } } else schedule()
+        val change = take(vsync)
+        drawTaken(change)
+        if (change == Change.NONE || change == Change.GROUP) schedule()
     }
     /** exact2 wants another turn: at the next vsync, ask it, and draw only if the stream changed. */
     private val turn = android.view.Choreographer.FrameCallback { t -> HostFacts.turned(t, System.nanoTime()); turnPosted = false; pump(vsync = true) }
@@ -1283,7 +1276,7 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
         val clip = b.get(i + 2) and (1 shl 30) == 0
         node.setClipToBounds(clip)
         // In view this frame: made now, never a blank row for a frame. Otherwise on the worker.
-        if (async && !shown) { tokens[id] = nextToken++; record(id, previous, node, b, body, end) } else {
+        if (async && !shown) record(id, previous, node, b, body, end) else {
             // Again into the node of the row it replaces (owned, shown, and nothing else drawing that node):
             // what references it stands, and HWUI damages this row only.
             val again = if (retain && owner != null && previous != 0 && !pending.containsKey(previous) &&
@@ -1324,7 +1317,7 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
             streamFrame = false
             if (later.isNotEmpty()) { laterPosted = true; android.view.Choreographer.getInstance().postFrameCallback(laterFrame) }
         } else makeLater(laterNs)
-        if (done.isNotEmpty()) regroupFrame.doFrame(0L) // the groups of rows made here ([makeOne]), for this frame
+        if (rowsReady) regroupFrame.doFrame(0L) // the groups of rows made here ([makeOne]), for this frame
     }
 
     /** The waiting rows the scroll is about to bring into view (within a quarter of the view, or three frames of
@@ -1382,7 +1375,8 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
         laterRows.remove(id)
         makeRow(l.b, l.at, now || l.b.get(l.at + 2) < 0 || near(id, f(l.b, l.at + 4)))
         // Its groups were recorded without it: they are recorded again once it is made, not with the next stream.
-        if (pending.containsKey(id)) awaited.add(id) else done.add(id)
+        if (!pending.containsKey(id)) rowPainted = true
+        if (rowPainted || pending[id] in rows) rowsReady = true
         val outer = skipDefs
         skipDefs = true
         ingest(l.b, l.sets, l.end)
@@ -1419,10 +1413,9 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
         val held = heldCopy ?: HashMap(slots.nodes).also { heldCopy = it }
         val animating = layers.nodes()
         val named = shared.nodes()
-        pending[id] = previous
+        pending[id] = previous.takeUnless { it == 0 }
         if (coverTrace) definedAt[id] = System.nanoTime()
         val replacing = previous != 0
-        if (!replacing) awaited.add(id)
         worker.execute {
             if (worker.isShutdown) return@execute
             android.os.Trace.beginSection(if (replacing) "exact row again" else "exact row new")
@@ -1439,18 +1432,20 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
             completions.post {
                 if (worker.isShutdown) { node.discardDisplayList(); return@post }
                 pending.remove(id)
-                if (cancelled.remove(id)) node.discardDisplayList() else rows.put(id, node)?.discardDisplayList()
-                // A new row its group could not draw yet: the groups drawing it are recorded again before the next
-                // frame, so it shows now, not with the next stream (regroup=0: with the next stream, to compare).
-                if (awaited.remove(id) && regroup) { done.add(id); if (!regrouping) { regrouping = true; android.view.Choreographer.getInstance().postFrameCallback(regroupFrame) } }
-                // What was drawn in its place is in the view's drawing: the next stream draws it all again.
-                rootSig = null
+                if (cancelled.remove(id)) node.discardDisplayList() else {
+                    rows.put(id, node)?.discardDisplayList()
+                    // A placement changes from its fallback to this node. Only its containing drawing changes.
+                    tokens[id] = nextToken++
+                    if (regroup) {
+                        rowsReady = true
+                        if (!regrouping) { regrouping = true; android.view.Choreographer.getInstance().postFrameCallback(regroupFrame) }
+                    }
+                }
                 // The row it replaces may still be in the last recorded drawing: it goes with the next stream.
                 if (stale.contains(previous) && !pending.containsValue(previous)) {
                     stale.remove(previous)
                     freeing.add(previous)
                 }
-                // Out of view when it was sent: the next frame there is anyway shows it (no frame of its own).
             }
         }
     }

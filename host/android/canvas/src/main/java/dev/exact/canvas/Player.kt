@@ -76,6 +76,7 @@ internal class Player(private val fonts: Map<Int, Font>) {
     var layer: (Int) -> android.graphics.RenderNode? = { null }
     var shared: (Long) -> android.graphics.RenderNode? = { null }
     var group: ((Int) -> android.graphics.RenderNode)? = null
+    private val groupOrigins = HashMap<Int, android.graphics.PointF>()
     /** What is drawn in place of a scroller's own node, for one whose edge the reader stretches ([Scrolling]). */
     var holder: ((Int) -> android.graphics.RenderNode?)? = null
     var width = 0
@@ -428,6 +429,13 @@ internal class Player(private val fonts: Map<Int, Font>) {
         val sx = shiftX; val sy = shiftY
         shiftX = sx + dx; shiftY = sy + dy
         try { replay(canvas, b, from, n, into = into) } finally { shiftX = sx; shiftY = sy }
+    }
+
+    /** A partial replay uses the same recording coordinates as the group in the full stream, including inside a filter. */
+    fun recordGroup(b: IntBuffer, range: IntArray, node: android.graphics.RenderNode) {
+        val origin = groupOrigins[range[0]]
+        replayAt(node.beginRecording(), b, range[1], range[2], origin?.x ?: 0f, origin?.y ?: 0f, node)
+        node.endRecording()
     }
 
     private fun f(b: IntBuffer, i: Int) = java.lang.Float.intBitsToFloat(b.get(i))
@@ -1243,6 +1251,8 @@ internal class Player(private val fonts: Map<Int, Font>) {
                         // A backdrop references the page's group; recording it again would move the page's rows.
                         while (i < n && b.get(i) != 21) i = walker.end(b, i)
                     } else {
+                        if (shiftX == 0f && shiftY == 0f) groupOrigins.remove(grouped)
+                        else groupOrigins.getOrPut(grouped) { android.graphics.PointF() }.set(shiftX, shiftY)
                         g.setPosition(0, 0, width, height)
                         outer = c
                         saveMatrix()
