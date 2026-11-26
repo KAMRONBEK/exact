@@ -2311,7 +2311,6 @@ and the Linux headless CPU renderer without claiming display frame timing.
 - Measure client-only startup while the entry itself is unavailable (#1660, LLP 1048 D2). Hold only `app-*.js` for six seconds with German selected. Both the inline-table and split-table releases have an empty root until the entry executes.
 
 - Should an explicit same-value assignment in a select's `change` restore the bound option? In #1733's filtered-field fixture, choose B while `pick = pick` keeps A. Chromium shows B under LLP 1069.001 D4.
-- Run `cargo test -p exact-web-js the_js_target_reads_a_role_as_the_kernel_does`. On b505d1ade the JS reader accepts a nested accent fallback that the kernel refuses.
 - Keep a terminal draft across input that only validates (#1733). Bind a terminal input to `"4"`, store its input in a separate label and type `-` then `2`. The label shows `4-` then `42`; the field shows `4` after both keys.
 - Read the live editor in Apple authored field assertions (#1733). On macOS, bind a field to `"A"`, let its input action only validate, type `abc` and `expect text` on the field. Both revisions report `A`. On iOS the reporter’s assertions passed even when its keyboard showed the rejected text.
 - Run `bun test ./scripts/completion-inventory.test.mjs` at 0fa23a7fe. Its ownership assertions report stale classifications for `Presenter::drag_of` and five accessibility helpers in `access.rs` (`bun scripts/completion-inventory.mjs --check`).
