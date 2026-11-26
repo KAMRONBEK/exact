@@ -585,6 +585,7 @@ extension NodeView {
         needsCapture = false; paintedThisTurn = false
         // A parked view keeps no bitmap: its create ops paint it again.
         if layer.contents != nil { layer.contents = nil }
+        drewFallbackText = false
         // Nor an extension: the next node's is set for it (`setExtension`)
         setExtension(.zero)
         // Its material goes, its children back in the node (LLP 1068 §4.1):

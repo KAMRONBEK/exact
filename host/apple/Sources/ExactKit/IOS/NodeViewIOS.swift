@@ -26,6 +26,8 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
     private(set) var textRasterWhole = false
     var textRasterReady = false { didSet { if oldValue != textRasterReady { presenter?.noteOwedText(self) } } }
     var textRasterFailed = false { didSet { if oldValue != textRasterFailed { presenter?.noteOwedText(self) } } }
+    /// `draw(_:)` painted fallback text into this view's backing store while no raster was shown.
+    var drewFallbackText = false
     var proseMarker: CATextLayer?
     var textLayoutValid = false
     /// Whether a frame has shown it where it is (`Presenter.showed`).
@@ -1402,6 +1404,7 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
     }
 
     package override func draw(_ rect: CGRect) {
+        drewFallbackText = false
         repaintThrough(); syncDrawnRange()
         guard let ctx = UIGraphicsGetCurrentContext() else { return }
         if !cssVisibilityHidden, Capture.capturing, kind == "canvas", let picture = canvases?.picture(of: self) {
@@ -1465,8 +1468,12 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
                     HostPhases.shared.end(phase)
                 }
                 let spec = paragraphSpec()
-                if let paragraph = paragraphLayout() { eachFragment(ctx) { box, at, lines in
-                    drawParagraph(ctx, paragraph: paragraph, spec: spec, in: box, dirty: rect.offsetBy(dx: -at.x, dy: -at.y), lines: lines) } }
+                if let paragraph = paragraphLayout() {
+                    drewFallbackText = true
+                    eachFragment(ctx) { box, at, lines in
+                        drawParagraph(ctx, paragraph: paragraph, spec: spec, in: box, dirty: rect.offsetBy(dx: -at.x, dy: -at.y), lines: lines)
+                    }
+                }
             }
         }
         if !cssVisibilityHidden, Capture.capturing, let picture = Capture.web[id] {
