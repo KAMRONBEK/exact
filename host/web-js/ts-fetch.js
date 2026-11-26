@@ -473,6 +473,7 @@ const GuardedAbortSignal = PageAbortSignal && new Proxy(PageAbortSignal, { get(t
 // prototype is or inherits the real one, with no `format` accessor of its own):
 // a guard over the fake would find no getter and the page would not start.
 const NativeDate = globalThis.Date.prototype.constructor, NativeMath = globalThis.Math, NativeIntl = globalThis.Intl, construct = Reflect.construct;
+const AGENT_ADMITTED = true;
 const AGENT_EPOCH = 1767225600000;
 let cachedAgentEpoch;
 function agentEpoch() {
@@ -482,7 +483,7 @@ function agentEpoch() {
     const href = globalThis.performance?.getEntriesByType?.('navigation')[0]?.name ?? globalThis.location?.href;
     if (!href) return null;
     const params = new URL(href).searchParams;
-    if (!['', '1'].includes(params.get('agent'))) return null;
+    if (!(AGENT_ADMITTED && ['', '1'].includes(params.get('agent')))) return null;
     const raw = params.get('epoch');
     const n = raw == null ? AGENT_EPOCH : Number(raw);
     cachedAgentEpoch = Number.isSafeInteger(n) && n >= 0 ? n : AGENT_EPOCH;

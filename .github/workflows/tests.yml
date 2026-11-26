@@ -89,7 +89,7 @@ jobs:
       - name: test
         env:
           CARGO_TERM_COLOR: always
-        run: cargo test --tests --no-fail-fast
+        run: cargo test --tests --no-fail-fast -- --test-threads=2
 
   scripts:
     runs-on: ubuntu-24.04
@@ -171,11 +171,11 @@ jobs:
         run: |
           mapfile -t files < <(
             bun -e '
-              import { readdirSync } from "node:fs";
+              import { readdirSync, statSync } from "node:fs";
               const shard = Number(process.env.SHARD);
               const all = readdirSync("scripts")
                 .filter(f => f.endsWith(".test.mjs") && f !== "package-libraries-link.test.mjs")
-                .sort()
+                .sort((a, b) => statSync("scripts/" + b).size - statSync("scripts/" + a).size || a.localeCompare(b))
                 .map(f => "./scripts/" + f);
               for (const f of all.filter((_, i) => i % 4 === shard)) console.log(f);
             '

@@ -81,6 +81,7 @@ import {
   layoutArgs,
 } from './agent-inspect.mjs';
 import { guardFlags } from './help.mjs';
+import { writeSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkOp } from './agent-check.mjs';
@@ -144,6 +145,24 @@ export const heartbeat = ({ name, line, last, op, since }, now) => {
 };
 
 export const DRIVEN_HOSTS = ['web', 'macos', 'mac', 'ios', 'linux', 'android', 'windows', 'host', 'host-ios'];
+const RAW_CONSOLE_LOG = console.log;
+async function writeLine(text) {
+  if (console.log !== RAW_CONSOLE_LOG) { console.log(text); return; }
+  const buf = Buffer.from(`${text}\n`);
+  for (let off = 0; off < buf.length; ) {
+    try {
+      const n = writeSync(1, buf, off, buf.length - off);
+      if (n <= 0) await new Promise(ok => setTimeout(ok, 1));
+      else off += n;
+    } catch (e) {
+      if (e?.code === 'EAGAIN' || e?.code === 'EWOULDBLOCK') {
+        await new Promise(ok => setTimeout(ok, 1));
+        continue;
+      }
+      throw e;
+    }
+  }
+}
 export async function main(argv, injected = {}) {
   const { flags, rest } = parseFlags(argv);
   guardFlags(flags.test ? 'test' : 'agent', rest, { parsed: true }); // --help, or a flag parseFlags left (never an op)
@@ -277,7 +296,7 @@ export async function main(argv, injected = {}) {
     const t = await readTrace(file, traceLocators, flags.plan);
     // A trace asked of a process is kept with its map, so it reads on any machine (LLP 1142 D2).
     if (flags.out || flags.pid) writeTrace(t, flags.out ?? file);
-    console.log(flags.json ? JSON.stringify(t) : renderTrace(t));
+    await writeLine(flags.json ? JSON.stringify(t) : renderTrace(t));
     return 0;
   }
   if (!host || !ops.length) {
@@ -677,7 +696,7 @@ export async function main(argv, injected = {}) {
       at = k + 1;
       const done = await step(line);
       for (const [op, r, how] of [...(s.heldReads?.splice(0) ?? []), ...(done ? [done] : [])]) {
-        console.log(flags.json ? JSON.stringify(r) : render(op, r, how));
+        await writeLine(flags.json ? JSON.stringify(r) : render(op, r, how));
         await notes(op, r);
       }
     }

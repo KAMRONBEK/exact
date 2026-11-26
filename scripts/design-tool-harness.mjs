@@ -128,7 +128,9 @@ export async function drive(url, storage, ops, { keepStorage = false } = {}) {
   const out = lines(child);
   const [code] = await Promise.all([new Promise(ok => child.once('close', ok)), out.ended]);
   if (code !== 0) throw new Error(`the drive failed: ${said}\n${out.seen.slice(-3).join('\n').slice(0, 3000)}`);
-  return out.seen.filter(l => l.startsWith('{')).map(l => JSON.parse(l));
+  return out.seen.filter(l => l.startsWith('{')).map(l => {
+    try { return JSON.parse(l); } catch (e) { throw new SyntaxError(`${e.message} (line len=${l.length}, tail=${JSON.stringify(l.slice(-80))})`); }
+  });
 }
 
 /** The tool on `app` through `forma tool --via` to a proxy in front of
