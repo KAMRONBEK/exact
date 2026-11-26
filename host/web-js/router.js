@@ -32,6 +32,8 @@ function rootFor(i) {
 }
 const segmentOf = v => { if (["", ".", ".."].includes(v)) throw new Refusal("a path parameter cannot be empty, `.` or `..`"); return enc(v, b => !/[A-Za-z0-9\-_.!~*'()]/.test(String.fromCharCode(b))); };
 const path = (r, values) => r.pattern.split("/").map(s => s[0] === ":" ? segmentOf(values.shift() ?? "") : s).join("/");
+const segments = p => p === "/" ? [] : p.replace(/^\//, "").split("/");
+const isStructuralPrefix = (a, b) => !!b && a.length <= b.length && a.every((s, j) => s[0] === ":" ? b[j][0] === ":" : s === b[j]);
 function chain(location) {
   const url = canonical(location), m = matchRoute(url);
   if (!m) return [];
@@ -40,10 +42,17 @@ function chain(location) {
   const idx = [index];
   if (!Routes[index].notfound) for (let p = Routes[index].parent; idx.at(-1) !== root && p != null && p >= 0; p = Routes[p].parent) { if (idx.includes(p)) return []; idx.push(p); }
   if (!idx.includes(root)) idx.push(root);
+  const leafPat = Routes[index].notfound ? null : segments(canonical(Routes[index].pattern)), parts = segments(url.split("?")[0]);
   return idx.reverse().map(i => {
-    const r = Routes[i], own = empty();
-    for (const n of names(r.pattern)) own[Names.indexOf(n)] = params[Names.indexOf(n)];
-    return { name: r.name, url: i === index ? url : canonical(path(r, names(r.pattern).map(n => params[Names.indexOf(n)]))), tab: Routes[root].name, params: own };
+    const r = Routes[i], own = empty(), pat = segments(canonical(r.pattern));
+    const positional = i !== index && isStructuralPrefix(pat, leafPat), values = [];
+    for (let j = 0; j < pat.length; j++) {
+      if (pat[j][0] !== ":") continue;
+      const n = pat[j].slice(1), v = positional ? dec(parts[j], false) : params[Names.indexOf(n)];
+      own[Names.indexOf(n)] = v;
+      values.push(v);
+    }
+    return { name: r.name, url: i === index ? url : canonical(path(r, values)), tab: Routes[root].name, params: own };
   });
 }
 const entry = (id, d, fragment = "") => [id, d.name, d.url, d.tab, d.params, fragment];

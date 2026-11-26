@@ -1,6 +1,7 @@
 import { test, expect } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { createDocument } from './dom.js';
 import { webCompiler } from './module.mjs';
@@ -496,6 +497,37 @@ export function each(p, list, key, row, pure) {
   } finally {
     globalThis.document = previous;
     if (render === undefined) delete globalThis.__exactRender; else globalThis.__exactRender = render;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('JS router reconstructs structural-prefix ancestors positionally (LLP 1156.008.000 D3)', async () => {
+  const dir = mkdtempSync(resolve(tmpdir(), 'exact-router-d3-'));
+  try {
+    stageRuntime(dir, ['rt.js', 'clock.js', 'resources.js', 'tree.js', 'events.js', 'pieces.js', 'mount.js', 'strings.js', 'elements.js', 'shape.js', 'overlay.js', 'held.js', 'roster.js', 'budget.js', 'rows.js', 'router.js', 'route-pattern.js', 'schedule.js', 'document.js']);
+    const router = await import(resolve(dir, 'router.js'));
+    router.routes([
+      ['home', '/', null, true, false],
+      ['trip', '/trip/:id', 0, false, false],
+      ['place', '/trip/:trip/place/:id', 1, false, false],
+      ['room', '/trip/:trip/room/:roomId', 1, false, false],
+      ['alt', '/alt/:id/detail', 1, false, false],
+    ]);
+    const idIdx = router.Names.indexOf('id'), tripIdx = router.Names.indexOf('trip');
+    const collided = router.launch('/trip/T%201/place/I%202', [])[1][0][1];
+    expect(collided.map(e => e[2])).toEqual(['/', '/trip/T%201', '/trip/T%201/place/I%202']);
+    expect(collided[1][4][idIdx]).toBe('T 1');
+    expect(collided[2][4][tripIdx]).toBe('T 1');
+    expect(collided[2][4][idIdx]).toBe('I 2');
+
+    const renamed = router.launch('/trip/T9/room/R4', [])[1][0][1];
+    expect(renamed.map(e => e[2])).toEqual(['/', '/trip/T9', '/trip/T9/room/R4']);
+    expect(renamed[1][4][idIdx]).toBe('T9');
+
+    const nonPrefix = router.launch('/alt/A7/detail', [])[1][0][1];
+    expect(nonPrefix.map(e => e[2])).toEqual(['/', '/trip/A7', '/alt/A7/detail']);
+    expect(nonPrefix[1][4][idIdx]).toBe('A7');
+  } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
