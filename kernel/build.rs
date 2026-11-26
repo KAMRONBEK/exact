@@ -162,7 +162,7 @@ fn digest(canonical: &str, codecs: &[(&str, String)]) -> u64 {
         // Tests do not define wire bytes, so exclude them and the snapshot itself.
         hasher.update(
             source
-                .split_once("\n#[cfg(test)]\n")
+                .split_once("\n#[cfg(test)]")
                 .map_or(source.as_str(), |(production, _)| production)
                 .as_bytes(),
         );

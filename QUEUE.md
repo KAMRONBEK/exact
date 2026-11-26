@@ -40,7 +40,6 @@
 - Scroll a painted pager between pages with snapping disabled, then enable `x mandatory`. The offset stays between pages until the next scroll or resize.
 - Fling a virtualized painted snap list past its mounted rows, then resize before it lands. Unmounted snap positions carry no row identity for following the same row through layout.
 - Under heavy build load, `cargo test -p exact-kernel --test it` took 6.77 s in `svg_scene::bounds::a_use_box_stops_at_the_expansion_limit` and hit its 5 s wall-clock limit. The expansion assertion passed, and the full binary passed with four test threads.
-- The wire digest's production-source cutoff matches a literal newline-delimited `#[cfg(test)]`. Adding a space after the attribute in `kernel/src/wire/codec.rs` includes the snapshot literal itself in the hash. Exercise that case when revisiting the digest.
 - Correct the generated documentation for `StyleId::enum_names` in `kernel/build.rs`. A numeric keyword row such as `ListInsetsContentToSafeArea` returns its schema words although the comment says it returns an empty list.
 
 - Switch the app language and show the provider buttons. The custom labels stay in English. On Android, TalkBack reads only “Sign in” for Google’s short label. Qualify localized labels, provider announcements and the current Google artwork.

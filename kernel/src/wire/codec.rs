@@ -732,7 +732,7 @@ impl Writer {
     }
 }
 
-#[cfg(test)]
+#[cfg(test)] // Keep a suffix here to exercise the wire digest's test-source cutoff.
 mod tests {
     use super::*;
     use crate::style::{GridLine, GridTrack, GridTrackMax, GridTrackMin};
@@ -755,7 +755,7 @@ mod tests {
         // Recomputed when the schema changes; the digest test prints the value.
         // Apple JSON record and inline style declarations participate (LLP 1172.001 E4),
         // even when the EXWF codec bytes above stay unchanged.
-        assert_eq!(SCHEMA_DIGEST, 0x5397f8145ace6862);
+        assert_eq!(SCHEMA_DIGEST, 0xe373c9a24599c154);
     }
 
     #[test]
