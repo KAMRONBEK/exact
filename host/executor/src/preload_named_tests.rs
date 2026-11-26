@@ -94,9 +94,9 @@ fn named_reads_wait_across_manifest_handoff_and_are_released_together() {
                     control.launch_pending(None);
                 }
             }
-            for ticket in 1..=2 {
-                let (got, outcome, timing) = collect(&core, &woke);
-                assert_eq!(got, ticket);
+            let mut got = Vec::new();
+            for _ in 1..=2 {
+                let (ticket, outcome, timing) = collect(&core, &woke);
                 assert_eq!(timing.cached, ending != 3);
                 let expected = match ending {
                     0 => b"named".as_slice(),
@@ -104,7 +104,10 @@ fn named_reads_wait_across_manifest_handoff_and_are_released_together() {
                     _ => b"base",
                 };
                 assert!(matches!(outcome, Outcome::Response(r) if r.body == expected));
+                got.push(ticket);
             }
+            got.sort_unstable();
+            assert_eq!(got, [1, 2]);
             assert_eq!(
                 server.count(),
                 match ending {

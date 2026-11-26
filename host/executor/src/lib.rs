@@ -187,14 +187,16 @@ struct State {
     /// room for real requests, nor settles before the refusal). One record
     /// per ticket, eight bytes: bounded by the runner's current tickets, one
     /// per target, and never refused for room.
-    waiting: VecDeque<u64>,
+    waiting: VecDeque<(u64, reads::OrderedKind)>,
     /// The tickets in `waiting`, to keep one record each.
     waiting_set: std::collections::HashSet<u64>,
     /// A stream holds its slot through its undrained terminal reply. Both kinds count in `counts[1]`.
     streams: StreamCounts,
     bytes: [usize; 2],
     next: usize,
-    ordered: VecDeque<u64>,
+    ordered: VecDeque<reads::OrderedEntry>,
+    shared_workers_started: usize,
+    shared_workers_busy: usize,
     retired: bool,
     ordered_barrier: bool,
     /// Ordered requests behind the barrier, in order: held rather than
@@ -555,6 +557,8 @@ impl Core {
                 });
             if spawned.is_err() {
                 self.failed.store(true, Ordering::Release);
+            } else if index != 0 {
+                state.shared_workers_started += 1;
             }
         }
         !self.failed.load(Ordering::Acquire)
@@ -606,23 +610,20 @@ impl Core {
         let mut state = self.shared.state.lock().unwrap();
         let ready = |lane: usize, state: &State| {
             if lane == 0 {
-                state.ordered.front().and_then(|ticket| {
-                    state.completed[0]
-                        .iter()
-                        .position(|done| done.ticket == *ticket)
-                })
+                reads::deliverable(state)
             } else {
-                (!state.completed[1].is_empty()).then_some(0)
+                (!state.completed[1].is_empty()).then_some((0, 0))
             }
         };
         let first = state.next;
-        let (lane, index) = if let Some(index) = ready(first, &state) {
-            (first, index)
-        } else if let Some(index) = ready(1 - first, &state) {
-            (1 - first, index)
-        } else {
-            return vec![];
-        };
+        let (lane, ordered_index, index) =
+            if let Some((ordered_index, index)) = ready(first, &state) {
+                (first, ordered_index, index)
+            } else if let Some((ordered_index, index)) = ready(1 - first, &state) {
+                (1 - first, ordered_index, index)
+            } else {
+                return vec![];
+            };
         let done = state.completed[lane]
             .remove(index)
             .expect("ready completion");
@@ -636,7 +637,8 @@ impl Core {
         };
         let release_count = drained(&mut state, done.ticket);
         if lane == 0 {
-            state.ordered.pop_front();
+            let entry = state.ordered.remove(ordered_index).expect("ordered entry");
+            debug_assert_eq!(entry.ticket, done.ticket);
         }
         state.next = 1 - lane;
         if !done.message {
@@ -679,7 +681,7 @@ impl Core {
     /// the host when something is ready). The answer stays pending: room
     /// never refuses a re-ask. Refused only when the executor is retired or
     /// never started, as all work is.
-    pub fn again(&self, ticket: u64) -> Result<(), String> {
+    pub fn again(&self, ticket: u64, class: RequestClass) -> Result<(), String> {
         let mut state = self.shared.state.lock().unwrap();
         state.dispatched = true;
         if let Some(why) = &self.worker_refusal {
@@ -688,11 +690,13 @@ impl Core {
         if state.retired {
             return Err("native executor retired".into());
         }
-        if state.waiting_set.contains(&ticket) || state.ordered.contains(&ticket) {
+        if state.waiting_set.contains(&ticket)
+            || state.ordered.iter().any(|entry| entry.ticket == ticket)
+        {
             return Ok(());
         }
         state.waiting_set.insert(ticket);
-        state.waiting.push_back(ticket);
+        state.waiting.push_back((ticket, reads::again_kind(class)));
         place_waiting(&mut state);
         if has_ready(&state) {
             wake(&mut state);
@@ -791,38 +795,7 @@ impl Drop for WorkerSlot {
     }
 }
 
-/// What a core's workers count against: `MAX_WORKERS` live at once,
-/// retired ones included until they exit.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum WorkerBudget {
-    /// The process's one bound, which every core of every host in the
-    /// process shares.
-    Process,
-    /// A bound of the thread that starts the core, for tests that run side
-    /// by side and must not refuse each other's cores.
-    Thread,
-}
-
-impl WorkerBudget {
-    /// The count of live workers this budget bounds.
-    fn live(self) -> Arc<AtomicUsize> {
-        match self {
-            // Cores created by one test share a bound. Slots retain that budget
-            // when their workers outlive the test thread or retire elsewhere.
-            WorkerBudget::Thread => {
-                thread_local! {
-                    static BUDGET: Arc<AtomicUsize> = Arc::default();
-                }
-                BUDGET.with(Arc::clone)
-            }
-            WorkerBudget::Process => {
-                static BUDGET: std::sync::LazyLock<Arc<AtomicUsize>> =
-                    std::sync::LazyLock::new(Arc::default);
-                Arc::clone(&BUDGET)
-            }
-        }
-    }
-}
+pub use admission::WorkerBudget;
 
 /// Forgetting runs after every commit; an idle core needs no worker wake
 /// unless queued jobs or disposal can make progress.
@@ -859,8 +832,8 @@ fn fenced_bytes(fenced: &VecDeque<Fenced>) -> usize {
 /// and no refusal is retained: behind a refusal they wait here, so that they
 /// neither settle before it nor take the fence's room for real requests.
 fn place_waiting(state: &mut State) {
-    while let Some(&ticket) = state.waiting.front() {
-        if state.ordered_barrier || !state.fenced.is_empty() || !settle_again(state, ticket) {
+    while let Some(&(ticket, kind)) = state.waiting.front() {
+        if state.ordered_barrier || !state.fenced.is_empty() || !settle_again(state, ticket, kind) {
             return;
         }
         state.waiting.pop_front();
@@ -870,11 +843,13 @@ fn place_waiting(state: &mut State) {
 
 /// A re-ask's marker, complete, at the end of the ordered sequence; false
 /// when its window (128 markers, the lane's bytes) has no room.
-fn settle_again(state: &mut State, ticket: u64) -> bool {
+fn settle_again(state: &mut State, ticket: u64, kind: reads::OrderedKind) -> bool {
     if state.agains >= AGAINS || AGAIN_BYTES > BYTES[0].saturating_sub(state.bytes[0]) {
         return false;
     }
-    state.ordered.push_back(ticket);
+    state
+        .ordered
+        .push_back(reads::OrderedEntry::new(ticket, kind));
     state.counts[0] += 1;
     state.light += 1;
     state.agains += 1;
@@ -895,9 +870,7 @@ fn settle_again(state: &mut State, ticket: u64) -> bool {
     true
 }
 
-/// An ordered request that may wait among the 128: a plain read with no
-/// opaque work beside it (RFC 9110 §9.2.1's safe methods; not auth, a surface, or
-/// a native call).
+/// An ordered request that may wait among the 128: a plain read with no opaque work (RFC 9110 §9.2.1).
 fn read(request: &Request, work: bool) -> bool {
     !work
         && safe(request)
@@ -907,16 +880,23 @@ fn read(request: &Request, work: bool) -> bool {
 }
 
 fn has_ready(state: &State) -> bool {
-    !state.completed[1].is_empty()
-        || state
-            .ordered
-            .front()
-            .is_some_and(|ticket| state.completed[0].iter().any(|done| done.ticket == *ticket))
+    !state.completed[1].is_empty() || reads::deliverable(state).is_some()
 }
 
 fn complete(shared: &Shared, ticket: u64, outcome: Outcome) {
+    complete_with(shared, ticket, outcome, None);
+}
+fn complete_with(
+    shared: &Shared,
+    ticket: u64,
+    outcome: Outcome,
+    busy: Option<&mut reads::SharedBusy<'_>>,
+) {
     let finished_at = std::time::Instant::now();
     let mut state = shared.state.lock().unwrap();
+    if let Some(busy) = busy {
+        busy.release_locked(&mut state);
+    }
     if state.retired {
         asynch::external_end(shared, &mut state, ticket);
         return;
@@ -931,13 +911,15 @@ fn complete(shared: &Shared, ticket: u64, outcome: Outcome) {
     // A completion frees ordered bytes a waiting job may need.
     rouse(shared, &state);
     if run.forgotten {
+        if lane == 0 {
+            state.ordered.retain(|entry| entry.ticket != ticket);
+        }
         state.counts[lane] -= usize::from(!run.waiting);
         state.streams.release(run.stream);
         state.bytes[lane] -= run.charge;
         cache::serve_ready(&mut state);
-        // The lane going idle can let a retained ordered refusal settle,
-        // and the work held behind it go: the host needs a pump for that.
-        if lane == 0 && (state.counts[0] == 0 || !state.fenced.is_empty()) {
+        // The lane going idle or dropping a forgotten barrier can expose ready work or a refusal.
+        if has_ready(&state) || (lane == 0 && (state.counts[0] == 0 || !state.fenced.is_empty())) {
             wake(&mut state);
         }
         // The room it held, in its lane and among the streams, may start an
@@ -1078,9 +1060,7 @@ fn reservation(request: &Request) -> Result<(usize, usize, usize), String> {
     Ok((lane, bytes, limit))
 }
 
-/// Whether `request`'s reply is held in a buffer no larger than its ceiling:
-/// plain HTTP on the independent lane, not a stream, a process or a native
-/// call, whose outcomes are collected elsewhere.
+/// Whether `request`'s reply is held in a buffer no larger than its ceiling.
 fn reads_within_ceiling(request: &Request) -> bool {
     matches!(request.http, HttpScheduling::Independent { .. })
         && !request.stream
@@ -1139,6 +1119,9 @@ fn worker(
                     preload::expire(cache);
                 }
                 if let Some(next) = reads::next_job(&shared, &mut state, lane) {
+                    if lane == 1 {
+                        state.shared_workers_busy += 1;
+                    }
                     break next;
                 }
                 let delay = state.cache.as_ref().and_then(|cache| {
@@ -1151,6 +1134,7 @@ fn worker(
                 };
             }
         };
+        let mut busy = reads::SharedBusy(&shared, lane == 1);
         let Job {
             ticket,
             mut request,
@@ -1163,10 +1147,11 @@ fn worker(
         } = job;
         if let Some(deadline) = queued_deadline {
             if !deadline.remaining(&mut request) {
-                complete(
+                complete_with(
                     &shared,
                     ticket,
                     failed(FailureKind::Timeout, "the request timed out while queued"),
+                    Some(&mut busy),
                 );
                 continue;
             }
@@ -1179,10 +1164,19 @@ fn worker(
                 // Reply's drop path publishes an aborted outcome if the handoff panics.
                 let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| hand(reply)));
                 let mut state = shared.state.lock().unwrap();
+                busy.release_locked(&mut state);
+                let mut unblocked_forgotten = false;
                 if let Some(run) = state.running.iter_mut().find(|r| r.ticket == ticket) {
                     run.blocking = false;
+                    unblocked_forgotten = run.forgotten;
+                }
+                if unblocked_forgotten {
+                    state.ordered.retain(|entry| entry.ticket != ticket);
                 }
                 rouse(&shared, &state);
+                if has_ready(&state) {
+                    wake(&mut state);
+                }
                 continue;
             }
             Some(OwnedWork::Now(work)) => (Some(work), None),
@@ -1218,7 +1212,7 @@ fn worker(
             )
         }))
         .unwrap_or_else(|_| failed(FailureKind::Aborted, "native work panicked"));
-        complete(&shared, ticket, outcome);
+        complete_with(&shared, ticket, outcome, Some(&mut busy));
     }
 }
 

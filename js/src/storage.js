@@ -9,6 +9,7 @@
   "use strict";
   global.__exact_storage_calls = function (env) {
     var host = env.host,
+      rawThen = env.rawThen,
       journal = env.journal,
       errorText = env.errorText,
       background = env.background,
@@ -318,7 +319,7 @@
       });
     }
     function announcing(promise, topics) {
-      return promise.then(function (value) {
+      return rawThen(promise, function (value) {
         announce(topics);
         return value;
       });
@@ -330,7 +331,7 @@
       return { changes: result.changes, lastInsertRowid: result.lastInsertRowid };
     }
     function written(promise, topics) {
-      return promise.then(function (value) {
+      return rawThen(promise, function (value) {
         var results = Array.isArray(value) ? value : [value];
         if (
           results.some(function (result) {
@@ -438,7 +439,7 @@
         close: function () {
           openDatabases.delete(handle);
           // A failed close still rejects for the caller, so one left unhandled is still reported.
-          return storageCall(raw, "close", []).then(undefined, function (e) {
+          return rawThen(storageCall(raw, "close", []), undefined, function (e) {
             openDatabases.add(handle);
             throw e;
           });
@@ -506,7 +507,8 @@
           }
         }
       );
-      return announcing(result, fileTopics(path)).then(
+      return rawThen(
+        announcing(result, fileTopics(path)),
         function (v) {
           // A kept set that cannot be saved fails the write, though the file is written; writing again keeps it.
           if (t) {
@@ -550,7 +552,7 @@
           typeof expect.size !== "number"
         )
           return Promise.reject(new TypeError(api + ": expect is a stat (modifiedMs and size) of a doc:/ path"));
-        return files.stat(path).then(function (now) {
+        return rawThen(files.stat(path), function (now) {
           if (now.modifiedMs !== expect.modifiedMs || now.size !== expect.size)
             throw storageError("document ECHANGED: " + path + " changed on disk since it was read", "ECHANGED");
           return write(path, data);
@@ -586,7 +588,7 @@
         if (!l.by || l.by === background || !l.by.replied) return;
         heldLocks.delete(l);
         try {
-          Promise.resolve(nativeStorage.fs.unlock(l.h)).then(undefined, function () {});
+          rawThen(Promise.resolve(nativeStorage.fs.unlock(l.h)), undefined, function () {});
         } catch (e) {}
       });
     }
@@ -732,12 +734,15 @@
       } catch (e) {
         return Promise.reject(e);
       }
-      return storageCall(nativeStorage && nativeStorage.fs, method, [from, to].concat(tail), function (value) {
-        return typeof value === "string" ? record(value.split("\t"), tail) : value;
-      }).then(function (written) {
-        announce(fileTopics(written && written.path));
-        return written;
-      });
+      return rawThen(
+        storageCall(nativeStorage && nativeStorage.fs, method, [from, to].concat(tail), function (value) {
+          return typeof value === "string" ? record(value.split("\t"), tail) : value;
+        }),
+        function (written) {
+          announce(fileTopics(written && written.path));
+          return written;
+        }
+      );
     }
     files.compressImage = function (from, to, options) {
       return imageCall("compressImage", from, to, options, function (parts, tail) {

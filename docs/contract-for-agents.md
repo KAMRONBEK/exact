@@ -1069,11 +1069,12 @@ Use the epoch to identify the batch. Subtracting those times cannot give tap-to-
 latency. The frame's `apply` measures batch application and `commit` measures Core
 Animation commit duration. The trace has no physical presentation timestamp for the tab.
 
-In the ordered run the rows 200 journal entry reported `wall 623 ms; delivery wait 1020 ms`.
-Wall time includes the fixture holding the rows reply. Delivery wait measures the
-time from transport completion to delivery, including the wait behind history.
-History can opt into independent delivery because neither its GET nor its parser
-changes what rows will read. [Native HTTP scheduling](reference.md#what-a-data-module-can-use)
+In the ordered comparison before LLP 1162 §8 Q2, the rows 200 journal entry reported
+`wall 623 ms; delivery wait 1020 ms`, where delivery wait measured the time from transport
+completion to delivery behind history. Resource reads now deliver on completion, while
+writes and mutations keep their order; `exactIndependentHttp` remains the opt-out for
+requests that leave the ordered sequence altogether (including bypassing send barriers and
+using the independent lane's budget). [Native HTTP scheduling](reference.md#what-a-data-module-can-use)
 
 To capture a slow return in your own development app on a connected iPhone, tap
 with four fingers and choose **Save Trace**. On the Mac run

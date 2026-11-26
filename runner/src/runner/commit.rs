@@ -1239,6 +1239,7 @@ impl<D: DataSource> Runner<D> {
                 target: name,
                 class: match target {
                     Target::Resource(_) if request.is_plain_http() => RequestClass::Read,
+                    Target::Resource(_) if request.is_local_work() => RequestClass::Local,
                     Target::Sent(m, _) if request.is_plain_http() => {
                         RequestClass::Parallel(m as u32)
                     }

@@ -3198,11 +3198,14 @@ sandbox page code: it can call browser `fetch` directly, subject to the
 rendered page's CSP where one is served.
 
 On native hosts, a resource's plain HTTP requests overlap, up to six at a
-time, and their replies are delivered in the order asked (LLP 1162 D1, D2).
-A TypeScript resource's answer hands over every request it has made, so
-`Promise.all` overlaps too. Reads wait for earlier sends, storage steps and
-native continuations; those wait for the reads before them. In the sequence,
-requests with `exactBodyFrom` or `exactBodyTo` still run one at a time.
+time, and settle as their replies arrive without waiting for earlier reads
+(LLP 1162 D1, D2, §8 Q2). Resource storage steps and local continuations
+(`scheduler.yield`, timers, re-asks) also run ahead of held HTTP reads while
+staying FIFO with one another. A TypeScript resource's answer hands over every
+request it has made, so `Promise.all` overlaps too. Reads and local work wait
+for earlier sends and mutations; sends wait for the reads and local work
+before them. In the sequence, requests with `exactBodyFrom` or `exactBodyTo`
+still run one at a time.
 
 Resource `GET`/`HEAD` reads retain the bound of 128 queued, running and
 unconsumed requests, with at most 64 MiB of waiting request buffers. A
@@ -3262,10 +3265,11 @@ only the 1 MiB it can hold, whatever its ceiling. A browser has no lanes and sch
 there only the ceiling applies. On every host a reply larger than
 `maxResponseBytes` fails as `refused`. The ceiling is 1 byte to 64 MiB (1 GiB
 with `exactBodyTo`), and anything else is a `TypeError`. A `GET` is
-not independent by default: ordinary resource reads already overlap, while
-an independent reply settles as it arrives. Leave writes, and any read whose
-parse depends on an earlier reply, in the queue. Storage steps and native
-continuations cannot opt out of it.
+not independent by default: ordinary resource reads already overlap and settle
+on arrival, while still respecting earlier sends and mutations. Use
+`exactIndependentHttp` when a read must bypass send barriers or use the
+independent lane's budget. Leave writes in the ordered sequence. Storage steps
+and native continuations cannot opt out of it.
 
 A Hermes data module has a 64 MiB heap limit by default. Terminal heap exhaustion
 fails its outstanding requests and tool invocations with

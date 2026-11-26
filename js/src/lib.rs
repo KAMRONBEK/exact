@@ -221,7 +221,9 @@ const TIMER: u64 = u64::MAX - 3;
 /// executor resumes: the TypeScript bake reports that the module can hand one
 /// out (`typescriptHostWork`), which links I/O (LLP 1047.001 D12).
 pub(crate) struct ModuleTurn;
-impl exact_runner::HostWork for ModuleTurn {}
+impl exact_runner::HostWork for ModuleTurn {
+    const LOCAL: bool = true;
+}
 
 /// Bake and worker timers stay with the runner until due. A live-clock wait
 /// reaches the host now so another turn can wake it early (LLP 1162 D3).

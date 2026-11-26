@@ -527,6 +527,7 @@ impl Machine {
             state.book.blocking |= lane == 0 && transport_lane == 0;
             starts.push((hop.run, hop.start));
         }
+        let mut saw_preload_wait = false;
         let mut index = 0;
         while index < state.jobs[lane].len() {
             if lane == 0 && !super::preload::reserve_front(state) {
@@ -538,14 +539,21 @@ impl Machine {
             let job = &state.jobs[lane][index];
             let kind = Kind::of(job);
             if lane == 0 && super::preload::waiting(state, job) {
+                saw_preload_wait = true;
                 index += 1;
                 continue;
             }
             // Only a read passes one that waits for a launch reply (LLP 1162.000 D1).
-            if lane == 0
-                && ((index > 0 && job.class != exact_runner::RequestClass::Read)
-                    || !super::reads::can_start(state, job))
-            {
+            if lane == 0 && saw_preload_wait && job.class != exact_runner::RequestClass::Read {
+                break;
+            }
+            let passable_read =
+                lane == 0 && job.overlap && job.class == exact_runner::RequestClass::Read;
+            if lane == 0 && !super::reads::can_start(state, job) {
+                if passable_read {
+                    index += 1;
+                    continue;
+                }
                 break;
             }
             let exchange = kind == Kind::Http && job.request.body_from.is_none();
@@ -562,19 +570,31 @@ impl Machine {
                 lane
             };
             if transport_lane == 0 && state.book.blocking {
+                if passable_read {
+                    index += 1;
+                    continue;
+                }
                 break;
             }
             if exchange && transport_lane == 1 && state.book.in_flight >= IN_FLIGHT {
+                if passable_read {
+                    index += 1;
+                    continue;
+                }
                 break;
             }
-            // A head short of bytes waits and is not passed over.
+            // A head short of bytes waits and is not passed over, except by a local/read behind a read.
             if !fits(state, lane, job, kind) {
+                if passable_read {
+                    index += 1;
+                    continue;
+                }
                 break;
             }
             if exchange && at_limit(state, transport_lane, &origin(&job.request.url)) {
                 // The independent lane passes over a head at its origin's
-                // HTTP/1.1 limit; the ordered one waits for it (D3).
-                if lane == 0 {
+                // HTTP/1.1 limit; the ordered one waits for it (D3), except local work behind a read.
+                if lane == 0 && !passable_read {
                     break;
                 }
                 index += 1;
@@ -583,6 +603,7 @@ impl Machine {
             let start = self.take(state, lane, transport_lane, index, kind);
             starts.push(start);
             // From the head again: a head passed over may no longer fit.
+            saw_preload_wait = false;
             index = 0;
         }
         starts
@@ -732,11 +753,19 @@ impl Machine {
                 // reply comes inside it: the start's hold covers it.
                 let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| hand(reply)));
                 let mut state = self.shared.state.lock().unwrap();
+                let mut unblocked_forgotten = false;
                 if let Some(r) = find(&mut state.running, run).filter(|r| r.blocking) {
                     r.blocking = false;
+                    unblocked_forgotten = r.forgotten;
                     state.book.blocking = false;
                 }
+                if unblocked_forgotten && lane == 0 {
+                    state.ordered.retain(|entry| entry.ticket != run.0);
+                }
                 self.shared.ready.notify_all();
+                if super::has_ready(&state) {
+                    super::wake(&mut state);
+                }
             }
             Kind::Closure => {
                 // Run here (a driver fault's, a continuation, storage): the
@@ -1172,6 +1201,9 @@ fn settle(state: &mut State, run: Run, outcome: Outcome) {
     let outcome = bounded_outcome(outcome, limit);
     super::cache::invalidate(state, invalidates.as_ref(), &outcome);
     if forgotten {
+        if lane == 0 {
+            state.ordered.retain(|entry| entry.ticket != run.0);
+        }
         state.book.trash.push(Box::new(outcome));
         if release_count(
             &mut state.book,
@@ -1228,6 +1260,12 @@ fn physical(state: &mut State, run: Run) {
         state.book.blocking = false;
     }
     let lane = r.lane;
+    if lane == 0 && r.forgotten {
+        state.ordered.retain(|entry| entry.ticket != r.ticket);
+        if super::has_ready(state) {
+            super::wake(state);
+        }
+    }
     if state.book.held_counts.remove(&run) {
         state.counts[lane] -= 1;
         if super::has_ready(state)

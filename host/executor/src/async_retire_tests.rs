@@ -113,7 +113,7 @@ fn retirement_discards_undrained_outcomes_reasks_and_fenced_requests() {
         declared_length: Some(2048),
     });
     wait(&core, |s| s.running.iter().all(|r| r.terminal));
-    core.again(2).unwrap();
+    core.again(2, RequestClass::Local).unwrap();
     assert_eq!(core.shared.state.lock().unwrap().light, 2);
     {
         let mut state = core.shared.state.lock().unwrap();

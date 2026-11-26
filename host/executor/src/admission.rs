@@ -1,6 +1,39 @@
 //! Admission and the bounded ordered fence (LLP 1041 §8.4, LLP 1162 D1).
 use super::*;
 
+/// What a core's workers count against: `MAX_WORKERS` live at once,
+/// retired ones included until they exit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WorkerBudget {
+    /// The process's one bound, which every core of every host in the
+    /// process shares.
+    Process,
+    /// A bound of the thread that starts the core, for tests that run side
+    /// by side and must not refuse each other's cores.
+    Thread,
+}
+
+impl WorkerBudget {
+    /// The count of live workers this budget bounds.
+    pub(super) fn live(self) -> Arc<AtomicUsize> {
+        match self {
+            // Cores created by one test share a bound. Slots retain that budget
+            // when their workers outlive the test thread or retire elsewhere.
+            WorkerBudget::Thread => {
+                thread_local! {
+                    static BUDGET: Arc<AtomicUsize> = Arc::default();
+                }
+                BUDGET.with(Arc::clone)
+            }
+            WorkerBudget::Process => {
+                static BUDGET: std::sync::LazyLock<Arc<AtomicUsize>> =
+                    std::sync::LazyLock::new(Arc::default);
+                Arc::clone(&BUDGET)
+            }
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum StreamKind {
     Network,
@@ -143,7 +176,13 @@ impl Core {
             .or(r.request.body_to_refusal())
             .or(r.request.upload_progress_refusal())
             .map_or_else(
-                || reads::reservation(&r.request, overlap && r.class == RequestClass::Read),
+                || {
+                    reads::reservation(
+                        &r.request,
+                        (overlap && r.class == RequestClass::Read)
+                            || (r.class == RequestClass::Local && r.request.is_local_work()),
+                    )
+                },
                 |why| Err(why.into()),
             )
             .and_then(|charge| state.book.reserve_inline_copy(&r.request, charge));
@@ -322,8 +361,22 @@ impl Core {
         } else {
             None
         };
-        if ordered && !forgotten {
-            state.ordered.push_back(r.ticket);
+        if ordered {
+            let kind = reads::ordered_kind(&r, reads::opaque(&work));
+            if !forgotten {
+                state
+                    .ordered
+                    .push_back(reads::OrderedEntry::new(r.ticket, kind));
+            } else if matches!(
+                kind,
+                reads::OrderedKind::Barrier | reads::OrderedKind::Local
+            ) {
+                state.ordered.push_back(reads::OrderedEntry {
+                    ticket: r.ticket,
+                    kind,
+                    forgotten: true,
+                });
+            }
         }
         if !waits && !one_shot {
             state.counts[lane] += 1;

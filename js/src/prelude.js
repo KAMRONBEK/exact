@@ -184,18 +184,15 @@
     if (!call || call.status !== "pending" || typeof work !== "function") return promise;
     call.storage++;
     storing.add(call);
-    return work(promise).then(
-      function (value) {
-        currentCall = call;
-        unstore(call);
-        return value;
-      },
-      function (error) {
-        currentCall = call;
-        unstore(call);
-        throw error;
-      }
-    );
+    return rawThen(work(promise), function (value) {
+      currentCall = call;
+      unstore(call);
+      return value;
+    }, function (error) {
+      currentCall = call;
+      unstore(call);
+      throw error;
+    });
   }
   // `crypto` (crypto.js), whose kept keys the store keeps (store.js).
   var keys = global.__exact_crypto({
@@ -313,21 +310,11 @@
     head = null;
   function issue(op) {
     head = op;
-    var promise;
-    try {
-      promise = op.run();
-    } catch (e) {
-      promise = Promise.reject(e);
-    }
+    var promise, saved = currentCall;
+    currentCall = null;
+    try { promise = op.run(); } catch (e) { promise = Promise.reject(e); } finally { currentCall = saved; }
     op.promise = promise;
-    promise.then(
-      function (value) {
-        landed(op, true, value);
-      },
-      function (error) {
-        landed(op, false, error);
-      }
-    );
+    rawThen(promise, function (value) { landed(op, true, value); }, function (error) { landed(op, false, error); });
   }
   function landed(op, ok, value) {
     // A revoked image's late completion must not clear the next head.
@@ -486,9 +473,17 @@
   global.__exact_auth({ host: host, answerOnly: answerOnly });
   delete global.__exact_auth;
 
+  var calls = new Map(), gcOwed = false, owedStamp = null;
+  var rawThen = global.__exact_promise_context({
+    calls: calls, background: background, work: work,
+    current: function () { return currentCall; },
+    setCurrent: function (call) { currentCall = call; },
+  });
+  delete global.__exact_promise_context;
   // --- the store (store.js) and storage (storage.js) ------------------------
   var storeEnv = {
     host: host,
+    rawThen: rawThen,
     presence: binary.presence,
     browserSecrets: browserSecrets,
     keys: keys,
@@ -510,6 +505,7 @@
   delete global.__exact_store;
   var storageCalls = global.__exact_storage_calls({
     host: host,
+    rawThen: rawThen,
     journal: journal,
     errorText: errorText,
     background: background,
@@ -550,9 +546,6 @@
     freeLocks = storageCalls.freeLocks;
 
   // --- the seam ------------------------------------------------------------
-  var calls = new Map(),
-    gcOwed = false, // calls: id -> { id, status, value, error, tickets }
-    owedStamp = null; // pending calls to re-stamp with the epoch after an owed collection
   // Large native strings travel beside the JSON skeleton by explicit paths (no property
   // spelling reserved); the serializer owns getters, toJSON, omissions and cycles. One
   // whose answer outlived a collection owes a full one on the reply, re-stamping pending
@@ -714,6 +707,7 @@
       } finally {
         endYields(call); // a branch its value did not wait for goes on, as a browser's does
         timers.drop(call); // its timers are its own (time.js `timers`)
+        call.value = call.error = call.more = undefined;
         call.replied = true;
         calls.delete(call.id);
         cleanUp();
@@ -760,6 +754,7 @@
     if (moduleWide && moving && due !== undefined && later && host(21, "", "") !== undefined)
       return JSON.stringify({ tag: 1, call: call.id, ticket: 0, waiting: true, timer: due });
     if (due !== undefined) return JSON.stringify({ tag: 1, call: call.id, ticket: 0, timer: due });
+    call.value = call.error = call.more = undefined;
     call.replied = true;
     calls.delete(call.id);
     cleanUp();
@@ -896,14 +891,14 @@
                     return Promise.reject(e);
                   }
                 }
-                return global
-                  .fetch("exact-native:", {
+                return rawThen(
+                  global.fetch("exact-native:", {
                     method: "POST",
                     body: JSON.stringify(request),
                     exactIndependentHttp: { maxResponseBytes: 1048576 },
-                  })
-                  .then(function (r) {
-                    return r.text().then(function (t) {
+                  }),
+                  function (r) {
+                    return rawThen(r.text(), function (t) {
                       if (r.status === 200) return JSON.parse(t);
                       if ((r.headers.get("content-type") || "").split(";", 1)[0].trim().toLowerCase() === "application/json") {
                         var refusal;
@@ -916,7 +911,8 @@
                       }
                       throw new Error(t || "native call failed");
                     });
-                  });
+                  }
+                );
               },
             });
       call.sync = true;
@@ -933,7 +929,7 @@
       // 2026-10-18).
       if (call.socketOps && call.tickets.length) call.socketConflict = true;
       if (call.socketConflict) {
-        if (result && typeof result.then === "function") result.then(undefined, function () {});
+        if (result && typeof result.then === "function") rawThen(result, undefined, function () {});
         throw new Error(SOCKET_AND_FETCH);
       }
       if (call.socketOps && result && typeof result.then === "function") handSocketOps(call, 17);
@@ -951,10 +947,9 @@
       return JSON.stringify({ tag: 3, call: call.id });
     }
     if (result && typeof result.then === "function") {
-      result.then(
-        function (v) {
-          if (call.lost) return;
-          call.status = "done";
+      rawThen(result, function (v) {
+        if (call.lost) return;
+        call.status = "done";
           call.value = v;
         },
         function (e) {
@@ -1079,6 +1074,7 @@
         : "";
     timers.drop(call);
     if (call.storage > 0 && !call.lost) return "storage" + rejected;
+    call.value = call.error = call.more = undefined;
     call.replied = true;
     calls.delete(call.id);
     cleanUp();
@@ -1099,6 +1095,7 @@
       if (!c.letGo) return;
       if (c.storage > 0 && !c.lost) owed = true;
       else {
+        c.value = c.error = c.more = undefined;
         c.replied = true;
         calls.delete(c.id);
       }
@@ -1229,9 +1226,8 @@
         return ok(value);
       }
       calls.set(mine.id, mine);
-      value.then(
-        function (v) {
-          mine.status = "done";
+      rawThen(value, function (v) {
+        mine.status = "done";
           mine.value = v;
         },
         function (e) {

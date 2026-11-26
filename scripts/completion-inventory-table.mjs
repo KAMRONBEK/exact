@@ -1470,7 +1470,7 @@ export const classifications = [
       "Dispatch::again_outcome io_grants LongPoll::refusal Outcome::summary Placement::name Placement::parse Request::auth Request::body_from " +
       "Request::body_from_refusal Request::body_to Request::body_to_refusal Request::cache Request::capture_surface Request::ceiling_refusal " +
       "Request::check_surface_grant Request::continuation Request::due Request::get Request::has_effects Request::header Request::held Request::idle_timeout " +
-      "Request::idle_timeout_refusal Request::independent_http Request::is_auth Request::is_held Request::is_native Request::is_ordered Request::is_plain_http " +
+      "Request::idle_timeout_refusal Request::independent_http Request::is_auth Request::is_held Request::is_local_work Request::is_native Request::is_ordered Request::is_plain_http " +
       "Request::native Request::post_json Request::restore_surface Request::timeout Request::timeout_refusal Response::body_written SocketOp::connection SocketOp::name " +
       "SocketOp::size SocketOrigin::words"],
     ["runner:runner/src/runner/outstanding.rs", "Outstanding::is_clear Outstanding::json"],

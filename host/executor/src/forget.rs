@@ -261,13 +261,13 @@ impl Core {
                     }
                 }
             }
-            state.ordered.retain(|ticket| held(*ticket));
+            reads::retain_on_forget(state, &held);
             // A parked upload let go unsent takes its size with it.
             let queued: std::collections::HashSet<u64> =
                 state.jobs.iter().flatten().map(|job| job.ticket).collect();
             state.book.sized.retain(|ticket, _| queued.contains(ticket));
             // A re-ask let go before it found room: dropped, never settled.
-            state.waiting.retain(|ticket| held(*ticket));
+            state.waiting.retain(|(ticket, _)| held(*ticket));
             state.waiting_set.retain(|ticket| held(*ticket));
             let mut kept = VecDeque::new();
             for mut place in std::mem::take(&mut state.fenced) {

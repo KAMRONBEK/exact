@@ -176,7 +176,7 @@ impl Executor {
     /// work (LLP 1041 §8.4, amended 2026-10-09); kept pending while the
     /// window is full. An error is terminal, for the host to record.
     pub fn again(&self, request: &RequestOut) -> Result<(), String> {
-        self.core.again(request.ticket)
+        self.core.again(request.ticket, request.class)
     }
     /// Acknowledge the coalesced wake before choosing a completion or refusal.
     pub fn begin_pump(&self) {
