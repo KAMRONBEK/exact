@@ -269,6 +269,13 @@ fn read_loop(file: Arc<File>, wake: UnixStream, log: Arc<Mutex<Log>>, stop: Arc<
     }
 }
 
+/// A feature report as `receiveFeatureReport` answers it, from the bytes the system read, whose first is always the
+/// report id: a numbered report keeps its id first, as WebHID's does, and an unnumbered one is its data alone, without
+/// the 0 the system leads it with.
+fn feature_report(read: &[u8], id: u8) -> &[u8] {
+    if id == 0 { read.get(1..).unwrap_or_default() } else { read }
+}
+
 fn base64(bytes: &[u8]) -> String {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::new();
@@ -430,7 +437,7 @@ impl Package for Hid {
                             if n < 0 {
                                 json!({ "error": "NotAllowedError", "message": std::io::Error::last_os_error().to_string() })
                             } else {
-                                json!({ "data": base64(&buf[..n as usize]) })
+                                json!({ "data": base64(feature_report(&buf[..n as usize], id)) })
                             }
                         }
                     }
@@ -486,5 +493,14 @@ mod tests {
         log.lock().unwrap().gone = true;
         assert_eq!(c.state(), json!({ "open": false, "connected": false }));
         assert_eq!(c.reports(&all)["interrupted"], json!(true));
+    }
+
+    /// `receiveFeatureReport` answers as the web does: a numbered report with its id first, an unnumbered one
+    /// without the 0 the system leads it with.
+    #[test]
+    fn a_feature_report_keeps_its_id_only_when_it_has_one() {
+        assert_eq!(feature_report(&[1, 0x63, 0xff], 1), [1, 0x63, 0xff]);
+        assert_eq!(feature_report(&[0, 0x63, 0xff], 0), [0x63, 0xff]);
+        assert_eq!(feature_report(&[], 0), [0u8; 0]);
     }
 }
