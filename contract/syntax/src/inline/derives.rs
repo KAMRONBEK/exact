@@ -315,20 +315,21 @@ impl<'a> Cx<'a> {
     ) -> Result<Expr, SyntaxError> {
         // Chase direct derive aliases iteratively so alias chains take no
         // native stack frames.
-        while self.resolve {
-            let Expr::Ident(name, _) = e else { break };
-            let Some(&d) = self.indices.get(name.as_str()) else {
-                break;
-            };
-            if bound.contains(&d) {
-                *nodes += 1;
-                if *nodes > MAX_DERIVE_NODES {
-                    return Err(self.too_large(e.span()));
+        if self.resolve {
+            while let Expr::Ident(name, _) = e {
+                let Some(&d) = self.indices.get(name.as_str()) else {
+                    break;
+                };
+                if bound.contains(&d) {
+                    *nodes += 1;
+                    if *nodes > MAX_DERIVE_NODES {
+                        return Err(self.too_large(e.span()));
+                    }
+                    return Ok(e.clone());
                 }
-                return Ok(e.clone());
+                e = &self.bodies[d];
+                whole = true;
             }
-            e = &self.bodies[d];
-            whole = true;
         }
         if depth > MAX_DERIVE_DEPTH {
             return Err(self.too_deep(e.span()));
