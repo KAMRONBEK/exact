@@ -229,7 +229,6 @@
 - A numeric key on an ordinary virtualized reorder list compiles, but the grip cannot lift. Use `key=rows.indexOf(name)` with eight strings and drag the first grip.
 - On the wasm web target, drag Account, lift it with Space, move up and press Escape. After settling, Space, Down and Enter on Privacy send no drop. The ordinary virtualized list on `2677907d5` reproduces this in Chromium.
 - Reconcile the current LLP count with its ceiling. On main, `bun scripts/gate.mjs` reports 16 current LLPs against a cap of 15.
-- Check hyphens before digits in authored data attributes against LLP 1075.003 §3.3. Building a text node with `data-v-2="x"` reports `syntax-expected-expression`.
 - Decide whether a settings list may spell `listStyle="inset-grouped"` alone when it has no drop handler. Removing only `reorderdrop` from the eight-row fixture with that spelling makes the compiler require `appearance="auto"` (LLP 1084 D1).
 - Give authors readable errors for rejected plan inputs and first frames. The web static-tree builder, snapshot commands and bake still print Rust Debug representations of bridge, decoding and layout errors.
 - The web hold candidate on `fable/web-hold-time-1443` (`eacd911d8`, #1443) still drops motion at the instant a second finger joins. Both targets release a 500 px/s pan at 1000. A smoothed dispatch also shifts the clock for the next untimed height sample, changing a −1000 px/s release to −728 and selecting a different stop.

@@ -21,7 +21,7 @@ export function ds(e, json) {
 }
 
 export const x_querySelectorAll = selector => {
-  const match = /^\[data-([a-z][a-z0-9]*(?:-[a-z][a-z0-9]*)*)~="([^"\\\n\r]+)"\]$/.exec(selector);
+  const match = /^\[data-([a-z][a-z0-9-]*)~="([^"\\\n\r]+)"\]$/.exec(selector);
   if (!match) return [];
   const root = document.getElementById("exact-root");
   const live = modalLayers();

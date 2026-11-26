@@ -1071,3 +1071,40 @@ fn package_preferences_use_the_drive_key_and_lowercase_step_name() {
     assert_eq!((error.span.line, error.span.col), (2, 10));
     assert!(error.message.contains("prefer extension"));
 }
+
+#[test]
+fn data_attribute_names_keep_digits_and_hyphens_after_the_first_letter() {
+    for name in ["data-v-2", "data-v--2", "data-v-", "data-v--"] {
+        let source =
+            format!("component A\n  state data-v = 4\n  view\n    text data-v-2 {name}=\"x\"\n");
+        let file = parse(&source).unwrap_or_else(|e| panic!("{name}: {e:?}"));
+        let Node::Element {
+            attrs, positional, ..
+        } = &file.components[0].view[0]
+        else {
+            panic!()
+        };
+        assert_eq!(attrs[0].name, name);
+        assert!(matches!(&positional[0], Expr::Binary(BinOp::Sub, ..)));
+    }
+}
+
+#[test]
+fn data_attribute_names_do_not_become_binding_names_or_assignment_targets() {
+    for name in ["data-v-2", "data-v--2", "data-v-", "data-v--"] {
+        for body in [
+            format!("  state {name} = 9\n  view\n    text \"word\"\n"),
+            format!(
+                "  state data-v = 4\n  action change\n    {name} = 5\n  view\n    text \"word\"\n"
+            ),
+            format!("  state data-v = 4\n  state {name} = 9\n  view\n    text `${{data-v-2}}`\n"),
+        ] {
+            let source = format!("component App\n{body}");
+            let error = parse(&source).expect_err(&source);
+            assert!(
+                error.id.starts_with("syntax-expected"),
+                "{source}: {error:?}"
+            );
+        }
+    }
+}
