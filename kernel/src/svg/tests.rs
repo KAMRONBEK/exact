@@ -606,7 +606,9 @@ fn a_gradient_with_no_length_or_radius_paints_its_last_stop() {
     let user = (PropId::GradientUnits, "userSpaceOnUse");
     let zero = [(StyleId::R, StyleValue::Number(0.0))];
     // Name, type, `r`, attributes; the last two take their stops from `href`.
-    let cases: [(&str, NodeType, &[_], &[_]); 7] = [
+    let cases: [(&str, NodeType, &[_], &[_]); 9] = [
+        ("r-fr", Radial, &zero, &[(PropId::Fr, "0.2")]),
+        ("r-fx", Radial, &zero, &[(PropId::Fx, "0.2")]),
         (
             "l-box",
             Linear,
@@ -643,7 +645,7 @@ fn a_gradient_with_no_length_or_radius_paints_its_last_stop() {
             rows,
             &[*props, &[(PropId::Id, *name)]].concat(),
         );
-        if i < 5 {
+        if i < 7 {
             let first = node(
                 &mut ops,
                 NodeType::SvgStop,
@@ -678,8 +680,9 @@ fn a_gradient_with_no_length_or_radius_paints_its_last_stop() {
     };
     let red = ColorValue::Fixed(Color::rgba(255, 0, 0, 255));
     let bbox = Some((0.0, 0.0, 20.0, 10.0));
-    // SVG 2 §14.2.2 and §14.2.3: equal end points, or a zero radius, paint
-    // the last stop's colour and opacity. Chrome does so under `pad`.
+    // Equal end points (SVG 2 §14.2.2.2), or a zero radius about the focus
+    // (SVG 1.1 §13.2.3), paint the last stop's colour and opacity. Chrome
+    // does so under `pad`.
     for name in ["l-box", "l-user", "r-box", "r-user", "pad"] {
         assert_eq!(
             resolve(&k, 2, name, bbox, vp),
@@ -687,9 +690,10 @@ fn a_gradient_with_no_length_or_radius_paints_its_last_stop() {
             "{name}"
         );
     }
-    // Under `reflect` Chrome paints the stops' average instead, so the
-    // server stays, as it does for a gradient with a length.
-    for name in ["reflect", "whole"] {
+    // Under `reflect` Chrome paints the stops' average instead, and a zero
+    // radius with a focal radius or an off-centre focus is still a two-circle
+    // gradient, so the server stays, as it does for a gradient with a length.
+    for name in ["reflect", "whole", "r-fr", "r-fx"] {
         assert!(
             matches!(resolve(&k, 2, name, bbox, vp), Resolved::Server(_)),
             "{name}"

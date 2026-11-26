@@ -192,12 +192,21 @@ pub fn resolve(
         Some("repeat") => Spread::Repeat,
         _ => Spread::Pad,
     };
-    // SVG 2 §14.2.2, §14.2.3: equal end points, or a zero radius, paint the
-    // last stop. Chrome does so under `pad` and paints the stops' average
-    // under `reflect` and `repeat`, which a colour role cannot express.
+    // Equal end points (SVG 2 §14.2.2.2), or a zero radius about the focus
+    // (SVG 1.1 §13.2.3, `r`), paint the last stop. Chrome does so under `pad`
+    // and paints the stops' average under `reflect` and `repeat`, which a
+    // colour role cannot express. A zero radius with a focal radius or an
+    // off-centre focus stays a two-circle gradient, as Chrome draws it.
     let degenerate = match kind {
         ServerKind::Linear { x1, y1, x2, y2 } => x1 == x2 && y1 == y2,
-        ServerKind::Radial { r, .. } => r <= 0.0,
+        ServerKind::Radial {
+            cx,
+            cy,
+            r,
+            fx,
+            fy,
+            fr,
+        } => r <= 0.0 && fr <= 0.0 && fx == cx && fy == cy,
     };
     if degenerate && spread == Spread::Pad {
         let last = stops.last().expect("two or more stops");
