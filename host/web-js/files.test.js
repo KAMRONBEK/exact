@@ -113,6 +113,46 @@ test('a share holds its files under the agent and refuses what the web cannot sh
   ]);
 });
 
+test.each(['js', 'wasm'])('%s journals a file share once when its adapter loads or refuses', async target => {
+  const js = readFileSync(new URL('./files.js', import.meta.url), 'utf8');
+  const wasm = readFileSync(new URL('../web/wasm/commit.js', import.meta.url), 'utf8');
+  const assignment = glueNode(js, node => node.type === 'AssignmentExpression'
+    && node.left.object?.name === 'Hosts' && node.left.property?.name === 'share' && node);
+  const command = glueNode(wasm, node => node.type === 'IfStatement'
+    && node.test.type === 'BinaryExpression' && node.test.left.object?.name === 'op'
+    && node.test.left.property?.name === 'name' && node.test.right.value === 'share' && node.consequent);
+  const files = ['app:/data/a b/n.txt'];
+  for (const outcome of ['load failure', 'adapter failure', 'shared', 'dismissed']) {
+    const lines = [], calls = [], pending = new Set();
+    const load = () => outcome === 'load failure' ? Promise.reject(new TypeError('load failed')) : Promise.resolve({
+      share: async (details, paths) => {
+        calls.push({ details, paths });
+        if (outcome === 'adapter failure') throw Object.assign(new Error('refused'), { name: 'NotAllowedError' });
+        return `share: ${outcome}`;
+      },
+    });
+    const bindings = {
+      Hosts: {}, clock: { agent: false }, Element: class {}, navigator: { share() {} },
+      say: line => lines.push(line), log: line => lines.push(line),
+      coversPath, appGrantSet: () => GRANTS, glue: load, picker: load,
+      counted: p => { pending.add(p); p.then(() => pending.delete(p), () => pending.delete(p)); },
+      inflight: pending, agentMode: false, writeIn: value => value, readOut: value => value,
+      host: { wasm: { exact_command: () => JSON.stringify({ present: true, files: files.map(path => ({ path })) }) } },
+      op: { args: ['Title', 'Text', null, files] },
+    };
+    new Function(...Object.keys(bindings), target === 'js'
+      ? assignment + '; Hosts.share(...op.args);' : command)(...Object.values(bindings));
+    expect(pending.size, `${target}: ${outcome}`).toBe(1);
+    await Promise.allSettled([...pending]);
+    expect(lines, `${target}: ${outcome}`).toEqual([outcome === 'load failure'
+      ? 'share: refused: TypeError' : outcome === 'adapter failure' ? 'share: refused: NotAllowedError' : `share: ${outcome}`]);
+    expect(pending.size, `${target}: ${outcome}`).toBe(0);
+    expect(calls, `${target}: ${outcome}`).toEqual(outcome === 'load failure' ? [] : [{
+      details: { title: 'Title', text: 'Text', url: null }, paths: files.map(path => ({ path })),
+    }]);
+  }
+});
+
 // One malformed line refuses the whole declaration here as in the runner
 // (save_file.rs pins this JSON as `normalized_json` writes it).
 test('a grant declaration with a malformed line admits no path', () => {

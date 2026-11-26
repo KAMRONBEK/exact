@@ -198,7 +198,7 @@ Hosts.share = (title, text, url, files) => {
   const source = globalThis.event?.currentTarget, anchor = source instanceof Element ? viewId(source) : null;
   if (clock.agent) return hold('share', null, { title: title ?? null, text: text ?? null, url: url ?? null, files, anchor }, (_, req) => { say(req.choice === 'shared' ? 'share: shared' : 'share: dismissed'); });
   if (typeof navigator.share !== 'function') return refuse('unavailable');
-  if (files.length) return void counted(glue().then(m => m.share({ title, text, url }, files.map(path => ({ path })))).then(say));
+  if (files.length) return void counted(glue().then(m => m.share({ title, text, url }, files.map(path => ({ path })))).then(say, e => refuse(e?.name ?? e)));
   navigator.share(Object.fromEntries(Object.entries({ title, text, url }).filter(([, v]) => v != null)))
     .then(() => 'share: shared', e => e?.name === 'AbortError' ? 'share: dismissed' : `share: refused: ${e?.name ?? e}`).then(say);
 };

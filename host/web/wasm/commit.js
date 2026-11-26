@@ -838,7 +838,7 @@ function apply(batch) {
                 title,
                 text,
                 url
-              }, ruling.files)).then(log);
+              }, ruling.files)).then(log, e => log(`share: refused: ${e?.name ?? e}`));
               inflight.add(p);
               p.finally(() => inflight.delete(p));
             } else if (ruling.present) {
