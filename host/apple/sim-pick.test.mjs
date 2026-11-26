@@ -1,5 +1,6 @@
 import { test, expect } from 'bun:test';
 import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
@@ -62,4 +63,13 @@ test('pickSimulatorInteractive selects by number, persists choice, and supports 
     expect(chosen.udid).toBe('IOS-27-AIR');
     expect(readFileSync(resolve(dir, '.exact/simulator'), 'utf8').trim()).toBe('IOS-27-AIR');
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('pickSimulatorInteractive leaves a stdin it found flowing still flowing, so the dev loop keeps its keys', async () => {
+  const stdin = Object.assign(new PassThrough(), { isTTY: true, isRaw: false, setRawMode() {} });
+  stdin.on('data', () => {});
+  const picked = pickSimulatorInteractive([SIMS[2]], { stdin, stdout: { write() {} } });
+  stdin.write('1\n');
+  expect((await picked).udid).toBe('IOS-27-PRO');
+  expect(stdin.readableFlowing).toBe(true);
 });
