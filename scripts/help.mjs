@@ -108,7 +108,7 @@ Pass --ios, --mac, --android or --open to launch a platform as soon as the serve
       ['--lan', 'bind every interface, so a phone on this network opens the printed LAN URL'],
     ],
     more: [
-      ['--ios · --mac · --android · --open · --sim <udid|name> · --no-interactive', 'launch a platform once listening (iOS/macOS connect for live reload); --sim picks the simulator; --no-interactive disables TTY keys'],
+      ['--ios · --mac · --android · --open · --sim <udid|name> · --no-interactive', 'launch a platform once listening (iOS, macOS and Android follow it for live reload); --sim picks the simulator; --no-interactive disables TTY keys'],
       ['--allow-host <name>', 'also answer to this host name (a tunnel\'s); repeatable'],
       ['--remote <host:port>', 'with a design: a TLS-only listener for paired remote clients (a certificate made for this run; its fingerprint printed)'],
       ['--trust-tunnel <port>', 'with a design: a loopback port for a tunnel you run; only paired tokens work through it'],
