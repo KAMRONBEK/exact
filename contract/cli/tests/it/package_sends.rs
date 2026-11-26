@@ -22,7 +22,8 @@ impl App {
         );
         app.package(
             "other",
-            r#"{"send": "otherPost", "options": {"post": "string"}, "answers": "Thread"}"#,
+            r#"{"send": "otherPost", "options": {"post": "string"}, "answers": "Thread"},
+    {"send": "otherSeen", "options": {"post": "string"}, "answers": null}"#,
         );
         app.write(
             "app/app.contract",
@@ -125,6 +126,48 @@ fn a_package_component_sends_through_no_other_module() {
         let begins = format!("`Comments` comes from the package `@scratch/comments`, and its `send posted` asks `{name}`");
         assert!(e.message.starts_with(&begins), "{}", e.message);
     }
+}
+
+#[test]
+fn a_package_components_bare_send_stays_in_its_own_package() {
+    let app = App::new("foreign-bare");
+    for (uses, name) in [
+        ("use otherSeen from \"@scratch/other\"", "otherSeen"),
+        (
+            "use otherSeen as markSeen from \"@scratch/other\"",
+            "markSeen",
+        ),
+    ] {
+        for body in [
+            format!("{name}(post=post)"),
+            format!("if busy\n      busy = false\n    else\n      {name}(post=post)"),
+            format!("match some(post)\n      case some(p)\n        {name}(post=p)\n      case none\n        busy = false"),
+        ] {
+            let e = app.compile(uses, "", &body).unwrap_err();
+            assert_eq!(e.id, "type-package-source", "{body}: {e}");
+            assert!(
+                e.message.starts_with("`Comments` comes from the package `@scratch/comments`, and its `otherSeen(…)` asks `otherSeen`"),
+                "{e}"
+            );
+            assert!(e.message.ends_with("an action prop that sends it"), "{e}");
+        }
+    }
+    app.compile(
+        "use commentsSeen as markSeen from \"@scratch/comments\"",
+        "action local\n    busy = true",
+        "local()\n    markSeen(post=post)",
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    // Apply the diagnostic's repair: the app sends through an action prop.
+    app.write(
+        "app/node_modules/@scratch/comments/ui.contract",
+        "component Comments\n  props\n    post: string\n    seen: action\n  action submit\n    seen()\n  view\n    button press=submit\n      text post\n",
+    );
+    app.write(
+        "app/app.contract",
+        "use Comments from \"@scratch/comments/ui\"\nuse otherSeen from \"@scratch/other\"\ncomponent App\n  action seen\n    otherSeen(post=\"p1\")\n  view\n    Comments(post=\"p1\", seen=seen)\n",
+    );
+    contract::compile_path(&app.0.join("app/app.contract")).unwrap_or_else(|e| panic!("{e}"));
 }
 
 #[test]
