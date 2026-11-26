@@ -434,10 +434,20 @@ impl Lexer {
                             });
                         }
                     }
+                    // A number after `.` is a list index, digits only, so
+                    // `rows.1.0` is two indexes, not `rows` and the number `1.0`.
+                    let index = matches!(
+                        out.last(),
+                        Some(Token {
+                            kind: TokenKind::Punct("."),
+                            ..
+                        })
+                    );
                     // A dot is the decimal point only when a digit follows, so
                     // `rows.0.steps` is an index and then a field, not the
                     // number `0.` (drums R7).
-                    if bytes.get(pos) == Some(&b'.')
+                    if !index
+                        && bytes.get(pos) == Some(&b'.')
                         && bytes
                             .get(pos + 1)
                             .is_some_and(|n| (*n as char).is_ascii_digit())
@@ -452,7 +462,7 @@ impl Lexer {
                     // least one digit. Without the digit the `e` is not part of
                     // the number, so a unit written against it (`2em`) is still
                     // the unquoted length it was.
-                    if matches!(bytes.get(pos), Some(b'e' | b'E')) {
+                    if !index && matches!(bytes.get(pos), Some(b'e' | b'E')) {
                         let sign = usize::from(matches!(bytes.get(pos + 1), Some(b'+' | b'-')));
                         if bytes
                             .get(pos + 1 + sign)
