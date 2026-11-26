@@ -81,7 +81,7 @@ impl<D: DataSource> Presenter<D> {
         true
     }
 
-    /// Props of a mounted audio element whose player has no reader.
+    /// Props of a mounted media element whose player has no reader.
     #[cfg(any(target_os = "android", test))]
     pub(crate) fn background_audio(
         &self,
@@ -94,7 +94,6 @@ impl<D: DataSource> Presenter<D> {
         if session != self.brush.native_session
             || node.key != key
             || node.node_type != NodeType::Video
-            || node.props.str(PropId::SemanticTag) != Some("audio")
         {
             return None;
         }

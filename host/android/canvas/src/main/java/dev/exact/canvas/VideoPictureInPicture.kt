@@ -84,6 +84,7 @@ internal class VideoPictureInPicture(private val activity: ExactActivity) {
 
     fun modeChanged(active: Boolean) {
         if (!active) {
+            if (!expanding) current?.takeIf { it.entered && !it.removed }?.let { activity.leftPicture(it.target) }
             returningToPage = expanding && commands.isNotEmpty()
             ended()
         } else {

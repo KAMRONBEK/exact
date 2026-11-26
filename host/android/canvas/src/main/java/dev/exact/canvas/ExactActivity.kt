@@ -37,6 +37,12 @@ open class ExactActivity : Activity() {
     internal fun floatPicture(target: MediaAllocation) {
         natives?.floatPicture(target, picture) ?: target.tell("pictureinpictureerror", "no video player is mounted", "")
     }
+    // After system expansion the activity resumes. After Close it stops, sometimes before the mode callback.
+    private var pictureAwaitingResume: MediaAllocation? = null
+    internal fun leftPicture(target: MediaAllocation) {
+        if (!nativeStarted) natives?.stopPicture(target)
+        else if (!nativeResumed) pictureAwaitingResume = target
+    }
     override fun onPictureInPictureModeChanged(active: Boolean, config: android.content.res.Configuration) {
         super.onPictureInPictureModeChanged(active, config)
         picture.modeChanged(active)
@@ -858,6 +864,8 @@ open class ExactActivity : Activity() {
         if (reads()) Extensions.stopped(isChangingConfigurations)
         view.running(false, reads())
         natives?.lifecycle?.event(ViewLifecycle.STOP)
+        pictureAwaitingResume?.let { natives?.stopPicture(it) }
+        pictureAwaitingResume = null
         natives?.stopMedia(allowBackground = !isFinishing && reads())
         // Behind the hide, the pads' release and the stop of the turns (none queued after it), what they and anything
         // since the pause committed is on disk before Android may kill it.
@@ -893,6 +901,7 @@ open class ExactActivity : Activity() {
         window()
         configure()
         nativeResumed = true
+        pictureAwaitingResume = null
         picture.pageReady()
         modulePhase = 3; moduleOwners?.move(modulePhase)
         natives?.lifecycle?.event(ViewLifecycle.RESUME)

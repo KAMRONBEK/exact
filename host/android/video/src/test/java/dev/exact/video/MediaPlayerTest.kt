@@ -72,6 +72,19 @@ class MediaPlayerTest {
         }
     }
 
+    @Test fun aNativePlayWithRefusedFocusLeavesThePlayerPaused() {
+        val p = player()
+        ReflectionHelpers.setField(p, "focusType", "playback")
+        val events = Events()
+        p.bind(events)
+        p.update(props("controls" to true), 640, 360, null)
+        val native = (p.controller as PlayerView).player!!
+        native.play()
+        assertTrue("error(not-allowed)" in events.names)
+        assertFalse(native.playWhenReady)
+        assertTrue(p.snapshot()!!.paused)
+    }
+
     @Test fun anUnchangedPausedFalseAfterARebuildIsNoRequestToPlay() {
         val first = player(); val events = Events()
         first.bind(events)

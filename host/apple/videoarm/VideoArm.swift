@@ -191,7 +191,13 @@ private final class VideoArm: NSObject, NowPlayingPlayer {
     var hdrItem = false
     var hdrTask: Task<Void, Never>?
     var naturalSize = CGSize.zero
-    var wantsPlay = false
+    var wantsPlay = false {
+        didSet {
+            #if os(iOS)
+            if !wantsPlay { mayContinueAfterHome = false }
+            #endif
+        }
+    }
     /// The item played to its end (HTML's "ended playback"): the next play
     /// starts it over, as HTML's play() does (LLP 1042 §8: a sound effect
     /// replays by asking to play again).
@@ -250,6 +256,9 @@ private final class VideoArm: NSObject, NowPlayingPlayer {
                 DispatchQueue.main.async { [weak self] in self?.advanced() }
             }
         ]
+        #if os(iOS)
+        NotificationCenter.default.addObserver(self, selector: #selector(backgrounded), name: UIApplication.didEnterBackgroundNotification, object: nil)
+        #endif
         NowPlaying.shared.joined(self)
     }
     /// The periodic observer serves `timeupdate` handlers and inline audio
@@ -273,11 +282,46 @@ private final class VideoArm: NSObject, NowPlayingPlayer {
             player.removeTimeObserver(tick); self.tick = nil
         }
     }
+    #if os(iOS)
+    private var continuesVideo: Bool {
+        props["audiovisualBackgroundPlaybackPolicy"] == "continuesIfPossible"
+            && VideoBackgroundPlayback.configured && !player.isMuted && player.volume > 0
+    }
+
+    private let backgroundTracks = VideoBackgroundPlayback()
+    private var mayContinueAfterHome = false
+
+    @objc private func backgrounded() {
+        guard !invalidated, props["semanticTag"] != "audio" else { return }
+        mayContinueAfterHome = continuesVideo && player.timeControlStatus == .playing
+            && backgroundTracks.hasAudio(player.currentItem)
+        guard !mayContinueAfterHome else { return }
+        wantsPlay = false
+        let nativePause = VideoBackgroundPlayback.willPauseAtHome(player)
+        backgroundPolicy()
+        if !nativePause { player.pause() }
+    }
+
+    private func backgroundPolicy() {
+        guard props["semanticTag"] != "audio" else { return }
+        let background = UIApplication.shared.applicationState == .background
+        if background && mayContinueAfterHome && !continuesVideo {
+            mayContinueAfterHome = false
+            sessionPause()
+        }
+        let allow = continuesVideo && (!background || mayContinueAfterHome)
+        set(\.audiovisualBackgroundPlaybackPolicy, allow ? .continuesIfPossible : .pauses)
+    }
+    #endif
+
     func volumeChanged() {
         guard Thread.isMainThread else { DispatchQueue.main.async { [weak self] in self?.volumeChanged() }; return }
         let now = (player.volume, player.isMuted)
         guard !invalidated, now != reportedVolume else { return }
         reportedVolume = now
+        #if os(iOS)
+        backgroundPolicy()
+        #endif
         emit("volumechange")
     }
     func rateChanged() {
@@ -407,6 +451,7 @@ private final class VideoArm: NSObject, NowPlayingPlayer {
         }
         guard !invalidated, generation == token else { return }
         #if os(iOS)
+        if status == .paused, player.timeControlStatus == .paused { mayContinueAfterHome = false }
         audioControls?.refresh()
         #endif
         let paused = status == .paused
@@ -530,6 +575,9 @@ private final class VideoArm: NSObject, NowPlayingPlayer {
         if changed("exactSeek"), let request = props["exactSeek"]?.split(separator: " ").last.flatMap({ Double($0) }) {
             if request.isFinite, request >= 0 { seek(request) } else { fail("invalid-value", "Invalid fastSeek") }
         }
+        #if os(iOS)
+        backgroundPolicy()
+        #endif
         configureItem()
         queueLoop()
         if let error = props["sourceError"], error != old["sourceError"] { fail("src-not-supported", error) }
@@ -684,6 +732,9 @@ private final class VideoArm: NSObject, NowPlayingPlayer {
     }
     func giveItem(_ asset: AVURLAsset, bound: CGSize? = nil, first: Bool = false) {
         // preload is a hint: AVKit may prepare an item so its native Play control works.
+        #if os(iOS)
+        if VideoBackgroundPlayback.configured, props["semanticTag"] != "audio" { backgroundTracks.prepare(asset) }
+        #endif
         let item = AVPlayerItem(asset: asset)
         // Read only before the item's first variant choice.
         item.startsOnFirstEligibleVariant = first
@@ -774,6 +825,12 @@ private final class VideoArm: NSObject, NowPlayingPlayer {
         player.insert(copy, after: current)
     }
     func play() {
+        #if os(iOS)
+        if props["semanticTag"] != "audio", UIApplication.shared.applicationState == .background, !(continuesVideo && mayContinueAfterHome) {
+            sessionPause()
+            return
+        }
+        #endif
         player.defaultRate = rate
         if atEnd { atEnd = false; seek(0) }
         player.play()

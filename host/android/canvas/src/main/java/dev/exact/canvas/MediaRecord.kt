@@ -50,7 +50,7 @@ internal object MediaRecords {
     fun forget(record: MediaRecord) { if (records[record.id] === record) forget(record.id) }
 }
 
-/** The sink follows an audio player across readers. Its redraw callback belongs to the current reader. */
+/** The sink follows a media player across readers. Its redraw callback belongs to the current reader. */
 internal class AudioLoan(val record: MediaRecord, val player: VideoPlayer) : MediaSink {
     private val epoch = ++record.audioEpoch
     var redraw: (() -> Unit)? = null
@@ -154,6 +154,7 @@ internal object BackgroundAudio {
             loan.player.release()
             return
         }
+        if (!loan.player.backgroundPlayback) { ended(loan); return }
         val json = JSONObject(props)
         resolveMediaSource(json, AssetRoot.of(entry.application))
         loan.player.update(json, 0, 0, null)
@@ -172,6 +173,14 @@ internal object BackgroundAudio {
 }
 
 internal fun resolveMediaSource(props: JSONObject, assets: File) {
+    val artwork = props.optString("mediaArtwork").takeUnless { props.isNull("mediaArtwork") || it.isBlank() }
+    if (artwork != null) {
+        when (val image = Sources.video(artwork, assets) { Native.appFile(it)?.let(::File)?.takeIf(Files::regular) }) {
+            is Source.Remote -> props.put("mediaArtwork", image.url)
+            is Source.Local -> props.put("mediaArtwork", Uri.fromFile(image.file).toString())
+            is Source.Refused -> props.remove("mediaArtwork")
+        }
+    }
     when (val source = Sources.video(props.optString("src"), assets) { Native.appFile(it)?.let(::File)?.takeIf(Files::regular) }) {
         is Source.Remote -> props.put("uri", source.url)
         is Source.Local -> props.put("uri", Uri.fromFile(source.file).toString())
@@ -202,6 +211,7 @@ interface VideoPlayer {
     /** Playing on its own account, not under Chrome's off-screen rule: it keeps its player out of view (D1). */
     val engaged: Boolean
     val backgroundPlayback: Boolean get() = false
+    fun backgroundSurface(reader: Context?) {}
     /** The controller's view with `controls` (Media3's `PlayerView`), which reports itself to accessibility services
      * at the node (D11); null without. */
     val controller: View?
