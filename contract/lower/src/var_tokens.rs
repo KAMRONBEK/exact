@@ -25,7 +25,8 @@
 //! one `var()` naming a token is that token, as a row reads it once the
 //! component is expanded or the call made. Any other argument is left as
 //! written, since it may be text; where it reaches a style row, a `var()` in
-//! it naming no token is refused there ([`carried`]).
+//! it naming no token is refused there ([`carried`]), and one only its
+//! fallback answers is warned at the argument ([`carried_undeclared`]).
 
 use crate::{tags, LowerError};
 use contract_syntax::{Attr, DesignSource, Expr, File, Node, Span, TemplatePart, ThemeDecl};
@@ -177,6 +178,18 @@ fn view_names(tree_nodes: &[Node], declared_names: &mut std::collections::BTreeS
     }
 }
 
+/// Each attribute `view`'s elements write, added to `out`.
+fn view_attrs<'a>(tree_nodes: &'a [Node], element_attrs: &mut Vec<&'a Attr>) {
+    for n in Node::walk(tree_nodes) {
+        if let Node::Element {
+            attrs: own_attrs, ..
+        } = n
+        {
+            element_attrs.extend(own_attrs);
+        }
+    }
+}
+
 /// Each custom property `list` declares, after its `--`, added to `out`.
 fn author_names(list: &[Attr], out: &mut std::collections::BTreeSet<String>) {
     for a in list {
@@ -244,6 +257,7 @@ pub fn rewrite(file: &mut File, tokens: &Tokens) -> Rewritten {
 pub(crate) struct FileTokens<'a> {
     file: &'a File,
     tokens: std::cell::OnceCell<Tokens>,
+    own: std::cell::OnceCell<std::collections::BTreeSet<Span>>,
 }
 
 impl<'a> FileTokens<'a> {
@@ -251,7 +265,25 @@ impl<'a> FileTokens<'a> {
         Self {
             file,
             tokens: std::cell::OnceCell::new(),
+            own: std::cell::OnceCell::new(),
         }
+    }
+
+    /// Where each literal of a style row the file's views write is, which
+    /// [`rewrite`] has read: a literal an expanded row holds elsewhere is a
+    /// component's argument.
+    fn own_literals(&self) -> &std::collections::BTreeSet<Span> {
+        self.own.get_or_init(|| {
+            let mut attrs = Vec::new();
+            for c in self.file.components.iter().chain(&self.file.members) {
+                view_attrs(&c.view, &mut attrs);
+            }
+            let literal = |e: &&Expr| matches!(e, Expr::Str(..) | Expr::Template(..));
+            (attrs.into_iter())
+                .filter(|a| tags::style(&a.name))
+                .flat_map(|a| a.value.walk().filter(literal).map(Expr::span))
+                .collect()
+        })
     }
 
     fn get(&self) -> &Tokens {
@@ -272,6 +304,39 @@ impl<'a> FileTokens<'a> {
 /// row. A `var()` among other words of an argument, naming a token, is left
 /// for the row's own check.
 pub(crate) fn carried(a: &Attr, file: &FileTokens<'_>) -> Result<(), LowerError> {
+    match read_in_row(a, file) {
+        Some((_, Some((why, literal, span)))) => Err(refusal(a, why, &literal, span, file.get())),
+        _ => Ok(()),
+    }
+}
+
+/// Each `var()` of a name nothing declares that a component's argument
+/// carries to one of `attrs`' rows reading it at run time, which its fallback
+/// always answers (LLP 1123 D5), added to `out`. [`rewrite`] warns of one
+/// written in the row itself; an argument it leaves, since the argument may
+/// be text, is warned of here, at the argument, once a row reads it.
+pub(crate) fn carried_undeclared(
+    attrs: &[Attr],
+    file: &FileTokens<'_>,
+    out: &mut Vec<(Span, Undeclared)>,
+) {
+    for a in attrs {
+        let Some((found, None)) = read_in_row(a, file) else {
+            continue;
+        };
+        // A literal no row of the source writes came from the use site
+        let own = file.own_literals();
+        for (span, call) in found.undeclared {
+            if !own.contains(&span) && !out.iter().any(|(s, c)| *s == span && *c == call) {
+                out.push((span, call));
+            }
+        }
+    }
+}
+
+/// How `a`'s row reads its value's `var()`s once expanded, and its first
+/// refusal; `None` when it is no style row or names no `var()`.
+fn read_in_row(a: &Attr, file: &FileTokens<'_>) -> Option<(Rewritten, Refused)> {
     fn mentions(e: &Expr) -> bool {
         let named = |s: &str| {
             s.as_bytes()
@@ -292,21 +357,17 @@ pub(crate) fn carried(a: &Attr, file: &FileTokens<'_>) -> Result<(), LowerError>
         }
     }
     if !tags::style(&a.name) || !mentions(&a.value) {
-        return Ok(());
+        return None;
     }
-    let tokens = file.get();
     let (mut out, mut refused) = (Rewritten::default(), None);
     value(
         &mut a.value.clone(),
-        tokens,
+        file.get(),
         row_mode(a),
         &mut out,
         &mut refused,
     );
-    match refused {
-        Some((why, literal, span)) => Err(refusal(a, why, &literal, span, tokens)),
-        None => Ok(()),
-    }
+    Some((out, refused))
 }
 
 /// The one warning for every fallback [`rewrite`] dropped, at the first.

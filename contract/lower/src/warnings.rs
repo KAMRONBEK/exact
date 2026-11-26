@@ -151,8 +151,12 @@ pub(crate) fn with_text_styles(
         .walk_regions_with(start, warning_regions);
     let (mut seen, mut platform) = (BTreeSet::new(), Vec::new());
     let mut seen_buttons = BTreeSet::new();
+    let (var_tokens, mut undeclared) =
+        (crate::var_tokens::FileTokens::new(checked.file), Vec::new());
     for (visit, (in_root, back, guards)) in visits {
         if let Some((tag, positional, attrs)) = visit.element() {
+            // @ref LLP 1123 D5 — an argument's `var()` that only its fallback answers, where a row reads it.
+            crate::var_tokens::carried_undeclared(attrs, &var_tokens, &mut undeclared);
             // A component used twice is inlined twice: one line for its source.
             let span = visit.span();
             let fresh = seen.insert((span.source_id, span.line, span.col, span.end_col));
@@ -213,6 +217,7 @@ pub(crate) fn with_text_styles(
             }
         }
     }
+    out.extend(crate::var_tokens::undeclared_warning(&undeclared));
     (checked.file.styles.iter()).for_each(|s| line_height::multiplier(&s.attrs, &mut out));
     out.extend(screens::screen_by_state(checked));
     out.extend(select_after_push::select_after_push(checked));
