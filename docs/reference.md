@@ -2205,6 +2205,33 @@ is `true` in a binary baked with production trust (for example, Apple's
 `--release`, `--distribution`, or `exact release`) and `false` in a development
 build.
 
+### Video picture in picture
+
+A URL-backed `video` uses the page commands `requestPictureInPicture(id)`
+and `exitPictureInPicture()`. Read `exactPage().pictureInPictureEnabled`
+to decide whether to show a custom button. The element reports a successful
+presentation with `enterpictureinpicture` and `leavepictureinpicture`.
+A failed request reports its reason through `pictureinpictureerror`.
+
+| Host | Command and verification |
+| --- | --- |
+| Web JS | Reads `document.pictureInPictureEnabled`. Headed Chromium ran the Contract button, the element events, repeat entry, exit and removal with a bundled MP4. Its own controls delivered one enter and one leave. A request from a task without user activation received `NotAllowedError`. |
+| Web wasm | Reads false and reports a request error. |
+| Android reader | An enabled APK reads the device’s picture-in-picture feature. On API 35 and 36 emulators the button pinned the player. Expansion, system close, command exit and removal each delivered one leave. Rotation kept the activity pinned. A request followed immediately by exit delivered one enter and one leave. A video removed while Android is entering picture in picture receives no events, and the activity returns to its normal mode. |
+| iOS | Reads false and reports that the command is unavailable on iOS. AVKit’s control reports enter, leave and failure. Delegate callbacks passed on iOS 27.2 and 26.5 simulators. The iOS events have not been run on a physical iPhone. |
+| macOS | The fixture received the named command refusal. The Mac’s ordinary video uses AVPlayerView. |
+| tvOS | The host declares the command unavailable. No tvOS drive was run. |
+| Painted Linux host, terminal | Both delivered the element error when driven headless on macOS. |
+| Windows | Uses the painted refusal. No Windows drive was run. |
+
+Android supplies its system controls for expanding and closing the pinned
+activity. The existing player and its media session continue. Exact adds no
+remote actions or automatic entry. A release APK declares PiP support when
+its plan includes a video and a request command. An unlocked development
+APK also declares support so a live edit can add the command. The flag
+allows the activity to enter PiP when asked. An app that never requests
+it stays in its ordinary window.
+
 ## Over-the-air updates
 
 The [recipe](recipes/over-the-air-updates.md) goes from a signing key to an

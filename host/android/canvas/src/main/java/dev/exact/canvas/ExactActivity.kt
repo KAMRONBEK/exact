@@ -33,6 +33,14 @@ open class ExactActivity : Activity() {
     /** The `video` and `audio` elements' player ([VideoPlayer]), where the APK links one (LLP 1042.001 D2). */
     protected open val video: ((Context) -> VideoPlayer)? = null
     private var natives: Natives? = null
+    internal val picture by lazy { VideoPictureInPicture(this) }
+    internal fun floatPicture(target: MediaAllocation) {
+        natives?.floatPicture(target, picture) ?: target.tell("pictureinpictureerror", "no video player is mounted", "")
+    }
+    override fun onPictureInPictureModeChanged(active: Boolean, config: android.content.res.Configuration) {
+        super.onPictureInPictureModeChanged(active, config)
+        picture.modeChanged(active)
+    }
     private val hostedModules by lazy { HostedModules(Extensions.withViews(modules)) }
 
     /** A signed update activated ([Requests]): the open videos and pages are opened from its assets again, and its
@@ -73,7 +81,8 @@ open class ExactActivity : Activity() {
 
     private var nativeState: Bundle? = null
     private var nativeStarted = false
-    private var nativeResumed = false
+    internal var nativeResumed = false
+        private set
     /** The app's text fields, each the platform's own ([Fields], LLP 1115.001 D8). */
     private var fields: Fields? = null
     /** The row pitch `start=N` scrolls by (0: the app's plan scrolls to it itself). */
@@ -825,7 +834,10 @@ open class ExactActivity : Activity() {
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (!hasFocus && reads()) pads.background()
-        if (hasFocus) Activities.resumed()
+        if (hasFocus) {
+            Activities.resumed()
+            picture.pageReady()
+        }
         // Over the keyguard's dismissal: focus comes once the phone is unlocked.
         if (hasFocus) Controls.ready(this)
     }
@@ -881,6 +893,7 @@ open class ExactActivity : Activity() {
         window()
         configure()
         nativeResumed = true
+        picture.pageReady()
         modulePhase = 3; moduleOwners?.move(modulePhase)
         natives?.lifecycle?.event(ViewLifecycle.RESUME)
         Auth.resumed()
@@ -929,6 +942,7 @@ open class ExactActivity : Activity() {
     }
 
     override fun onDestroy() {
+        picture.destroy()
         folds.stop()
         accessibility.removeAccessibilityStateChangeListener(accessWatch)
         requests.destroy()
