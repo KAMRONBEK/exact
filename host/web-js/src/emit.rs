@@ -1173,6 +1173,9 @@ impl Em<'_> {
             }
             if b.kind == BindingKind::Prop
                 && (b.id == PropId::AppleMagnification as u16
+                    || b.id == PropId::AppleAllowsMagnification as u16
+                    || b.id == PropId::AppleAllowsBackForwardNavigationGestures as u16
+                    || b.id == PropId::AppleInactiveSchedulingPolicy as u16
                     || b.id == PropId::StatusBarStyle as u16
                     || b.id == PropId::StatusBarAnimation as u16
                     || b.id == PropId::SystemBarsHidden as u16
