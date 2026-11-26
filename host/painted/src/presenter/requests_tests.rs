@@ -275,7 +275,7 @@ fn each_request_is_queued_taken_once_and_answered_by_its_id() {
             "tel:+15550100"
         ]
     );
-    assert_eq!(says(&p, "openURL refused: \"file:///etc/passwd\""), 1);
+    assert_eq!(says(&p, "openURL refused: file: is not"), 1);
     assert_eq!(says(&p, "no browser"), 0, "nothing is logged as unopenable");
     // The share sheet: what the app gave, and which of the three it gave.
     tap(&mut p, "send");

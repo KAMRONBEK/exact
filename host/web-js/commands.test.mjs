@@ -114,7 +114,7 @@ test("a prompt's Return commits its field, then presses its action", async () =>
 }, 30000);
 
 // `openURL` hands the browser a scheme app.json's `open_url` declares (`exact.openSchemes`), whatever the case it is
-// written in; an undeclared scheme, and one that runs or reads content even if declared, is refused; under the agent
+// written in; an undeclared scheme, and one that runs or reads content even if declared, is refused, its journal line naming only the scheme; under the agent
 // a declared one is journaled, not opened. `change` at a named element hears which.
 test('openURL opens a declared scheme, refuses the rest, and journals under the agent', async () => {
   const server = Bun.serve({ port: 0, fetch(request) {
@@ -137,6 +137,7 @@ test('openURL opens a declared scheme, refuses the rest, and journals under the 
         page('https://example.com/', 'asked');
         page('zed://ssh/devbox/p', 'asked');
         page('https://example.com/', 'absent');
+        for (const url of ['unknown:/route?token=private', '/route?token=private']) page(url);
         await new Promise(r => setTimeout(r));
         globalThis.result = { opened, said, heard };
       </script>`, { headers: { 'content-type': 'text/html' } });
@@ -150,10 +151,14 @@ test('openURL opens a declared scheme, refuses the rest, and journals under the 
     const { opened, said, heard } = await page.evaluate(() => globalThis.result);
     expect(opened).toEqual(['vscode://vscode-remote/ssh-remote+devbox/p', 'vscode://file/a', 'https://example.com/', 'https://example.com/']);
     expect(heard).toEqual(['opened', 'failed']);
-    expect(said).toHaveLength(4);
-    expect(said[0]).toStartWith('openURL refused: "zed://ssh/devbox/p"');
-    expect(said[1]).toStartWith('openURL refused: "javascript:alert(1)"');
+    expect(said).toHaveLength(6);
+    expect(said[0]).toStartWith('openURL refused: zed: is not');
+    expect(said[1]).toStartWith('openURL refused: javascript: is not');
     expect(said[2]).toBe('openURL vscode: vscode://file/b (journaled, not opened under the agent)');
+    // A refusal names the scheme alone: a query can carry a token.
+    expect(said[4]).toStartWith('openURL refused: unknown: is not');
+    expect(said[5]).toStartWith('openURL refused: a URL with no scheme is not');
+    expect(said.filter(line => line.includes('private'))).toEqual([]);
   } finally {
     await browser?.close();
     server.stop(true);

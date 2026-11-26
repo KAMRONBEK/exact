@@ -187,7 +187,7 @@ final class Adapter: ExactSessionDelegate {
         if let url, session.openDeclaredScheme(url, open: { url, done in done(NSWorkspace.shared.open(url)) },
                                                registered: registered, answer: answer) { return }
         guard let url, ["http", "https", "mailto"].contains(url.scheme?.lowercased() ?? "") else {
-            FileHandle.standardError.write(Data("exact: refused to open \(target)\n".utf8))
+            FileHandle.standardError.write(Data("exact: refused to open \(ExactEnv.refusedOpenName(target))\n".utf8))
             return answer(false)
         }
         answer(NSWorkspace.shared.open(url))

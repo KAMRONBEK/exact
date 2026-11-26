@@ -594,6 +594,57 @@ component App
     }
 
     #[test]
+    fn a_refused_open_url_journals_its_scheme_and_none_of_the_url() {
+        let source = r#"component App
+  view
+    text "x"
+"#;
+        let (mut p, error) = Presenter::boot_with_fixture_fonts(
+            &crate::test_plan(source),
+            (),
+            (300., 500.),
+            1.,
+            Default::default(),
+            PainterChoice::Cpu,
+        )
+        .unwrap();
+        assert!(error.is_none());
+        p.compat = r#"{"inputs":{"capabilities":{"openUrlSchemes":["demo"]}}}"#.into();
+        p.serve_requests();
+        for url in [
+            "unknown:/route?token=private",
+            "JavaScript:alert('private')",
+            "demo:\0private",
+            "/route?token=private",
+            "not a url: private",
+        ] {
+            p.open_url(&[exact_plan::Value::from(url)]);
+        }
+        assert!(p.take_requests().is_none());
+        let refused: Vec<String> = p
+            .host
+            .runner()
+            .journal()
+            .filter_map(|l| l.find("openURL refused").map(|at| l[at..].to_owned()))
+            .collect();
+        let head = |l: &String| l.split(" is not ").next().unwrap_or_default().to_owned();
+        assert_eq!(
+            refused.iter().map(head).collect::<Vec<_>>(),
+            [
+                "openURL refused: unknown:",
+                "openURL refused: javascript:",
+                "openURL refused: demo:",
+                "openURL refused: a URL with no scheme",
+                "openURL refused: a URL with no scheme",
+            ]
+        );
+        assert!(
+            refused.iter().all(|l| !l.contains("private")),
+            "{refused:?}"
+        );
+    }
+
+    #[test]
     fn desktop_links_and_open_url_commands_use_the_registered_handler() {
         use std::{
             cell::{Cell, RefCell},

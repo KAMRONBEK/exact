@@ -85,7 +85,8 @@ export const openURL = (say, agentMode) => (u, id) => {
   else if (to) open(to, "_blank", "noopener,noreferrer");
   // The app's own settings page (LLP 1133.002 D11): a browser has none to open.
   else if (u === "app-settings:") say("openURL refused: app-settings: has no page on the web; a site's permissions are the browser's own (its address bar, its settings)");
-  else say(`openURL refused: ${JSON.stringify(String(u).slice(0, 80))} is not an absolute http, https, mailto or tel URL, nor of a scheme app.json's open_url.schemes declares`);
+  // The URL's path and query can carry a token, so the journal names only its scheme, as the painted host's does.
+  else say(`openURL refused: ${/^[a-z][a-z0-9+.-]*:/i.exec(String(u).trim())?.[0].toLowerCase() ?? "a URL with no scheme"} is not an absolute http, https, mailto or tel URL, nor of a scheme app.json's open_url.schemes declares`);
   if (id != null) queueMicrotask(() => liveById(String(id))?.dispatchEvent(new CustomEvent("change", { detail: to ? "opened" : "failed" })));
 };
 // The inverse of `message=`: text into the named surface, every post in
