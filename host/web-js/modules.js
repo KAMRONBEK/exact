@@ -47,6 +47,7 @@ import { members } from "./members.js";
 import { sheets } from "./sheets.js";
 import { errorCode, object, complete, handlesAt, overlay, partial, equalJson, serdeJson, fill, value } from "./declared-values.js";
 import { hatchClock } from "./hatches.js";
+import { loadOnce } from '../web/load-once.js';
 
 // `rows`: source → [extension.name, send, substitute, type, request, options' type, live];
 // `bound`: extension → a loader of its web implementation, where the app binds one
@@ -57,6 +58,8 @@ import { hatchClock } from "./hatches.js";
 // Who a call comes from, least privileged first (the runner's `CallOrigin`)
 const RANK = ["device", "wake", "tool", "action", "app"];
 export function modules(rows, bound = {}, views = {}, events = {}) {
+  const loads = {};
+
   const byKey = new Map(), preferred = new Map(), permission = new Map(), held = [];
   const covers = row => (!Array.isArray(row.sub.implementationTargets) || row.sub.implementationTargets.includes("web")) && !row.sub.implementationOverrides?.includes("web");
   const ownedKey = (key, owner) => key + (owner ? `#${owner}` : "");
@@ -415,12 +418,12 @@ export function modules(rows, bound = {}, views = {}, events = {}) {
   const shown = () => clock.agent ? agentShown : typeof document !== "object" || document.visibilityState !== "hidden";
   // An admitted path's file (LLP 1133.009 D10 item 4), in the store `storage.fs` reads: the app's, or the drive's
   // scratch store under the agent; none when the drive names none.
-  let store = null;
-  const fileStore = () => store ??= import("./storage-environment.js").then(env => {
+
+  const fileStore = () => loadOnce(loads, "store", () => import("./storage-environment.js").then(env => {
     const key = env.storageKey(data.appId);
     if (key == null) throw Object.assign(new Error(env.agentStorageRefusal), { code: "agent" });
     return import(new URL("./storage-fs.js", import.meta.url).href).then(m => m.createFileStore(key));
-  });
+  }));
   const { tracks, audioSession } = packageServices();
   const files = packageFiles(fileStore);
   // The extension's chunk, and the session's one instance of its implementation, which its names and its views share
