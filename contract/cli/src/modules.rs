@@ -376,8 +376,33 @@ fn call(
             ));
         }
     }
-    // A shape named by its literal goes as its schema (LLP 1133.016 D15 item 4).
     let sub: serde_json::Value = serde_json::from_str(&m.substitute).unwrap_or_default();
+    if sub["list"]["androidGroups"] == true {
+        if let Some((_, android)) = words.iter().find(|(platform, _)| platform == "android") {
+            let word = |name: &str| android.iter().find(|(key, _)| key == name).map(|(_, e)| e);
+            let group = word("group");
+            if let Some((value, message)) = match (group, word("groupSummary")) {
+                (Some(e @ Expr::Str(s, _)), _) if s.is_empty() => {
+                    Some((e, "android.group must be a non-empty string"))
+                }
+                (Some(e @ (Expr::Number(..) | Expr::Bool(..) | Expr::None(..))), _) => {
+                    Some((e, "android.group must be a non-empty string"))
+                }
+                (_, Some(e @ (Expr::Str(..) | Expr::Number(..) | Expr::None(..)))) => {
+                    Some((e, "android.groupSummary must be a boolean"))
+                }
+                (None, Some(e)) => Some((e, "android.groupSummary requires android.group")),
+                _ => None,
+            } {
+                errors.push(error(
+                    "contract-module-argument",
+                    message.into(),
+                    value.span(),
+                ));
+            }
+        }
+    }
+    // A shape named by its literal goes as its schema (LLP 1133.016 D15 item 4).
     let paths: Vec<String> = (sub["shapeNames"].as_array().into_iter().flatten())
         .filter_map(|p| p.as_str().map(str::to_owned))
         .collect();

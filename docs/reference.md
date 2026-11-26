@@ -4292,6 +4292,37 @@ grant beside this one: see [Push](#push).
   `NotSupportedError`; launchers draw their own dot). The app's Kotlin may set
   more on each post through `NotificationsModule.builderHatch`.
 
+On Android, `android.group` is a non-empty string that bundles individual
+posts in the shade. A channel controls their settings. Apple's
+`apple.threadIdentifier` groups Apple posts independently. Give each child its
+own tag and use one more tag for the summary. For example, an app that declares
+the `field_trip` channel can pass its current count with each post.
+
+```contract
+  action specimen(title: string, tag: string, count: number)
+    showNotification(title=title, tag=tag, android.channelId="field_trip", android.group="field-trip")
+    showNotification(title="Field trip", body=`${count} specimens`, tag="trip-summary", android.channelId="field_trip", android.group="field-trip", android.groupSummary=true)
+  action finishTrip
+    closeNotification(tag="trip-summary")
+```
+
+Run this action on Android. On Apple, post each child with its thread identifier.
+Call `specimen` with each new or updated child. After closing a child by tag,
+replace the summary with the remaining count or call `finishTrip` when the last
+child goes. Closing the summary early also dismisses its posted children on
+Android. The app chooses the summary's text and click action.
+
+On API 35 and 36 AndroidX defaults to `GROUP_ALERT_ALL`, so both a child and
+its summary can sound. On both Google APIs emulators, back-to-back posts sounded
+once and posts about 2.5 seconds apart sounded twice. Exact sets `GROUP_ALERT_CHILDREN` on each summary to
+avoid the second alert. App Kotlin can still choose an explicit alert policy
+on the builder for an audible post. A silent child keeps its group and uses
+`GROUP_ALERT_SUMMARY` to suppress its own alert. Without a group, Exact passes the fallback key
+`silent`. Reserve that key for silence. API 35 groups it normally, while the
+API 36 image clears that key and sets the silent flag. Closing a summary
+with this reserved key therefore leaves the other silent posts on API 36.
+The agent models the submitted group. A written `android.groupSummary` requires a group.
+
 | host | post | `showTrigger` | click | badge |
 | --- | --- | --- | --- | --- |
 | web | `new Notification` in the page | while the page is open: the web has no trigger that outlives the page | while the page is open | `navigator.setAppBadge` where the browser has it, else `NotSupportedError` |
@@ -4305,11 +4336,13 @@ there `available` is false and every call refuses `NotSupportedError`.
 
 Under the agent nothing reaches the system on any host. A post while
 `prompt` waits on a `permission` ticket (`tap @t allow`, or `--permission
-notifications=granted` at launch); `state.notifications` lists what the app
-posted (`{title, body, tag, silent, data, showTrigger, navigate, delivered,
-ref}`, a tag replacing its older one, `closeNotification` removing it, an
-entry for later `delivered: false` until `clock` passes it); `state.badge` is
-the badge (a number, `"flag"` or `null`). `tap @ref` on a delivered entry is
+notifications=granted` at launch). `state.notifications` lists each post's
+title, body, tag, silent, data, showTrigger, navigate, delivered and ref.
+On Android, `android.group` and `android.groupSummary` give the key and role
+handed to Android before the system ranks or regroups notifications. On Android,
+scheduling under an active tag replaces any pending alarm. The posted entry
+stays visible until delivery replaces it. Closing the tag removes both. A scheduled entry reads `delivered: false` until the clock reaches
+its time. `state.badge` is a number, `"flag"` or `null`. `tap @ref` on a delivered entry is
 its click; `tap @ref <action>` chooses one of its `actions`, `tap @ref
 '<action>=<text>'` with a typed reply, a background action running hidden
 as `state.wake` shows it (`origin` `action`); `--notification '<entry>'` relaunches the app with one, as the

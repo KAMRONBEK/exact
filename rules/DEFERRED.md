@@ -1203,6 +1203,9 @@ names no take; `:focus-within` remains out.
   token-mode registration and a TypeScript exchange with Expo, using
   `extra.eas.projectId`. JVM and mocked-fetch tests cover these paths; real
   registration and delivery through Expo remain owed on the reporter's phone.
+  **Expanded (panel, 2026-11-25), AZ2 (expo/exact#1800; LLP 1133.004 D3).**
+  Pocket Lab can name an Android notification's group and post, replace and close
+  its own summary by tag. A silent child keeps its named group.
   **Expanded (the 2026-11-14 panel, two to one, under Charlie's delegation and
   direction to build the ideal end state; LLP 1133.004 §9 P6, P8):** an app's
   own Swift `UNNotificationServiceExtension`, packaged by default in iOS and

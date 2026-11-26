@@ -47,6 +47,7 @@ mod app_icon;
 mod app_list;
 mod desktop;
 mod handed;
+mod notification_group;
 mod reach;
 mod region_list;
 mod update;
@@ -205,6 +206,15 @@ impl<D: DataSource> Runner<D> {
                 .starts_with("person-required")
                 .then_some("person-required");
             return Effect::Now(json!({ "error": "NotAllowedError", "message": message }));
+        }
+        if self.host_target() == "android" && self.substitute(row)["list"]["androidGroups"] == true
+        {
+            if let Some(message) =
+                notification_group::invalid(&self.plan, row, &args["android"], reply.is_some())
+            {
+                self.log(format!("{declared}: refused: TypeError: {message}"));
+                return Effect::Now(json!({ "error": "TypeError", "message": message }));
+            }
         }
         if let Some(refusal) = self.effect_refusal(row, &args) {
             self.log(format!(
@@ -416,6 +426,11 @@ impl<D: DataSource> Runner<D> {
             self.apply_update(row, args)?;
         }
         if let Some(list) = sub["list"].as_object() {
+            let android_groups =
+                self.host_target() == "android" && sub["list"]["androidGroups"] == true;
+            if android_groups {
+                fields.insert("android".into(), notification_group::listed(args));
+            }
             if let Err(code) = self.listing(&extension, list, &mut fields) {
                 self.log(format!("{declared}: refused: {code}"));
                 return Err(json!({ "error": code }));
@@ -468,6 +483,9 @@ impl<D: DataSource> Runner<D> {
                 fields: fields.clone(),
             };
             let replaced = self.with_list(&extension, &state, |entries| {
+                if android_groups {
+                    return (notification_group::post(entries, entry), true);
+                }
                 let same = |e: &Listed| {
                     e.fields.get(&key) == Some(&value) && e.fields.get("kind") == kind.as_ref()
                 };
@@ -529,7 +547,14 @@ impl<D: DataSource> Runner<D> {
             let value = fields.get(key).cloned().unwrap_or(Json::Null);
             let lists = self.lists_of(row);
             for state in lists {
+                let android_groups = self.host_target() == "android"
+                    && self.list_decl(&extension, &state)["androidGroups"] == true;
                 let removed = self.with_list(&extension, &state, |entries| {
+                    if android_groups {
+                        let removed = notification_group::close(entries, &value);
+                        let changed = !removed.is_empty();
+                        return (removed, changed);
+                    }
                     let mut removed = Vec::new();
                     entries.retain(|e| {
                         let keep = e.fields.get(key) != Some(&value)
@@ -778,14 +803,20 @@ impl<D: DataSource> Runner<D> {
         // Earlier raised events have the first commits. The clock can stop on each one's request.
         if !self.has_module_event() {
             if let Some(show) = self.extensions.declared.shows.pop() {
+                let android_groups = self.host_target() == "android"
+                    && self.list_decl(&show.extension, &show.state)["androidGroups"] == true;
                 let listed = self.with_list(&show.extension, &show.state, |entries| {
-                    let Some(entry) = entries
-                        .iter_mut()
-                        .find(|entry| entry.reference == show.reference)
+                    let Some(i) = entries
+                        .iter()
+                        .position(|entry| entry.reference == show.reference)
                     else {
                         return (false, false);
                     };
-                    entry.fields.insert("delivered".into(), json!(true));
+                    entries[i].fields.insert("delivered".into(), json!(true));
+                    if android_groups {
+                        let due = entries.remove(i);
+                        notification_group::post(entries, due);
+                    }
                     (true, true)
                 });
                 if listed && !self.page.hidden {
@@ -918,16 +949,25 @@ impl<D: DataSource> Runner<D> {
         {
             return self.tap_action(&row, &state, at, choice);
         }
-        let entry = self
+        let entry = self.take_tapped(&row, &state, at);
+        self.log(format!("{state} @{reference}: tapped"));
+        self.activate_entry(&row, &Json::Object(entry.fields), reference, None)
+    }
+
+    fn take_tapped(&mut self, row: &ModulesRow, state: &str, at: usize) -> Listed {
+        let android_groups = self.host_target() == "android"
+            && self.substitute(row)["list"]["androidGroups"] == true;
+        let entries = self
             .extensions
             .declared
             .lists
-            .get_mut(&state)
-            .expect("found above")
-            .remove(at);
-        let row = self.module_row(&entry.source);
-        self.log(format!("{state} @{reference}: tapped"));
-        self.activate_entry(&row, &Json::Object(entry.fields), reference, None)
+            .get_mut(state)
+            .expect("found above");
+        if android_groups {
+            notification_group::take(entries, at, None)
+        } else {
+            entries.remove(at)
+        }
     }
 
     /// `tap @ref <action>[=<reply>]` on an entry that shows actions (LLP
@@ -969,14 +1009,7 @@ impl<D: DataSource> Runner<D> {
             (false, Some(_)) => return Err(format!("@{reference}: `{name}` takes no typed reply")),
         };
         let foreground = action["foreground"] != false;
-        let mut fields = self
-            .extensions
-            .declared
-            .lists
-            .get_mut(state)
-            .expect("found above")
-            .remove(at)
-            .fields;
+        let mut fields = self.take_tapped(row, state, at).fields;
         fields.remove("navigate");
         fields.insert("action".into(), json!(name));
         fields.insert("reply".into(), reply);
