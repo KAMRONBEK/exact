@@ -1042,12 +1042,21 @@ public final class Agent {
             // Every list reported and filled where it shows, nested ones
             // included, before the fixed point is read (LLP 1070 G3).
             if settle { presenter.settlePump() }
-            // What hatches asked of elements (LLP 1075.003.000.001 §2.5): drained
-            // here, on the thread this loop holds, each drain a snapshot. A hatch
-            // whose acts keep causing acts is named after 16.
-            if settle, presenter.elements.inFlight > 0 {
+            // What hatches asked of elements (LLP 1075.003.000.001 §2.5) and
+            // deferred native bar presses: drained here on the thread this loop
+            // holds, each drain a snapshot. A hatch whose acts keep causing acts
+            // is named after 16.
+            #if os(iOS) || os(tvOS)
+            let deferredInFlight = presenter.deferredPresses.inFlight > 0
+            #else
+            let deferredInFlight = false
+            #endif
+            if settle, presenter.elements.inFlight > 0 || deferredInFlight {
                 hatchDrains += 1
                 if hatchDrains > 16 { return reply(landed, false, reason: "hatches") }
+                #if os(iOS) || os(tvOS)
+                presenter.deferredPresses.drain()
+                #endif
                 presenter.elements.drain()
                 continue
             }
@@ -1136,8 +1145,13 @@ public final class Agent {
                 // or queuing its answer's `then` during the wait above. Recheck
                 // the runner before claiming the fixed point (LLP 1012 §2).
                 let afterNative = max(landed, self.settle() ?? landed)
+                #if os(iOS) || os(tvOS)
+                let stillDeferred = presenter.deferredPresses.inFlight > 0
+                #else
+                let stillDeferred = false
+                #endif
                 if pendingCount() > 0 || session.timerDue.map({ $0 <= landed }) == true
-                    || afterNative > landed || launchQueued() || presenter.elements.inFlight > 0 {
+                    || afterNative > landed || launchQueued() || presenter.elements.inFlight > 0 || stillDeferred {
                     rounds += 1
                     if rounds >= 16 || Date() >= deadline { return reply(landed, false) }
                     to = afterNative

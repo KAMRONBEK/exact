@@ -321,7 +321,7 @@ final class SegmentPress: NSObject {
         let i = control.selectedSegmentIndex
         settled = i
         guard tabs.indices.contains(i) else { return }
-        _ = host?.presenter.hatchAct(tabs[i], 0, NavigationMarks.shared.personNow())
+        host?.presenter.pressFromBar(tabs[i], origin: NavigationMarks.shared.personNow())
     }
 }
 
@@ -339,12 +339,12 @@ final class BarPress: NSObject {
         // (`MenuHost.invoke`).
         if !node.handlers.contains("press"), let invocation = host.presenter.invocation(of: node) {
             if invocation.opensPopover, !host.presenter.menus.pullsDown(invocation.target) {
-                _ = host.presenter.menus.openFromBar(node)
+                if !node.disabled, !node.inert { _ = host.presenter.menus.openFromBar(node) }
                 return
             }
             // A dialog it shows modally or closes, as its command says (`MenuHost.invoke`'s bar item).
             if invocation.action == .showModal || invocation.action == .close {
-                if !node.disabled { host.presenter.press(id) }
+                if !node.disabled, !node.inert { host.presenter.press(id) }
                 return
             }
         }
@@ -353,7 +353,7 @@ final class BarPress: NSObject {
             if !node.disabled, !node.inert { host.presenter.press(id) }
             return
         }
-        _ = host.presenter.hatchAct(id, 0, NavigationMarks.shared.personNow())
+        host.presenter.pressFromBar(id, origin: NavigationMarks.shared.personNow())
     }
 }
 

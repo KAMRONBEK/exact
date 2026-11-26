@@ -173,6 +173,7 @@ package final class Presenter {
     package lazy var fieldSelections = FieldSelections(self)
     /// Nodes marked `hatch="word"` (LLP 1075.003.000).
     package internal(set) lazy var elements: any ElementHatching = NativeModuleLink.makeElements?(self) ?? NoElementHatches()
+    let deferredPresses = DeferredPresses()
     lazy package var navigation: any NavigationHosting = NavigationLink.make?(self) ?? NoNavigation(self)
     /// Each navigation root's tabs, as the last batch to say them gave them (`takeRootTabs`).
     package var rootTabs: [UInt32: RootTabs] = [:]
@@ -383,9 +384,8 @@ package final class Presenter {
         releaseOrientationLock()
         focusEvents.reset(); TipLink.installed?.withdraw(owner: self)
         // Every hatched node ends first, its view and platform object there.
-        elements.reset()
-        flightHost.reset()
-        canvasKey = nil
+        elements.reset(); deferredPresses.reset()
+        flightHost.reset(); canvasKey = nil
         session?.transformInputHold?.cancel()
         reorders.abandon()
         session?.rasters?.reset()
