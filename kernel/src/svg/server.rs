@@ -192,6 +192,17 @@ pub fn resolve(
         Some("repeat") => Spread::Repeat,
         _ => Spread::Pad,
     };
+    // SVG 2 §14.2.2, §14.2.3: equal end points, or a zero radius, paint the
+    // last stop. Chrome does so under `pad` and paints the stops' average
+    // under `reflect` and `repeat`, which a colour role cannot express.
+    let degenerate = match kind {
+        ServerKind::Linear { x1, y1, x2, y2 } => x1 == x2 && y1 == y2,
+        ServerKind::Radial { r, .. } => r <= 0.0,
+    };
+    if degenerate && spread == Spread::Pad {
+        let last = stops.last().expect("two or more stops");
+        return Resolved::Color(last.color, last.opacity);
+    }
     Resolved::Server(Server {
         kind,
         stops,
