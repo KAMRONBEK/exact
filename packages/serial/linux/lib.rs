@@ -203,7 +203,8 @@ fn sysfs_ports(root: &std::path::Path) -> Vec<Port> {
         };
         let product = usb.and_then(|u| read_text(&u.join("product").to_string_lossy()));
         // The 8250 driver registers `nr_uarts` ports (32 on Ubuntu's kernels) whether a UART answers or not; one
-        // where none does reads `type` 0, `PORT_UNKNOWN` (Documentation/ABI/stable/sysfs-class-tty).
+        // where none does reads `type` 0, `PORT_UNKNOWN` (include/uapi/linux/serial.h), the type TIOCGSERIAL
+        // answers, which sysfs shows (Documentation/ABI/testing/sysfs-tty).
         if usb.is_none()
             && read_text(&entry.path().join("type").to_string_lossy()).as_deref() == Some("0")
         {
