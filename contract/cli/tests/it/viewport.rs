@@ -253,6 +253,32 @@ component App
 }
 
 #[test]
+fn a_postures_type_is_checked_when_its_value_is_unread_or_interpolated() {
+    for (ty, text) in [
+        ("number", "`${fold.devicePosture}`"),
+        ("bool", "`${fold.devicePosture}`"),
+        ("option<string>", "\"fold\""),
+        ("string[]", "\"fold\""),
+    ] {
+        let source = format!("shape Fold\n  devicePosture: {ty}\ncomponent App\n  resource fold = exactViewport() as shape Fold\n  view\n    text {text}\n");
+        let plan = contract::compile(&source).unwrap();
+        let why = match contract::bake(plan, boxed(NoData)) {
+            Err(contract::BakeError::Runner(RunnerError::Shape { resource, why })) => {
+                assert_eq!(resource, "fold");
+                why
+            }
+            other => panic!("devicePosture: {ty}: expected a shape refusal, got {other:?}"),
+        };
+        assert!(
+            why.contains("Fold.devicePosture") && why.contains("continuous"),
+            "{why}"
+        );
+        let repaired = source.replace(&format!("devicePosture: {ty}"), "devicePosture: string");
+        contract::bake(contract::compile(&repaired).unwrap(), boxed(NoData)).unwrap();
+    }
+}
+
+#[test]
 fn display_ratio_is_optional_host_data_and_updates_without_display_lengths() {
     let plan = contract::bake(contract::compile(
         "shape Viewport\n  devicePixelRatio: option<number>\ncomponent App\n  resource viewport = exactViewport() as shape Viewport\n  view\n    text \"Display\"\n",
