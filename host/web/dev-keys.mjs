@@ -78,9 +78,11 @@ export function platformLaunchCommand(platform, { app, root, url, simUdid = null
       : { command: process.execPath, args: [resolve(root, 'host/apple/build.mjs'), app.crate('apple'), ...extra], cwd: root };
   }
   if (platform === 'android') {
+    // As on Apple, the APK follows the loop (agent-android.mjs reverses its loopback port onto the device).
+    const extra = ['--run', '--url', url];
     return ownExact
-      ? { command: process.execPath, args: [resolve(app.dir, 'exact.mjs'), 'android', '--run'], cwd: app.dir }
-      : { command: process.execPath, args: [resolve(root, 'scripts/agent-android.mjs'), 'build', app.name, '--apk', '--install', '--run'], cwd: root };
+      ? { command: process.execPath, args: [resolve(app.dir, 'exact.mjs'), 'android', ...extra], cwd: app.dir }
+      : { command: process.execPath, args: [resolve(root, 'scripts/agent-android.mjs'), 'build', app.name, '--apk', '--install', ...extra], cwd: root };
   }
   throw new Error(`unknown platform ${platform}`);
 }

@@ -44,6 +44,9 @@ test('platformLaunchCommand routes external exact new apps through exact.mjs for
     const internal = { dir: '/repo/apps/caltrain', name: 'caltrain', outside: false, crate: () => 'caltrain-apple' };
     const inRepo = platformLaunchCommand('ios', { app: internal, root: '/repo', url: 'http://127.0.0.1:8765/', simUdid: 'U1' });
     expect(inRepo.args).toEqual(['/repo/host/apple/build.mjs', '--ios', 'caltrain-apple', '--run', '--url', 'http://127.0.0.1:8765/', '--sim', 'U1']);
+    // Android follows the loop as iOS does: a save reloads the installed APK.
+    expect(platformLaunchCommand('android', { app: outside, root: '/repo', url: 'http://127.0.0.1:8765/' }).args).toEqual([resolve(dir, 'exact.mjs'), 'android', '--run', '--url', 'http://127.0.0.1:8765/']);
+    expect(platformLaunchCommand('android', { app: internal, root: '/repo', url: 'http://127.0.0.1:8765/' }).args).toEqual(['/repo/scripts/agent-android.mjs', 'build', 'caltrain', '--apk', '--install', '--run', '--url', 'http://127.0.0.1:8765/']);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
