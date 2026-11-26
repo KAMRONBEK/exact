@@ -18,13 +18,14 @@ pub const WIDTH: usize = 100;
 /// Formatting is explicit: no compiler or development loop calls this.
 pub fn format(src: &str) -> Result<String, SyntaxError> {
     let (file, tokens) = parse_tokens(Lexer::tokenize(src, 1)?)?;
+    let tokens = widened(tokens);
     let lines: Vec<&str> = src.lines().collect();
     let mut layout = Layout::new(&tokens, &lines);
     layout.file(&file);
     let out = layout.render();
     // Spacing must never turn subtraction into a hyphenated name, join
     // punctuation, or alter a literal. Reparse the newly introduced breaks.
-    let after = Lexer::tokenize(&out, 1)?;
+    let after = widened(Lexer::tokenize(&out, 1)?);
     let after_lines: Vec<&str> = out.lines().collect();
     let original = tokens
         .iter()
@@ -53,6 +54,22 @@ pub fn format(src: &str) -> Result<String, SyntaxError> {
         });
     }
     Ok(out)
+}
+
+/// The tokens, each spanning its text. The lexer gives a package
+/// substitute's `=` and JSON value (`prefer extension device.powerState={…}`)
+/// a point span, and this formatter prints a token as the text its span covers.
+fn widened(mut tokens: Vec<Token>) -> Vec<Token> {
+    for t in &mut tokens {
+        let width = match &t.kind {
+            TokenKind::Punct(p) => p.len(),
+            // A value spanning lines keeps its later lines as written.
+            TokenKind::Json(json) => json.lines().next().map_or(0, str::len),
+            _ => continue,
+        };
+        t.span.end_col = t.span.col + width as u32;
+    }
+    tokens
 }
 
 fn erase_spans(mut file: File) -> File {
@@ -327,6 +344,12 @@ impl<'a> Layout<'a> {
             for (t, next) in line.clone().zip(line.skip(1)) {
                 if t.kind == TokenKind::Punct("-") {
                     self.prefixes.insert(t.span);
+                }
+                // A substitute's key keeps its `=` and value tight, as an attribute's.
+                if matches!(step, crate::Step::PreferExtension { .. })
+                    && next.kind == TokenKind::Punct("=")
+                {
+                    self.attributes.insert(t.span);
                 }
                 if matches!(step, crate::Step::Size { .. } | crate::Step::Resize { .. })
                     && matches!(t.kind, TokenKind::Number(_))
