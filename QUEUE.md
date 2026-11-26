@@ -2270,7 +2270,6 @@ and the Linux headless CPU renderer without claiming display frame timing.
 - Compare held modifiers as a set in Windows reserved-shortcut diagnostics. A Windows app warns for `Control+Escape` but misses `Control+Control+Escape`, which the host matches the same way (#1617).
 - Decide whether comparing disjoint enum types should warn. A function taking `x: enum<"pen", "text">` and `y: enum<"copy", "save">` compiles `x == y`.
 - Check inference across child action props. A child declaring `pick(x)` and forwarding `run=pick` to another child that calls `run(mode)` with an enum state gets `type-cannot-infer` for `x` even when that is its only caller.
-- Give a handlerless `button appearance="none" role="tab"` its implicit keyboard focus on painted hosts. Type Enter at it with an Enter shortcut elsewhere. Painted fires the other button unless the tab has `tabindex=0`. Chromium keeps Enter on the tab.
 - Skip an empty anchor when moving through a painted menu by arrow key. Between two buttons in a `column role="menu"`, put `link href="" tabindex=0` and press ArrowDown on the first button. Painted focuses the link and Chromium focuses the next button.
 - Run `bun test ./game/new.test.mjs -t 'ordinary cargo fmt accepts'`. Formatting a generated game's workspace asks to reorder the Android re-exports in `game/audio/src/native.rs`.
 - Run `bun test ./game/new.test.mjs -t 'Rivals.*captured lock|the SDK lock decides'`. Rivals resolves brotli-decompressor 6.0.0 against a captured 6.3.2, and the SDK fixture's generated lock fails Cargo metadata with `--locked`.
