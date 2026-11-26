@@ -30,7 +30,10 @@ function keptMember(name, source, args, type, path) {
   }
   const fits = i => equal(kept.answers[i][0], at) && (!type || conforms(kept.answers[i][1], type));
   if (candidates) {
-    const i = candidates.find(i => i >= kept.next && fits(i)) ?? candidates.find(fits);
+    const next = kept.next;
+    const i = kept.answers[next]?.[4] === path && fits(next)
+      ? next
+      : candidates.find(i => i >= next && fits(i)) ?? candidates.find(fits);
     if (i === undefined) return null;
     kept.next = i + 1;
     return kept.answers[i];
