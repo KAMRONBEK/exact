@@ -24,6 +24,8 @@ package protocol NavigationHosting: AnyObject {
     func groundChanged()
     /// Whether a node that left keeps its view for its route's exit.
     func keepsForExit(_ id: UInt32) -> Bool
+    /// Whether navigation holds per-node bookkeeping (`refused`, `shown`, `keptSheets`) for `id`.
+    func tracks(_ id: UInt32) -> Bool
     /// A batch inside `startViewTransition()`'s cross-fade: its routes play no entrance or exit of their own.
     var crossFading: Bool { get set }
 
@@ -240,6 +242,7 @@ package final class NoNavigation: NavigationHosting {
     package func reset() { oneLocationAsked = nil }
     package func groundChanged() {}
     package func keepsForExit(_ id: UInt32) -> Bool { false }
+    package func tracks(_ id: UInt32) -> Bool { false }
 
     package var selection: (root: UInt32, stack: [UInt32], at: Int)? { nil }
     package var barRoute: Bool { false }

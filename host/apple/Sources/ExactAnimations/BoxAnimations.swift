@@ -105,6 +105,11 @@ final class BoxAnimations: BoxAnimating {
         return !flying && specs.contains { $0.key.hasPrefix("transform.") && !(proxied && Self.proxied($0.key)) }
     }
 
+    func tracks(_ id: UInt32) -> Bool {
+        boxSpecs[id] != nil || fills[id] != nil || proxies[id] != nil || clips[id] != nil
+            || boxInstalled[id] != nil || hiddenBoxes.contains(id) || flyingBoxes.contains(id)
+    }
+
     func forget(_ id: UInt32) {
         if let entry = boxSpecs.removeValue(forKey: id) { CssAnimations.apply([], to: entry.layer, clock: nil, installed: &boxInstalled[id, default: [:]]) }
         fills.removeValue(forKey: id)?.clear()

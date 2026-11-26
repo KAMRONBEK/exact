@@ -1249,7 +1249,7 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
     /// layer's `masksToBounds`, except on a scroller drawn into a band (`clipsItself`).
     package var overflowClips: Bool {
         let ox = style["overflow_x"]?.string ?? "visible", oy = style["overflow_y"]?.string ?? "visible"
-        return ["hidden", "clip"].contains(ox) || ["hidden", "clip"].contains(oy) || scrollDormant
+        return ox == "hidden" || ox == "clip" || oy == "hidden" || oy == "clip" || scrollDormant
     }
 
     func syncScroll() {

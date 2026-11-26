@@ -266,6 +266,11 @@ package final class BlockHost {
     /// The runtime is replaced: no rectangle it sent stands.
     func forgetRects() { rects = [:] }
 
+    /// Whether any block table currently tracks `id`.
+    func hasEntry(_ id: UInt32) -> Bool {
+        entries[id] != nil || used[id] != nil || rects[id] != nil || margined[id] != nil || toldUpdates[id] != nil || pending[id] != nil
+    }
+
     /// The node is gone, and its block with it.
     func destroyed(_ id: UInt32) {
         if let node = entries[id]?.node { onDestroyed?(node) }

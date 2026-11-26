@@ -22,6 +22,13 @@ package final class NodeView: NSView, NSTextViewDelegate, NSTextFieldDelegate {
     /// The opacity written while a reveal holds the box off screen (`holdOffstage`).
     var offstageAlpha: CGFloat?
     var stage = Stage.committed
+    var hasToolTip = false
+    var needsTeardownForget = false
+    func setToolTip(_ tip: String?) {
+        guard tip != nil || hasToolTip else { return }
+        if toolTip != tip { toolTip = tip }
+        hasToolTip = tip != nil
+    }
     var paintGhost = false
     var paintGhosts = 0
     weak var paintParent: PaintView?
@@ -895,8 +902,9 @@ package final class NodeView: NSView, NSTextViewDelegate, NSTextFieldDelegate {
     /// any overflow but `visible`; line-clamp, LLP 1054 P3). Without a clip box
     /// it is `clipsToBounds` (`applyStyle`; a landing flight, `FlightsMac`).
     package var overflowClips: Bool {
-        let over = [style["overflow_x"]?.string ?? "visible", style["overflow_y"]?.string ?? "visible"]
-        return kind == "text" ? over.contains { $0 != "visible" } || number("line_clamp") > 0 : over.contains { $0 == "hidden" || $0 == "clip" }
+        let ox = style["overflow_x"]?.string ?? "visible", oy = style["overflow_y"]?.string ?? "visible"
+        return kind == "text" ? ox != "visible" || oy != "visible" || number("line_clamp") > 0
+            : ox == "hidden" || ox == "clip" || oy == "hidden" || oy == "clip"
     }
 
     func applyStyle(_ s: NodeStyle) {

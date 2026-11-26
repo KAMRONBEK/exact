@@ -419,8 +419,8 @@ extension NodeView {
     /// (`clip` beside `visible`, CSS Overflow 3 §3.1).
     var clipsOneAxis: Bool {
         guard kind != "text" else { return false }
-        let pair = [style["overflow_x"]?.string ?? "visible", style["overflow_y"]?.string ?? "visible"]
-        return pair == ["clip", "visible"] || pair == ["visible", "clip"]
+        let ox = style["overflow_x"]?.string ?? "visible", oy = style["overflow_y"]?.string ?? "visible"
+        return (ox == "clip" && oy == "visible") || (ox == "visible" && oy == "clip")
     }
 
     /// Overflow clips at the padding edge; a one-axis clip has square corners.

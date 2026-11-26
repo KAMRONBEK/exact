@@ -22,6 +22,8 @@ package protocol BoxAnimating: AnyObject {
     func animatesBox(_ id: UInt32) -> Bool
     /// Whether `id`'s layer plays transform animations (none while it flies).
     func playsTransform(_ id: UInt32, flying: Bool, clock: Double?) -> Bool
+    /// Whether `BoxAnimations` retains any animation, fill, proxy, clip or visibility state for `id`.
+    func tracks(_ id: UInt32) -> Bool
     func forget(_ id: UInt32)
     /// `id`'s box paints its background colour on `fill` (nil for its own layer), as a box's extension holds its
     /// picture (LLP 1123 D13): its background-colour animations play there.
@@ -46,6 +48,7 @@ package final class NoBoxAnimations: BoxAnimating {
     package func seek(clock: Double?) {}
     package func animatesBox(_ id: UInt32) -> Bool { false }
     package func playsTransform(_ id: UInt32, flying: Bool, clock: Double?) -> Bool { false }
+    package func tracks(_ id: UInt32) -> Bool { false }
     package func forget(_ id: UInt32) {}
 }
 

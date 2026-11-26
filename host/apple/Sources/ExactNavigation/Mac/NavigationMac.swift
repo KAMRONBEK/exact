@@ -11,6 +11,8 @@ final class NavigationHost {
     /// Each root's stack as last shown, its keys through its selected route.
     private var shown: [UInt32: [String]] = [:]
     init(presenter: Presenter) { self.presenter = presenter }
+    /// Whether navigation holds per-node bookkeeping for `id`.
+    func tracks(_ id: UInt32) -> Bool { refused[id] != nil || shown[id] != nil || keptSheets[id] != nil }
     /// LLP 1080.001 D3: a route or tabpanel this host hid (the web's
     /// hide-and-inert rule), which it inerts with it.
     func hides(_ node: NodeView) -> Bool { node.routeInert && (panels.contains(node.id) || node.props["navigationKey"] != nil) }
@@ -114,11 +116,12 @@ final class NavigationHost {
         let concerned = concerned ?? presenter.toolbar.mayChangeAHeader(batch)
         if concerned { sheetsRead = true }
         var sheeted: [(base: NodeView, route: NodeView, header: SheetHeader?)] = []
+        let hasTracked = !refused.isEmpty || !shown.isEmpty || !keptSheets.isEmpty
         for op in batch.ops {
             // A row, or a symbol in one, came or changed: the split's painted list is read again (SplitMac.swift `veil`).
             if op.op == .create || op.op == .children || op.op == .props { split.rowsChanged = true }
             if op.op == .style || op.op == .frame, let id = op.nodeID { split.restyled(id) }
-            if op.op == .destroy, let id = op.nodeID { refused.removeValue(forKey: id); shown.removeValue(forKey: id); keptSheets.removeValue(forKey: id) }
+            if hasTracked, op.op == .destroy, let id = op.nodeID { refused.removeValue(forKey: id); shown.removeValue(forKey: id); keptSheets.removeValue(forKey: id) }
         }
         func gate(_ node: NodeView, hidden: Bool, inert: Bool) {
             if node.isHidden != hidden || node.routeInert != inert { subtrees.insert(node.id) }
