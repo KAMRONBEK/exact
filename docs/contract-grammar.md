@@ -45,8 +45,8 @@ a `keyframes` or `font` block, and a component need at least one entry.
   field. An exponent is part of the number only when digits follow its `e` or
   `E` and optional sign (`1e300`, `2.5E-3`, `4e+2`), so `2em` is a number and a
   unit; one past the largest double is refused. A number right after `.` is a
-  list index, digits only, so `rows.1.0` is two indexes. Numeric parsing rejects invalid
-  spellings. Negative values are unary minus applied to a number; as an
+  list index, digits only, so `rows.1.0` is two indexes. Numeric parsing
+  rejects invalid spellings. Negative values are unary minus applied to a number; as an
   attribute's whole value (`min=-40`, `step=-0.5`, `margin-top=-8`,
   `min=-1e300`) it is the negative literal, the number it is, as `40` is, and
   a text field's `min`, `max` and `step` take a number of either sign as a
