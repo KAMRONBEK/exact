@@ -210,6 +210,11 @@ impl Client {
         self.store.select()
     }
 
+    /// Non-fatal reason this launch opened at entry zero, if any.
+    pub fn launch_note(&self) -> Option<&str> {
+        self.store.launch_note()
+    }
+
     /// Prepare the update selected for this launch, or `None` for entry zero.
     /// The plan bytes and complete asset roster are pinned to one generation;
     /// a corrupt plan returns refreshed fallback status instead of booting or

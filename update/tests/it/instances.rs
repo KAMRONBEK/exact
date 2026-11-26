@@ -131,3 +131,33 @@ fn write_entry_does_not_replace_an_entry_held_by_a_reader() {
     assert!(origin.check(&mut owner).is_ok());
     assert_eq!(std::fs::read(dir.join("app.plan")).unwrap(), b"plan four");
 }
+
+#[test]
+#[cfg_attr(
+    windows,
+    ignore = "Windows durable store is not qualified (LLP 1026 D11a)"
+)]
+fn reader_records_launch_note_when_selected_entry_cannot_be_held() {
+    let temp = Temp::new("reader-drop-note");
+    let bundle = Bundle::new(4, b"plan four").asset("mark.png", b"a mark");
+    let mut origin = Origin::of(&bundle);
+    let mut owner = open(&temp);
+    let Ok(Check::Staged { entry, .. }) = origin.check(&mut owner) else {
+        panic!("seq 4 stages");
+    };
+    // Hold an exclusive lock on the entry's exact.json (simulating removal or
+    // repair in flight) so the reader can read the view but fails `hold_entry`.
+    let held_exclusively =
+        std::fs::File::open(temp.path().join("entries").join(&entry).join("exact.json")).unwrap();
+    held_exclusively.try_lock().unwrap();
+    let mut reader = open(&temp);
+    assert_eq!(reader.select().entry, None);
+    assert!(reader.prepare_selected().unwrap().is_none());
+    let note = reader
+        .launch_note()
+        .expect("reader drop records a non-fatal launch note");
+    assert!(note.contains("reader mode dropped entry"), "{note}");
+    drop(reader);
+    drop(held_exclusively);
+    drop(owner);
+}
