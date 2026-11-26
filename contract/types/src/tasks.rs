@@ -190,18 +190,21 @@ pub(crate) fn repeated_owner(
     }
 }
 
-/// A package's component that owns a request to a source its own package's
-/// module does not declare (LLP 1035.005.004 D7): the app grants what a
-/// package's module declares, so a package asks and sends only through its
+/// A package's component that owns a request to a source or send its own
+/// package's module does not declare (LLP 1035.005.004 D7): the app grants what
+/// a package's module declares, so a package asks and sends only through its
 /// own.
 pub(crate) fn foreign_source(file: &contract_syntax::File, child: &Component) -> Option<TypeError> {
+    use contract_syntax::ModuleKind;
     let package = child.params.package.as_deref()?;
-    let declared = |source: &str| {
-        file.modules.iter().any(|m| {
-            m.kind == contract_syntax::ModuleKind::Source
-                && m.package == package
-                && (m.name == source || m.declared == source)
-        })
+    let own = || file.modules.iter().filter(|m| m.package == package);
+    let reads = |source: &str| {
+        own().any(|m| m.kind == ModuleKind::Source && (m.name == source || m.declared == source))
+    };
+    // A send's declared name without its `use` is the app's data, so only its
+    // name in scope counts.
+    let sends = |source: &str| {
+        reads(source) || own().any(|m| m.kind == ModuleKind::Send && m.name == source)
     };
     let name = &child.name;
     let foreign = |what: String, source: &str, span| {
@@ -214,12 +217,12 @@ pub(crate) fn foreign_source(file: &contract_syntax::File, child: &Component) ->
     }
     };
     if let Some(r) = child.resources.iter().find(|r| {
-        !contract_syntax::inline::DEVICE_FACTS.contains(&r.source.as_str()) && !declared(&r.source)
+        !contract_syntax::inline::DEVICE_FACTS.contains(&r.source.as_str()) && !reads(&r.source)
     }) {
         return Some(foreign(format!("`resource {}`", r.name), &r.source, r.span));
     }
     child.actions.iter().find_map(|a| {
-        let (target, source, span) = first_send(&a.body, &|source| !declared(source))?;
+        let (target, source, span) = first_send(&a.body, &|source| !sends(source))?;
         Some(foreign(format!("`send {target}`"), source, span))
     })
 }
