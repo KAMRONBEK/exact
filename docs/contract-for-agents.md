@@ -5021,9 +5021,10 @@ main navigationKey=`${top(nav).id}` navigationBack="close" navigate=follow displ
   on it), draw the header as written. What the compiler cannot see (a value computed as
   the app runs) iOS keeps out of the bar.
 - On the other targets:
-  - **Android's top app bar and tvOS's bar leave out a readout**, and Android the title's
-    own parts too: the subtitle, the avatar and the tap on the title. The Mac's toolbar
-    takes a header only when it has a place for every part: the heading, the first text
+  - **Android's top app bar and tvOS's bar leave out a readout**, and Android also leaves
+    out the title's avatar, glyph-line subtitles and tap on the title (plain-text subtitles
+    after the heading project into Material's small top app bar, LLP 1115.001 D11).
+    The Mac's toolbar takes a header only when it has a place for every part: the heading, the first text
     after it (in a box or not) as the window's subtitle, buttons whose face is words,
     symbols, dots and at most one picture, readouts of words, symbols and dots, one
     search field and a tablist of two or more tabs that each show a title alone.

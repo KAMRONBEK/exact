@@ -1114,20 +1114,20 @@ tabs by the rule and tells the kernel what the bars cover (`HostCover`, the Appl
 
 - the header a top bar replaces takes no room and is neither painted nor hit;
 - the tablist the navigation bar replaces, likewise;
-- each route is inset by the room its bars take: 64 dp at its top where it has a top bar, the navigation bar's
-  height at its bottom.
+- each route is inset by the room its bars take: the top app bar's height (`max(64, 28 * font_scale)` dp, or `max(64, 44 * font_scale)` dp with a subtitle) at its top where it has a top bar, and the navigation bar's height at its bottom.
 
 So the page's content starts under the top bar and ends at the navigation bar, and neither bar is in the page's stream. Both are over it: the top bar at the window's top, reaching under the status bar, whose area is the bar's own colour; the navigation bar at the window's bottom, reaching under the gesture bar. **A keyboard does not move the navigation bar.** It ends the page above itself and covers the bar, as it covers a Material app's, and the room the bar took of the routes goes to nothing while it is covered (`Presenter::fit_bars`).
 
-The title, Up arrow, action icons and unselected destinations use the bar element’s own `color`, or black or white on its authored background. An enabled button’s own `color` still wins. On an authored bar background, accent ink below [4.5:1 for text](https://www.w3.org/TR/WCAG22/#contrast-minimum) or [3:1 for symbols](https://www.w3.org/TR/WCAG22/#non-text-contrast) takes the other scheme’s role, then another readable tone of the same hue if needed. On translucent fills, automatic ink uses the window colour behind the band. Set `color` when page content shows through. The ink roles below are defaults.
+The title, subtitle, Up arrow, action icons and unselected destinations use the bar element’s own `color`, or black or white on its authored background. An enabled button’s own `color` still wins. On an authored bar background, accent ink below [4.5:1 for text](https://www.w3.org/TR/WCAG22/#contrast-minimum) or [3:1 for symbols](https://www.w3.org/TR/WCAG22/#non-text-contrast) takes the other scheme’s role, then another readable tone of the same hue if needed. On translucent fills, automatic ink uses the window colour behind the band. Set `color` when page content shows through. The ink roles below are defaults.
 
 **The top app bar** (Compose’s small `TopAppBar`)
 
 | | Here | Material 3 |
 |---|---|---|
-| Height | 64 dp, under the status bar | 64 dp |
+| Height | `max(64, 28 * font_scale)` dp under the status bar, or `max(64, 44 * font_scale)` dp with a subtitle | 64 dp (`AppBarSmallTokens.ContainerHeight`), growing with title content (`TopAppBarMeasurePolicy`) |
 | Colour | The header’s `background-color`, through the status bar. By default, `surface` at rest and `surfaceContainer` on scroll | the same two (`OnScrollContainerColor`) |
 | Title | the heading, title-large (22/28 sp, regular), `onSurface`, one line cut with an ellipsis; 16 dp from the side, or 4 dp after what leads it (56 dp after the Up arrow) | the same (`TopAppBarLayout`: the title's box at `TopAppBarTitleInset` or after the navigation icon, its own 4 dp padding) |
+| Subtitle | the first shown, visible, non-blank plain `text` after the heading inside its title group (`Kernel::header_subtitle`), label-medium (12/16 sp, medium, 0.5 tracking), `onSurfaceVariant` (or the header's authored ink), one line cut with an ellipsis, stacked 0 dp beneath the title on the same start edge and vertically centred together | `AppBarSmallTokens.SubtitleFont` (`LabelMedium`), `AppBarTokens.SubtitleColor` (`OnSurfaceVariant`), 0 dp gap in `SingleRowTopAppBar` |
 | Up arrow | on a pushed route: Material Symbols' `arrow_back`, 24 dp in a 48 dp target 4 dp from the side, `onSurface` | the same |
 | Buttons | the header's, leading before the heading and trailing after it, 4 dp from the side: a 24 dp symbol in a 48 dp target (`onSurfaceVariant`) for a symbol button; a constrained badge face (a single filled box child holding a picture, initial text or symbol, matching Apple's `BadgeFace`) at 36 dp inside a 48 dp target with authored fill, corners, `object-fit` and fallback; else a text button (label-large, `primary`, 12 dp padding, at least 58 dp wide) | icon buttons, avatar buttons and text buttons, the same metrics |
 | Held | the ripple (above), in a 40 dp circle on an icon, a pill on a text button | the ripple, bounded by the icon button's 40 dp circle |
@@ -1196,7 +1196,7 @@ Not built of D11:
   `surface` colour, and rows have no separator (`grouped-*` rows' Material cells).
   The leading and trailing slots' sizes and colours, the supporting text's style, the three-line item
   and Material's section headers remain open.
-- **A header's rich title**: the avatar, the subtitle and the tap on the title that iOS shows are not read here.
+- **A header's rich title**: the avatar, glyph-line subtitles (symbols beside text) and the tap on the title that iOS shows are not read here (plain-text subtitles are projected above).
 - **`onSecondaryContainer`** for the selected symbol, badges, a navigation rail on a wide window, and hiding the
   navigation bar for a route pushed while the tablist is hidden (the bar follows the tablist's own `display`).
 - **A window whose page does not start at its top.** The top bar is at the window's top and its room is taken

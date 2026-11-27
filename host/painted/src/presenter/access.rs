@@ -681,10 +681,60 @@ impl<D: DataSource> Presenter<D> {
             let title = plan.title.clone();
             self.access_bar_node(b, *heading, 0, role::HEADING, 0, title, place);
         }
+        if let Some((sub_node, rect)) = texts
+            .iter()
+            .find(|(node, _)| Some(*node) == plan.subtitle_node)
+        {
+            if !self.bar_node_aria_hidden(*sub_node, plan.heading)
+                && !self.host.authored_visibility(*sub_node).1
+            {
+                let label = self
+                    .host
+                    .kernel()
+                    .node(*sub_node)
+                    .map(|n| self.access_name(&n))
+                    .unwrap_or_default();
+                if !label.trim().is_empty() {
+                    self.access_bar_node(b, *sub_node, 0, role::TEXT, 0, label, (*rect, frame));
+                }
+            }
+        }
         for item in &plan.trailing {
             button(self, b, item);
         }
         (identity(self.host.kernel(), plan.route), plan.title)
+    }
+
+    fn bar_node_aria_hidden(&self, view: ViewId, heading: Option<ViewId>) -> bool {
+        let kernel = self.host.kernel();
+        let holds_heading = |ancestor: ViewId| {
+            let Some(mut cur) = heading else {
+                return false;
+            };
+            loop {
+                if cur == ancestor {
+                    return true;
+                }
+                let Some(parent) = kernel.node(cur).and_then(|n| n.parent) else {
+                    return false;
+                };
+                cur = parent;
+            }
+        };
+        let mut at = Some(view);
+        while let Some(id) = at {
+            if holds_heading(id) {
+                break;
+            }
+            let Some(node) = kernel.node(id) else {
+                break;
+            };
+            if node.props.bool(PropId::AccessibilityElementsHidden) == Some(true) {
+                return true;
+            }
+            at = node.parent;
+        }
+        false
     }
 
     /// The navigation bar's nodes: the bar, and its destinations in it.

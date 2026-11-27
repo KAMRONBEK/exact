@@ -333,6 +333,9 @@ fn disabled_large_font_and_rtl_badges_behave_cleanly() {
         direction: Direction::Ltr,
         title: "Home".into(),
         title_direction: Direction::Ltr,
+        subtitle_node: None,
+        subtitle: String::new(),
+        subtitle_direction: Direction::Ltr,
         up: false,
         leading: vec![Button {
             node: 3,

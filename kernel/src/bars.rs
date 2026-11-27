@@ -56,6 +56,7 @@ use crate::id::ViewId;
 use crate::kernel::{Kernel, NodeRef};
 use crate::props::PropValue;
 
+mod subtitle;
 mod symbols;
 
 // Paint predicates are broader than the projection rules below.

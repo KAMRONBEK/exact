@@ -63,14 +63,16 @@ impl<D: DataSource> Presenter<D> {
                 };
                 let band = (bars.bands.get(route).copied())
                     .unwrap_or([env.top, env.right, env.bottom, env.left]);
-                let barred = bars.routes.iter().any(|r| r.route == *route);
+                let bar_route = bars.routes.iter().find(|r| r.route == *route);
+                let barred = bar_route.is_some();
+                let subtitled = bar_route.is_some_and(|r| r.subtitle.is_some());
                 let (ox, oy) = (page.0 + x, page.1 + y);
                 let update = OwnerUpdate {
                     band: Some(band),
                     keyboard: self.owner_keyboard((ox, oy)),
                     segments: owner_segments(&env, (x, y, node.frame.width, node.frame.height)),
                     window_map: Some(WindowMap([1.0, 0.0, 0.0, 1.0, ox, oy])),
-                    configuration: Some(self.configuration(barred, sheet.is_some())),
+                    configuration: Some(self.configuration(barred, subtitled, sheet.is_some())),
                     ..Default::default()
                 };
                 updates.push((*route, update));
@@ -99,12 +101,18 @@ impl<D: DataSource> Presenter<D> {
     }
 
     /// The identity of a route's configuration, which an `observed-max` reader keeps its largest band for (D9): the
-    /// window's size, where the page lies in it and the page's size, the room the shell's bars take, whether the route
-    /// has a top bar and the navigation bar shows, and whether it is in a sheet.
-    fn configuration(&self, barred: bool, sheeted: bool) -> u64 {
+    /// window's size, where the page lies in it and the page's size, the room the route's own bars take (including
+    /// any subtitle top growth), whether the route has a top bar and the navigation bar shows, and whether it is in a sheet.
+    fn configuration(&self, barred: bool, subtitled: bool, sheeted: bool) -> u64 {
         let mut h = DefaultHasher::new();
         let window = self.window().map_or((0.0, 0.0), |w| w.size);
-        let (above, below, foot) = self.host.bars().room.unwrap_or_default();
+        let bars = self.host.bars();
+        let (plain_above, below, foot) = bars.room.unwrap_or_default();
+        let above = if subtitled {
+            bars.subtitled_above
+        } else {
+            plain_above
+        };
         let page = self.page_origin();
         for v in [
             window.0,
@@ -119,7 +127,7 @@ impl<D: DataSource> Presenter<D> {
         ] {
             v.to_bits().hash(&mut h);
         }
-        (barred, self.host.bars().tabs.is_some(), sheeted).hash(&mut h);
+        (barred, bars.tabs.is_some(), sheeted).hash(&mut h);
         h.finish()
     }
 }

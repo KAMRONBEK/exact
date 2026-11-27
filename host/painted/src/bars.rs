@@ -102,10 +102,24 @@ impl<D: DataSource> Host<D> {
     /// is projected again and, where what the bars cover changed, laid out:
     /// whether it was.
     pub fn set_bar_room(&mut self, room: Option<(f32, f32, f32)>) -> Result<bool, String> {
-        if self.navigation.bars.room == room {
+        self.set_bar_rooms(room, room.map_or(0.0, |r| r.0))
+    }
+
+    /// Like [`Host::set_bar_room`], with a separate top room for routes whose
+    /// header projects a supporting subtitle (LLP 1115.001 D11).
+    pub fn set_bar_rooms(
+        &mut self,
+        room: Option<(f32, f32, f32)>,
+        subtitled_above: f32,
+    ) -> Result<bool, String> {
+        let subtitled_above = if room.is_some() { subtitled_above } else { 0.0 };
+        if self.navigation.bars.room == room
+            && self.navigation.bars.subtitled_above == subtitled_above
+        {
             return Ok(false);
         }
         self.navigation.bars.room = room;
+        self.navigation.bars.subtitled_above = subtitled_above;
         match self.project_bars() {
             true => self.layout().map(|_| true),
             false => Ok(false),
@@ -257,7 +271,12 @@ impl<D: DataSource> Host<D> {
                     let shows = Bar::of(asked_none, shape.is_some(), pushed, false) == Bar::Header;
                     let mut top = 0.0;
                     if let Some(shape) = shape.filter(|_| shows) {
-                        top = above;
+                        let subtitle = kernel.header_subtitle(&shape);
+                        top = if subtitle.is_some() {
+                            self.navigation.bars.subtitled_above
+                        } else {
+                            above
+                        };
                         for id in lifted(kernel, &shape) {
                             wanted.insert(id, HostCover::Whole);
                         }
@@ -265,6 +284,7 @@ impl<D: DataSource> Host<D> {
                             route: *route,
                             pushed,
                             shape,
+                            subtitle,
                         });
                     }
                     let frame = node.frame;

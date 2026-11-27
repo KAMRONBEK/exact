@@ -595,6 +595,8 @@ mod links;
 mod scheme;
 #[path = "bars_tests/scroll.rs"]
 mod scroll;
+#[path = "bars_tests/subtitle.rs"]
+mod subtitle;
 
 #[test]
 fn the_top_bar_takes_its_on_scroll_colour_and_a_retapped_tab_scrolls_to_the_top() {

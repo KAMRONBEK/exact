@@ -40,7 +40,7 @@ export const classifications = [
       "exact_set_page exact_set_place exact_set_preferences exact_set_root_font_size exact_set_symbol_measure exact_set_time exact_set_time_format exact_set_wake " +
       "exact_surface_record exact_text_scale_changed exact_timeline_scrolled exact_top_layer exact_transform_motion"],
     ["painted:host/painted/src/agent.rs", "prefer prefer_fold retell_offset"],
-    ["painted:host/painted/src/bars.rs", "Host::bars Host::project_bars Host::set_bar_room"],
+    ["painted:host/painted/src/bars.rs", "Host::bars Host::project_bars Host::set_bar_room Host::set_bar_rooms"],
     ["painted:host/painted/src/canvas.rs", "CanvasHost::roles_here CanvasHost::set_borrowed"],
     ["painted:host/painted/src/canvas/colors.rs", "CanvasHost::set_colors"],
     ["painted:host/painted/src/canvas/device.rs", "CanvasHost::chrome CanvasHost::configure CanvasHost::set_keyboard_progress CanvasHost::set_window"],
@@ -1000,7 +1000,7 @@ export const classifications = [
     ["painted:host/painted/src/paint/shape.rs", "Shape::elliptical Shape::inset Shape::new Shape::rect Shape::rounded Shape::with_corners"],
     ["painted:host/painted/src/paint/svg.rs", "resolve_with"],
     ["painted:host/painted/src/presenter/bars/badge.rs", "Badge::read"],
-    ["painted:host/painted/src/presenter/bars/look.rs", "Layout::bottom Layout::paint Layout::target_at Layout::texts Layout::top nav_height top_height"],
+    ["painted:host/painted/src/presenter/bars/look.rs", "Layout::bottom Layout::paint Layout::target_at Layout::texts Layout::top nav_height top_content_height top_height"],
     ["painted:host/painted/src/presenter/clock.rs", "wall_since"],
     ["painted:host/painted/src/presenter/display_frame.rs", "SubmittedFrame::pixels"],
     ["painted:host/painted/src/presenter/edit_menu.rs", "EditMenu::enabled"],
@@ -1220,7 +1220,7 @@ export const classifications = [
     "The named painted adapter reads or updates the current Presenter through the runner or its Host forwarding API. runner/src/runner/event.rs dispatches through a mounted view and its action binding; no independent operation identity is supplied. contact.rs feedback_contains checks the live node's tracking shape for contact_press, pointer_moved feedback and pointer_lift activation.", [
     ["painted:host/painted/src/presenter/access.rs",
       "Presenter::access_bar_info Presenter::access_bottom Presenter::access_control Presenter::access_emit " +
-      "Presenter::access_key Presenter::access_top"],
+      "Presenter::access_key Presenter::access_top Presenter::bar_node_aria_hidden"],
     ["painted:host/painted/src/presenter/access/menu.rs", "Presenter::access_choose Presenter::access_menu Presenter::access_menu_focus"],
     ["painted:host/painted/src/presenter/access/surface.rs", "Presenter::surface_menu_flags Presenter::surface_scroll_label"],
     ["painted:host/painted/src/presenter/access/actions.rs", "Presenter::action_available Presenter::action_targets"],

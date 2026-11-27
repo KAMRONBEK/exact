@@ -207,12 +207,17 @@ impl<D: DataSource> Presenter<D> {
     pub(super) fn fit_bars(&mut self) -> Option<String> {
         self.bars.painter.as_ref()?;
         let (window, safe, frame) = self.bar_window();
-        let above = (safe[0] + look::top_height() - frame[1]).max(0.0);
-        let nav = look::nav_height(self.bar_font_scale());
+        let scale = self.bar_font_scale();
+        let above = (safe[0] + look::top_content_height(scale, false) - frame[1]).max(0.0);
+        let above_subtitled = (safe[0] + look::top_content_height(scale, true) - frame[1]).max(0.0);
+        let nav = look::nav_height(scale);
         let below = (frame[1] + frame[3] - (window.1 - safe[2] - nav)).max(0.0);
         // A sheet's foot reaches under the system's bar (`stage.rs`).
         let foot = (frame[1] + frame[3] - (window.1 - safe[2])).max(0.0);
-        match self.host.set_bar_room(Some((above, below, foot))) {
+        match self
+            .host
+            .set_bar_rooms(Some((above, below, foot)), above_subtitled)
+        {
             Ok(true) => self.after_commit(),
             Ok(false) => None,
             Err(e) => Some(e),
@@ -469,6 +474,19 @@ impl<D: DataSource> Presenter<D> {
                     .filter_map(|id| self.bar_button(*id, self.dark_at(*id)))
                     .collect()
             };
+            let title = (r.shape.heading)
+                .and_then(|heading| kernel.bar_text(heading))
+                .unwrap_or_default();
+            let subtitle_node = r.subtitle.filter(|_| !title.is_empty());
+            let subtitle = subtitle_node
+                .and_then(|id| kernel.bar_text(id))
+                .unwrap_or_default();
+            let subtitle_node = subtitle_node.filter(|_| !subtitle.is_empty());
+            let subtitle_direction = subtitle_node
+                .and_then(|id| kernel.node(id))
+                .map_or(exact_kernel::Direction::Ltr, |node| {
+                    node.computed_row(exact_kernel::StyleId::Direction, |s| s.direction)
+                });
             Top {
                 route: r.route,
                 heading: r.shape.heading,
@@ -476,9 +494,7 @@ impl<D: DataSource> Presenter<D> {
                     .node(r.shape.header)
                     .unwrap()
                     .computed_row(exact_kernel::StyleId::Direction, |s| s.direction),
-                title: (r.shape.heading)
-                    .and_then(|heading| kernel.bar_text(heading))
-                    .unwrap_or_default(),
+                title,
                 title_direction: r
                     .shape
                     .heading
@@ -486,6 +502,9 @@ impl<D: DataSource> Presenter<D> {
                     .map_or(exact_kernel::Direction::Ltr, |node| {
                         node.computed_row(exact_kernel::StyleId::Direction, |s| s.direction)
                     }),
+                subtitle_node,
+                subtitle,
+                subtitle_direction,
                 up: r.pushed,
                 leading: buttons(&r.shape.leading),
                 trailing: buttons(&r.shape.trailing),
@@ -1156,7 +1175,9 @@ impl<D: DataSource> Presenter<D> {
         };
         let frame = |f: [f32; 4]| serde_json::json!({"x": r2(f[0]), "y": r2(f[1]), "w": r2(f[2]), "h": r2(f[3])});
         let top = self.bars.top.as_ref().map(|s| {
+            let subtitle_node = s.plan.subtitle_node.filter(|_| !s.plan.subtitle.is_empty());
             serde_json::json!({"route": s.plan.route, "title": s.plan.title, "heading": s.plan.heading,
+                "subtitle": subtitle_node.map(|_| s.plan.subtitle.as_str()), "subtitleNode": subtitle_node,
                 "up": s.plan.up, "scrolled": s.plan.scrolled, "frame": frame(s.frame),
                 "targets": targets(&s.layout.targets, s.frame)})
         });
