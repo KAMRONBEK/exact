@@ -16,6 +16,7 @@ import { launchAndOptionallyStream } from './sim-logs.mjs';
 import { canFastSimulatorRun, tryFastSimulatorRun } from './fast-run.mjs';
 import { platformWidgetEntries, widgetEntityKeys, activityEntries, hasEntries, widgetGroup, prepareWidgetCore, sharedWidgetCore, placeCoreFramework, dropLeftoverCore, entryProfiles, alarmActivity } from './widgets.mjs';
 import { assembleMac, assembleIOS, buildIntents, shortcutKeys, placeMacDylibs } from './bundle.mjs';
+import { embedArmReach, writeEmbedBundle } from './embed.mjs';
 import { EXTENSION_KINDS, assertNotificationServiceGrants, extensionKinds, notificationService, notificationServiceDirectory, notificationServicePlatformRefusal, staleModuleCache, withoutExtensions } from './extensions.mjs';
 import { buildWatch, watchCompanion, watchProfiles, watchSyncSelected } from './watch.mjs';
 import { spawn, spawnSync, swiftOptimization } from './toolchain.mjs';
@@ -650,8 +651,9 @@ async function main(args, lockHeld = false) {
     prof = pair?.app ?? profile(ph?.udid, app.id, required, { phoneName: ph?.name });
     return identity(prof.team, { profiles: [prof, pair?.extension, pair?.share, ...(!tv && packaged.has('watch') ? watchProfiles({ app, udid: ph?.udid, like: prof }) : [])].filter(Boolean) });
   })() : ios ? '-' : appstore ? (args.includes('--ad-hoc') ? '-' : process.env.EXACT_APPSTORE_ID ?? null) : (distribution ? process.env.EXACT_DEVELOPER_ID ?? null : macIdentity());
+  const embedOnly = appleEmbedOnly(args);
   if (!ios && sha1 === '-') widgets = false;
-  if (!ios && !appleEmbedOnly(args)) macSigning(app, null, { current: sha1, release: process.env.EXACT_UPDATE_TRUST === 'production' || distribution, distribution, store: appstore ? 'appstore' : null, preflight: true, log: () => {} });
+  if (!ios && !embedOnly) macSigning(app, null, { current: sha1, release: process.env.EXACT_UPDATE_TRUST === 'production' || distribution, distribution, store: appstore ? 'appstore' : null, preflight: true, log: () => {} });
   let macWidgets = null;
   const dylib = `lib${gpuCrate.replace(/-/g, '_')}.dylib`;
   // One load name lets the Swift presenter serve every app.
@@ -669,7 +671,7 @@ async function main(args, lockHeld = false) {
   const t0 = Date.now(); buildStep('cargo');
   const target = ios ? (tv ? tvTarget : device ? 'aarch64-apple-ios' : iosTarget) : bakeTarget('macos');
   const library = prepareLibrary(app.dir, target); // a package's prebuilt framework (LLP 1154 D3), fetched and checked before Cargo
-  const attach = !tv && !device && !distribution && !ipa && !developmentArchive && !appleEmbedOnly(args) && !args.includes('--host') && (process.env.EXACT_UPDATE_TRUST ?? 'development') === 'development'; // agent attach (LLP 1012.000 D2): a Mac or iOS simulator app built here to run, never one packaged or embedded, the embedding fixture, a device's or an Apple TV's
+  const attach = !tv && !device && !distribution && !ipa && !developmentArchive && !embedOnly && !args.includes('--host') && (process.env.EXACT_UPDATE_TRUST ?? 'development') === 'development'; // agent attach (LLP 1012.000 D2): a Mac or iOS simulator app built here to run, never one packaged or embedded, the embedding fixture, a device's or an Apple TV's
   const stampSdk = { sdk: sdkName, sdkVersion: designCompatible(app, ios ? 'ios' : 'macos') ? COMPATIBLE_SDK[ios ? 'ios' : 'macos'] : null, purpose: attach ? 'local-development' : null }; // the SDK the link records
   const destination = ios ? (tv ? (device ? 'tvos' : 'tvos-simulator') : device ? 'ios' : 'ios-simulator') : 'macos';
   const sdk = read('xcrun', ['--sdk', sdkName, '--show-sdk-path']).stdout.trim();
@@ -690,7 +692,7 @@ async function main(args, lockHeld = false) {
   const built = () => ({ target: destination, trust: cargoEnv.EXACT_UPDATE_TRUST, signing: sha1 && sha1 !== '-' ? sha1 : 'ad-hoc' }); // `--json`'s object (help.mjs `jsonBuilt`)
   // Outside apps receive these profiles through injectedProfiles (LLP 1036.001 D1).
   const production = cargoEnv.EXACT_UPDATE_TRUST === 'production';
-  const frameworkBundles = ios && production && !appleEmbedOnly(args);
+  const frameworkBundles = ios && (production || embedOnly);
   const frameworkPlatform = tv ? (device ? 'AppleTVOS' : 'AppleTVSimulator') : device ? 'iPhoneOS' : 'iPhoneSimulator';
   const cargoProfile = production ? productionProfile : HOST_DEV;
   // host-dev says `incremental = true`, and Cargo lets an inherited
@@ -790,8 +792,7 @@ async function main(args, lockHeld = false) {
   // so its compile starts here and runs beside the bake; only the link waits
   // for the archive. Another app's build compiling the same scratch is
   // SwiftPM's own lock's; the claim below is the link's. `--embed` alone
-  // builds no Swift.
-  const embedOnly = appleEmbedOnly(args);
+  // builds no ExactKit/ExactIOS executable.
   cargoEnv.EXACT_FORMA_SWIFT = wantsSwiftNames(app, modules.apple, embedOnly) ? '1' : '0';
   // The compiler, by its version: part of the name of what is kept from one build to the next.
   const swiftc = read('xcrun', ['--sdk', sdkName, 'swiftc', '--version']).stdout ?? '';
@@ -936,40 +937,28 @@ async function main(args, lockHeld = false) {
   // The app's GPU module (LLP 1009 D2): a dylib beside the executable (in
   // the bundle's Frameworks on iOS), loaded on demand by the presenter.
   const gpuNote = [...(hasGpu ? [dylib] : []), ...moduleDylibs.map(m => m.built)].join(', ') || 'no GPU crate';
-  // --embed (LLP 1031 D10, the developer-facing promise): what a consumer
-  // without a Rust toolchain links — the archive, the C header, the GPU
-  // module, the shaders and assets, and the cohort's `compat.json` — under
-  // the resolver's app-owned `embed` directory, with `ExactKit` at
-  // `host/apple`. With --archive it also builds the IPA; --embed alone
-  // builds no Swift. The sample hosts prove that the same pieces link.
+  // --embed (LLP 1031 D10, LLP 1031.000): complete brownfield artifact directory under paths.embed.
+  // Static-only apps compile zero Swift; apps with arms, native modules or widgets build only those artifacts.
   const { link: appleLink, products: swiftCapabilities } = appleComposition(buildReceipt.graph, linksByPlan(production, args), app.manifest.link, bakedCompat, developmentArchive);
-  if (args.includes('--embed')) {
-    const platform = ios ? (device ? 'ios' : 'ios-simulator') : 'macos';
-    const gpu = hasGpu ? (frameworkBundles ? 'ExactGpu.framework/ExactGpu' : loadName) : null;
-    const embed = mkdtempSync(resolve(paths.namespace, '.embed-'));
-    cleanup.push(embed);
-    mkdirSync(resolve(embed, 'include'), { recursive: true });
-    const archive = `lib${crate.replace(/-/g, '_')}.a`;
-    copyFileSync(resolve(libDir, archive), resolve(embed, archive));
-    // Every header but an unlinked family's (LLP 1047.001 D4): a family in its own target has an `explicit` submodule
-    // in CExact's module map, and its exports, `exact_<name>.h`, are in the archive only when it is linked.
-    const families = [...readFileSync(resolve(pkg, 'Sources/CExact/module.modulemap'), 'utf8').matchAll(/explicit module \w+ \{\s*header "[^"]*\/(exact_(\w+)\.h)"/g)];
-    const unlinked = new Set(families.filter(([, , name]) => appleLink !== 'all' && !appleLink.split(',').includes(name)).map(([, header]) => header));
-    for (const header of readdirSync(resolve(pkg, 'include')).filter((h) => !unlinked.has(h))) copyFileSync(resolve(pkg, 'include', header), resolve(embed, 'include', header));
-    copyAppleGpuProducts(libDir, embed, gpuArtifacts, frameworkBundles);
-    const embeddedLibrary = embedLibrary(library, embed, ios); // a package's framework (LLP 1154 D3), which the consumer links and embeds
-    // Beside the executable in the embedding app's bundle, as the standalone app has it.
-    if (svgFilterBuilt) copyFileSync(svgFilterBuilt, resolve(embed, svgFilterLibraryName));
-    copyAppleStaticTrees(paths.capture, embed);
-    verifyBakeFiles(bakedCompat, bakedPlan, listAssets(embed, true, ['typescript']));
-    writeFileSync(resolve(embed, 'compat.json'), JSON.stringify(bakedCompat, null, 2) + '\n');
-    // What the consumer links beside the archive and installs before its first session (LLP 1047.001 D4).
-    writeFileSync(resolve(embed, 'capabilities.json'), JSON.stringify({ products: ['ExactKit', ...swiftCapabilities], install: swiftCapabilities.map((product) => `${product}.install()`), optimize, swiftFlags: production && optimize === 'size' ? ['-Osize', '-Xfrontend', '-internalize-at-link'] : [], ...embeddedLibrary }, null, 2) + '\n');
-    writeFileSync(resolve(embed, 'receipt.json'), receipt(app, { platform, target: ios ? target : (process.arch === 'arm64' ? 'aarch64-apple-darwin' : 'x86_64-apple-darwin'), sdk, archive, gpu, package: pkg, composition, compatibilityId:bakedCompat.id, build:buildReceipt }));
-    const bytes = statSync(resolve(embed, archive)).size;
-    placeAppleArtifact(embed, paths.embed);
-    console.log(`host/apple: ${paths.embed.replace(root + '/', '')} — ${archive} ${(bytes / 1048576).toFixed(2)} MB, include/*.h${gpu ? `, ${gpu}` : ''}${svgFilterBuilt ? `, ${svgFilterLibraryName} (the bundle's top level)` : ios ? ', no SVG filter kernels (no Metal toolchain)' : ''}, shaders, assets, compat.json; link it with ExactKit${composition === 'updating' ? ' + ExactUpdates' : ''} from the package at ${pkg.replace(root + '/', '')}`);
-    if (embedOnly) { if (args.includes('--json')) reportBuilt({ path: paths.embed, ...built() }); return; }
+  const reaches = buildReceipt.graph.loads;
+  const embedArms = embedOnly ? embedArmReach({ reaches, app, level }) : null;
+  const settled = production && level === '0' && Array.isArray(reaches);
+  const carries = (module) => embedArms ? embedArms.has(module) : (!settled || reaches.includes(module));
+  const packages = appleImplementations(app.dir, tv ? 'tvos' : ios ? 'ios' : 'macos', buildReceipt.graph.extensions);
+  const composing = modules.apple.length > 0 || packages.length > 0;
+  const launchMods = launchModules(app.dir, app.manifest);
+  const serviceDylibs = launchServices(launchMods, webBuildDir);
+  const hasWeb = !tv && carries('web'), hasVideo = carries('video'), hasSound = carries('sound'), hasMidi = !tv && carries('midi'), hasSvg = carries('svg'), canvasGpu = metal && carries('canvas'), hasListen = !ios && carries('listen');
+  const emitEmbed = (extra = {}) => writeEmbedBundle({ app, ios, device, tv, target, sdk, sdkName, triple: ios ? iosTripleFor(app, device, tv, compiled.ios) : moduleTripleFor(app, false), crate, libDir, paths, cleanup, buildReceipt, bakedCompat, bakedPlan, composition, optimize, production, distribution, appleLink, swiftCapabilities, gpuArtifacts, hasGpu, loadName, frameworkBundles, frameworkPlatform, svgFilterBuilt, svgFilterLibraryName, library, launchPartsDir, launchModuleNames: launchMods.map(m => m.name), alarm: ios && !tv && packaged.has('alarms') ? alarmActivity(packages) : null, appleReach, swiftc, linkRoot: paths.scratch, claimedDomains: claimedDomains(app), copyAppleGpuProducts, copyAppleStaticTrees, placeAppleArtifact, receipt, writeUsageStrings, usageKeys, runApple, ...extra });
+  const embedNeedsSwift = ios && (hasWeb || hasVideo || hasSound || hasMidi || composing || serviceDylibs.length > 0 || widgets);
+  if (embedOnly && embedNeedsSwift && process.platform === 'darwin') {
+    const oldXcode = xcodeRefusal(sdkName);
+    if (oldXcode) { console.error(oldXcode); process.exitCode = 1; return; }
+  }
+  if (embedOnly && !(ios && (embedNeedsSwift || hasSvg || canvasGpu))) {
+    emitEmbed();
+    if (args.includes('--json')) reportBuilt({ path: paths.embed, ...built() });
+    return;
   }
   const t1 = Date.now(); buildStep('swift');
   // The host's loaded modules only where the plan can reach them (LLP 1047
@@ -985,13 +974,9 @@ async function main(args, lockHeld = false) {
   const iosModes = app.manifest.host?.ios?.backgroundModes ?? [];
   if (ios && !tv && buildReceipt.graph.backgroundVideo && !(['playback', 'playback-mix'].includes(app.manifest.audio_session) && iosModes.includes('audio'))) throw new Error('host/apple: audiovisualBackgroundPlaybackPolicy="continuesIfPossible" needs `audio_session` set to "playback" or "playback-mix" and "audio" in `host.ios.backgroundModes` in app.json on iOS');
   if (ios && !tv && buildReceipt.graph.mediaSession && !(app.manifest.audio_session === 'playback' && iosModes.includes('audio'))) throw new Error('host/apple: a media session needs `audio_session: "playback"` and `"audio"` in `host.ios.backgroundModes` in app.json on iOS: the lock screen shows only a playback session\'s media');
-  const reaches = buildReceipt.graph.loads;
-  const settled = production && level === '0' && Array.isArray(reaches);
-  const carries = (module) => !settled || reaches.includes(module);
-  const leftOut = settled ? ['canvas', 'svg', 'video', 'web', 'sound', 'midi', 'listen'].filter((module) => !reaches.includes(module)) : [];
+  const leftOut = settled && !embedOnly ? ['canvas', 'svg', 'video', 'web', 'sound', 'midi', 'listen'].filter((module) => !reaches.includes(module)) : [];
   if (leftOut.length) console.log(`host/apple: the plan cannot change (production, store level 0) and reaches no ${leftOut.join(', ')} module: left out of this build`);
-  const canvasGpu = metal && carries('canvas');
-  const lateCrates = fixedPlan && !embedOnly ? [...(carries('svg') ? ['exact-svg-raster'] : []), ...(canvasGpu ? ['exact-canvas-vello'] : []), ...(!ios && carries('listen') ? ['exact-listen'] : [])] : [];
+  const lateCrates = (fixedPlan || embedOnly) ? [...(carries('svg') ? ['exact-svg-raster'] : []), ...(canvasGpu ? ['exact-canvas-vello'] : []), ...(!ios && carries('listen') ? ['exact-listen'] : [])] : [];
   const lateModules = lateCrates.length ? buildModules(lateCrates, 'late-modules.log') : null;
   const env = swiftEnv(libDir, composition, appleLink);
   // The products: the standalone app, and with --host the sample host too
@@ -1012,8 +997,12 @@ async function main(args, lockHeld = false) {
   const waitForSwift = () => awaitBuildOutput(app, paths.swiftLock, (owner) => console.log(`host/apple: waiting for the Swift build of ${owner} in ${swiftBuildRoot.replace(root + '/', '')}`));
   const widgetClaim = widgets ? waitForSwift() : null;
   // An iOS development core links reserved room and this app's plan is fitted into its copy (#477); a shipped one has none.
-  const reserve = ios && !production && !distribution && linkedPlan ? linkedPlan.dir : null, core = widgets ? sharedWidgetCore({ app, prepared: widgetCore, libDir, crate, env, runApple, linkedPlan, library, reserve: !!reserve }) : null;
-  const shared = core && { ...core, framework: placeCoreFramework(core.framework, resolve(binDir, 'ExactCore.framework'), app, ios ? 'ios' : 'macos', reserve) };
+  const reserve = ios && !production && !distribution && !embedOnly && linkedPlan ? linkedPlan.dir : null;
+  let core = null, shared = null;
+  try {
+    core = widgets ? sharedWidgetCore({ app, prepared: widgetCore, libDir, crate, env, runApple, linkedPlan, library, reserve: !!reserve }) : null;
+    shared = core && { ...core, framework: placeCoreFramework(core.framework, resolve(binDir, 'ExactCore.framework'), app, ios ? 'ios' : 'macos', reserve) };
+  } catch (error) { widgetClaim?.(); throw error; } finally { if (embedOnly) widgetClaim?.(); }
   if (shared) env.EXACT_CORE_FRAMEWORK = relative(pkg, shared.xcframework);
   // A Clip's executable name may also be its parent's or a sample host's.
   const clipBin = simulatorClip ? resolve(mkdtempSync(resolve(binDir, '.clip-')), simulatorClip.executable) : null;
@@ -1021,7 +1010,7 @@ async function main(args, lockHeld = false) {
   // written after the link (`recordedMinimum`), or `ld` refuses an object newer than the link. Its generated code needs
   // only iOS 17 (intents.mjs `floor`); the metadata still reads the app's minimum.
   const intentOptions = { app, compat: bakedCompat, directory: resolve(linkRoot, 'intents'), sdkName, sdk, triple: moduleTripleFor(app, ios, device, tv, recordedMinimum ? compiled : targets), platform: ios ? 'ios' : 'macos', deployment: ios ? targets.ios : targets.macos, swiftc, runApple }, nativeIntents = [];
-  let intents = tv || !packaged.has('intents') ? null : buildIntents(intentOptions);
+  let intents = embedOnly || tv || !packaged.has('intents') ? null : buildIntents(intentOptions);
   // The shared scratch links one app at a time: another app's build of this
   // destination waits here (seconds once ExactKit is compiled), and the
   // executable is in this build's private stage before the claim is let go.
@@ -1067,7 +1056,6 @@ async function main(args, lockHeld = false) {
   };
   const arms = [];
   // tvOS has no WebKit, so no iframe arm there.
-  const hasWeb = !tv && carries('web'), hasVideo = carries('video'), hasSvg = carries('svg'), hasListen = !ios && carries('listen');
   if (hasWeb) arms.push(arm([...webArgs, ...(!production && !distribution ? ['-D', 'EXACT_DEVELOPMENT'] : [])], [resolve(root, 'host/apple/webarm/WebArm.swift'), ...frameSources], webBuilt));
   const videoBuilt = resolve(webBuildDir, videoLoadName);
   // The video arm and its media session (LLP 1098 D7): both sources are its key and its inputs, with MediaPlayer.
@@ -1075,7 +1063,7 @@ async function main(args, lockHeld = false) {
   const videoArgs = ownArgs(webArgs).flatMap(value => value === 'ExactWebArm' ? ['ExactVideoArm'] : value === resolve(root, 'host/apple/webarm/WebArm.swift') ? video : value === webBuilt ? [videoBuilt] : value === 'WebKit' ? ['AVKit', '-framework', 'MediaPlayer'] : [value]);
   if (hasVideo) arms.push(arm(videoArgs, video, videoBuilt));
   // The sound arm (LLP 1096 D8): Swift over a C mixer and AVAudioEngine's raising calls in Objective-C.
-  const hasSound = carries('sound'), soundBuilt = resolve(webBuildDir, soundLoadName);
+  const soundBuilt = resolve(webBuildDir, soundLoadName);
   if (hasSound) {
     const sound = (f) => resolve(root, 'host/apple/soundarm', f), triple = webArgs[webArgs.indexOf('-target') + 1], flags = ['-O2', '-fobjc-arc', '-fobjc-arc-exceptions'];
     const objects = ['sound_mixer.c', 'sound_render.c', 'sound_engine.m'].map((file) => {
@@ -1089,7 +1077,7 @@ async function main(args, lockHeld = false) {
     arms.push(arm(soundArgs, [sound('SoundArm.swift'), sound('sound_mixer.c'), sound('sound_mixer.h'), sound('sound_render.c'), sound('sound_engine.m'), sound('sound_render.h')], soundBuilt));
   }
   // The MIDI arm (LLP 1125 D6): CoreMIDI on a thread of its own; tvOS has none.
-  const hasMidi = !tv && carries('midi'), midiBuilt = resolve(webBuildDir, 'libexact_midi.dylib'), midiSource = resolve(root, 'host/apple/midiarm/MIDIArm.swift'), midiRing = resolve(root, 'host/apple/midiarm/midi_ring.h');
+  const midiBuilt = resolve(webBuildDir, 'libexact_midi.dylib'), midiSource = resolve(root, 'host/apple/midiarm/MIDIArm.swift'), midiRing = resolve(root, 'host/apple/midiarm/midi_ring.h');
   if (hasMidi) arms.push(arm(ownArgs(webArgs).map(value => value === 'ExactWebArm' ? 'ExactMIDIArm' : value === resolve(root, 'host/apple/webarm/WebArm.swift') ? midiSource : value === webBuilt ? midiBuilt : value === 'WebKit' ? 'CoreMIDI' : value).concat(['-import-objc-header', midiRing]), [midiSource, midiRing], midiBuilt));
   // The loose arms, each where the build carries it: [carried, built, load name, its framework on iOS].
   const looseArms = [[hasWeb, webBuilt, webLoadName, 'ExactWeb'], [hasVideo, videoBuilt, videoLoadName, 'ExactVideo'], [hasSound, soundBuilt, soundLoadName, 'ExactSound'], [hasMidi, midiBuilt, 'libexact_midi.dylib', 'ExactMIDI'], ...(ios ? [] : [[hasListen, moduleLib['exact-listen'], 'libexact_listen.dylib', null]])];
@@ -1103,7 +1091,7 @@ async function main(args, lockHeld = false) {
   const dataKeys = resolve(linkRoot, `ExactDataKeys-${app.id}.swift`);
   // @ref LLP 1133.001 D4, D5 — the modules' Swift implementations the app names, each package a Swift module of its
   // own loaded by an adapter at first use (LLP 1067.000.001), and their configuration, refused before one compiles.
-  const packages = appleImplementations(app.dir, tv ? 'tvos' : ios ? 'ios' : 'macos', buildReceipt.graph.extensions), composing = modules.apple.length > 0 || packages.length > 0, configured = appleConfig(app, tv ? 'tvos' : ios ? 'ios' : 'macos', buildReceipt.graph.extensions, production || distribution);
+  const configured = appleConfig(app, tv ? 'tvos' : ios ? 'ios' : 'macos', buildReceipt.graph.extensions, production || distribution);
   // A package that asks for AlarmKit's countdown compiles the host's metadata type into its own module, on iOS
   // only, as the extension compiles it (LLP 1133.030 D8 item 1).
   for (const p of packages) if (p.activity === 'alarmkit' && ios && !tv) p.sources = [...p.sources, resolve(root, 'host/apple/widget/AlarmAttributes.swift')];
@@ -1144,12 +1132,12 @@ async function main(args, lockHeld = false) {
   const simulatorArch = iosTriple.startsWith('arm64') ? 'arm64' : 'x86_64', iosArch = device ? 'arm64' : simulatorArch;
   const moduleArgs = (sdkFor, targetArgs, out, forIos = false, simulator = false, arch = macArch, packagesIn = packageDir, probe = false) => {
     placePackages(packagesIn);
-    return ['--sdk', sdkFor, 'swiftc', '-module-cache-path', resolve(packagesRoot, 'modules-module-cache'), '-parse-as-library', '-emit-library', swiftOptimization(), '-swift-version', '5', '-module-name', 'ExactAppModules', ...moduleSources, ...(packages.length ? ['-I', packagesIn, '-L', packagesIn, ...packageObjects(packagesIn)] : []), ...packageImports(packagesIn), ...(app.manifest.host?.[forIos ? 'ios' : 'macos']?.swiftPackages?.length ? ['-D', 'SWIFT_PACKAGE', ...packageLink(packagesIn)] : []), ...frameworksFor(forIos, simulator, arch).args, ...(probe ? ['-Xlinker', '-rpath', '-Xlinker', '@loader_path/Frameworks'] : []), ...linkArgs(forIos), ...moduleLibraryLinkArgs({ wrapped: forIos && production && !probe }), '-o', out, ...targetArgs];
+    return ['--sdk', sdkFor, 'swiftc', '-module-cache-path', resolve(packagesRoot, 'modules-module-cache'), '-parse-as-library', '-emit-library', swiftOptimization(), '-swift-version', '5', '-module-name', 'ExactAppModules', ...moduleSources, ...(packages.length ? ['-I', packagesIn, '-L', packagesIn, ...packageObjects(packagesIn)] : []), ...packageImports(packagesIn), ...(app.manifest.host?.[forIos ? 'ios' : 'macos']?.swiftPackages?.length ? ['-D', 'SWIFT_PACKAGE', ...packageLink(packagesIn)] : []), ...frameworksFor(forIos, simulator, arch).args, ...(probe ? ['-Xlinker', '-rpath', '-Xlinker', '@loader_path/Frameworks'] : []), ...linkArgs(forIos), ...moduleLibraryLinkArgs({ wrapped: forIos && (production || embedOnly) && !probe }), '-o', out, ...targetArgs];
   };
   const moduleLibraries = modulesBuilt ? frameworksFor(ios, ios && !device, ios ? iosArch : macArch).libraries : [];
   const macTarget = ['-target', moduleTripleFor(app, false)];
   const { place: placePackages, libraries: packageLibraries, resources: packageResources, frameworks: packageFrameworks, imports: packageImports, link: packageLink, products: packageProducts } = packageCompiler({ packages, packageDir, packageTargets,
-    packageCopies, seam, packagesRoot, swiftc, production, distribution, ios, tv,
+    packageCopies, seam, packagesRoot, swiftc, production, distribution, ios, tv, frameworkBundles,
     app, extensions: buildReceipt.graph.extensions, swiftInputs: buildReceipt.binary.inventories, minimum: { ios: app.manifest.host?.ios?.minimumOS, tvos: app.manifest.host?.ios?.minimumOS,
       macos: app.manifest.host?.macos?.minimumOS } });
   placePackages(packageDir);
@@ -1184,14 +1172,15 @@ async function main(args, lockHeld = false) {
     return place(library, launcher);
   };
   const firstRoute = routes.find(r => !r.lacking); if (firstRoute && !firstRoute.placed) try { firstRoute.placed = compileProbe(firstRoute); } catch (e) { firstRoute.placed = () => { throw e; }; }
-  const serviceDylibs = launchServices(launchModules(app.dir, app.manifest), webBuildDir); for (const svc of serviceDylibs) arms.push(arm(['--sdk', sdkName, 'swiftc', '-module-cache-path', resolve(packagesRoot, 'modules-module-cache'), ...serviceArgs(svc), ...(ios ? ['-target', iosTripleFor(app, device, tv, compiled.ios), '-sdk', sdk] : macTarget)], svc.sources, svc.built, '', true));
+  for (const svc of serviceDylibs) arms.push(arm(['--sdk', sdkName, 'swiftc', '-module-cache-path', resolve(packagesRoot, 'modules-module-cache'), ...serviceArgs(svc), ...(ios ? ['-target', iosTripleFor(app, device, tv, compiled.ios), '-sdk', sdk] : macTarget)], svc.sources, svc.built, '', true));
   await hostCompile?.done({ repeated: true });
   if (appModule) await appModule();
   if (!tv && packaged.has('intents') && modulesBuilt) nativeIntents.push(nativeIntentModule({ moduleName: 'ExactAppModules', binary: modulesBuilt, sources: moduleSources, args: moduleArgs(sdkName, ios ? ['-target', moduleTripleFor(app, true, device, tv), '-sdk', sdk] : macTarget, modulesBuilt, ios, ios && !device, ios ? iosArch : macArch), directory: resolve(linkRoot, 'native-intents'), swiftc, runApple }));
-  if (packaged.has('intents') && nativeIntents.some(Boolean)) intents = buildIntents({ ...intentOptions, nativeModules: nativeIntents });
+  if (!embedOnly && packaged.has('intents') && nativeIntents.some(Boolean)) intents = buildIntents({ ...intentOptions, nativeModules: nativeIntents });
   // The early build stands when it succeeded and the bake came out as it was expected to.
   const linkedEarly = early ? await early.step.done({ repeated: true }) && expected.capture === libDir && expected.composition === composition && expected.scratch === paths.scratch : false;
   let stripped = null;
+  if (!embedOnly) {
   mkdirSync(dirname(paths.swiftLock), { recursive: true });
   if (early && expected.swiftLock !== paths.swiftLock) early.claim();
   const releaseSwift = widgetClaim ?? (early && expected.swiftLock === paths.swiftLock ? early.claim : waitForSwift());
@@ -1262,8 +1251,9 @@ async function main(args, lockHeld = false) {
       stripped = stripProductionExecutable(executable, { production, ipa });
       if (stripped && !ipa) console.log(`host/apple: symbols: ${p === 'ExactClip' ? resolve(paths.products, relative(binDir, stripped.dsym)) : p === product ? resolve(paths.products, basename(stripped.dsym)) : `${basename(stripped.dsym)}, beside the host product`} (${(stripped.saved / 1048576).toFixed(1)} MB off the executable)`);
     }
-    if (launchPartsDir) { auditLaunchParts(launchPartsObjects(swiftBinDir), launchModules(app.dir, app.manifest), read); }
+    if (launchPartsDir) { auditLaunchParts(launchPartsObjects(swiftBinDir), launchMods, read); }
   } finally { releaseSwift(); }
+  }
   const tSwift = Date.now(); buildStep('arms');
   for (const placed of arms) await placed();
   if (modules.tags.length) {
@@ -1321,6 +1311,10 @@ async function main(args, lockHeld = false) {
   const canvasGpuLoadName = 'libexact_canvas_gpu.dylib';
   const canvasGpuBuilt = canvasGpu ? resolve(webBuildDir, canvasGpuLoadName) : null;
   if (canvasGpu) copyFileSync(moduleLib['exact-canvas-vello'], canvasGpuBuilt);
+  if (args.includes('--embed')) {
+    emitEmbed({ looseArms, hasSvg, svgBuilt, svgLoadName, canvasGpuBuilt, canvasGpuLoadName, modulesBuilt, modulesLoadName, moduleLibraries, packageLibraries, packageResources, serviceDylibs, rosterKeys, nativeIntents, shared });
+    if (embedOnly) { if (args.includes('--json')) reportBuilt({ path: paths.embed, ...built() }); return; }
+  }
   const t2 = Date.now(); buildStep('package');
   // Where the build's time went, said at its end: the app's Rust and bake; the Swift host's link, and what of its compile
   // the bake did not cover; the arms and the app's module artifact; what of the host's two Rust modules those did not

@@ -1685,17 +1685,43 @@ The release signs GPU modules before baking their digests and preserves those
 signatures through packaging. iOS archives package primary and named GPU modules
 as signed frameworks; development builds keep their loose dylibs.
 Combining `--device --archive out.ipa --embed` produces both the IPA and the
-embed directory without a connected phone. The embed directory contains the
-static library, C header, assets, shaders, compatibility and capability metadata,
-receipt, and signed GPU frameworks (primary and named modules). Copy those
-frameworks intact into the embedding app's `Frameworks/`; their binaries must
-retain the baked digests.
+embed directory without a connected phone. On iOS, `--embed` emits a complete
+App Store-ready artifact directory (`LLP 1031.000`):
+
+- `lib<crate>.a` and `include/*.h` (`embed.link.mode = "static-archive"`), or
+  `Frameworks/ExactCore.framework` (`embed.link.mode = "shared-core"`, replacing
+  `lib<crate>.a` so the Rust runtime is linked once across the app and its widget
+  extension) when the app declares widgets or Live Activities.
+- `ExactEmbedComposition.swift`, a deterministic generated Swift file importing
+  only the SwiftPM products in `capabilities.json` with zero build-environment
+  variables; add it to the Xcode target and call `ExactEmbedComposition.install()`
+  before creating sessions (or use `ExactEmbedComposition.app`).
+- `Frameworks/<Name>.framework` for every iOS dynamic library the app's baked
+  composition reaches: signed GPU frameworks (copy intact to preserve baked
+  digests), required host arms (`ExactWeb`, `ExactVideo`, `ExactSound`, `ExactMIDI`,
+  `ExactSvg`, `ExactCanvasGpu`), native modules (`ExactModules`, package frameworks,
+  `ExactSwiftDependencies`, launch service frameworks), and `ExactWidgetReload` /
+  `ExactActivity` when widgets or activities are declared.
+- `PrivacyInfo.xcprivacy` declaring `ExactKit` and the Rust runtime's
+  required-reason APIs (each wrapped `.framework` also carries its own manifest).
+- `Resources/` carrying `host.ios.resources`, SwiftPM resource bundles, compiled
+  asset catalogs/icons when declared, and localized `InfoPlist.strings`.
+- `intents/` (`ExactIntents.swift` and any `LaunchParts/*.swift`) compiled by the
+  Xcode target so Xcode merges `Metadata.appintents` with host intents; link flags
+  are in `capabilities.json` `embed.intents.launchLink`.
+- `widgets/` (`Sources/`, `plans/`, `typescript/`, and widget fonts) compiled by a
+  consumer-owned WidgetKit extension target linking `ExactCore.framework` and
+  `ExactSnapshot`, with `embed.widgets.infoPlist` and `embed.widgets.entitlements`
+  (excluding `applinks:`).
+- `compat.json`, `receipt.json`, and `capabilities.json` (preserving top-level
+  `products`, `install`, `optimize`, `swiftFlags`, and `frameworks` alongside the
+  `embed` manifest). Static-only iOS apps compile no Swift during `--embed`.
 
 ### Optional Apple host products
 
 An external Swift host links `ExactKit` plus each capability product its plans
-use, then calls that product's public `install()` before creating sessions.
-The generated `--embed` composition lists the capabilities to link. Implement
+use, then adds `ExactEmbedComposition.swift` (or calls each product's public
+`install()` in `capabilities.json` order) before creating sessions. Implement
 `ExactSessionDelegate`'s `exactSession(_:command:args:)` on the embedding host
 to handle `openURL` (for links and deep links) and `setScheme` (to apply the
 app's appearance choice to the embedding window or scene).

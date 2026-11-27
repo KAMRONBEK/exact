@@ -132,7 +132,7 @@ export function composedModule(packages, ownModule, config = new Map()) {
 /** Compile each package against the seam's link stub, then link its independent library.
  * The final app library supplies the seam; the stub permits app Swift to import a package
  * without a build-time link cycle (LLP 1067.000.001 D1, D5). */
-export function packageCompiler({ packages, packageDir, packageTargets, packageCopies, seam, packagesRoot, swiftc, production, distribution, ios, tv, minimum, app, extensions, swiftInputs }) {
+export function packageCompiler({ packages, packageDir, packageTargets, packageCopies, seam, packagesRoot, swiftc, production, distribution, ios, tv, frameworkBundles = ios && production, minimum, app, extensions, swiftInputs }) {
   const destination = tv ? 'tvos' : ios ? 'ios' : 'macos';
   const cache = { snapshots: new Map(), manifests: new Map(), destination };
   const graph = app ? appSwiftPackageGraph(app, packages, extensions, cache) : swiftPackageGraph(app, packages, cache);
@@ -180,7 +180,7 @@ export function packageCompiler({ packages, packageDir, packageTargets, packageC
   const place = dir => {
     if (placed.has(dir)) return;
     mkdirSync(dir, { recursive: true });
-    const wrapped = dir === packageDir && ios && production;
+    const wrapped = dir === packageDir && frameworkBundles;
     const os = packageTargets.get(dir)[1].some(arg => /-apple-(ios|tvos)/.test(arg)) ? 'ios' : 'macos';
     const platform = dir === packageDir ? destination : packageTargets.get(dir)[1].some(arg => arg.endsWith('-macabi')) ? 'maccatalyst' : os;
     const traitChecks = [];
