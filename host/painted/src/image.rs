@@ -997,15 +997,16 @@ impl Images {
                         generation: self.generation,
                         pixels: decode.pixels,
                         variant: decode.storage(),
-                        crop: decode.crop,
+                        crop: if header.is_svg() {
+                            svg_picture::scale_crop(scale)
+                        } else {
+                            decode.crop
+                        },
                     },
                     metadata: header.metadata,
                     cost: decode.cost,
                     priority: Priority::Visible,
                 };
-                if header.is_svg() {
-                    self.backend.note_scale(source, decode.pixels, scale);
-                }
                 match self.backend.request(demand, false) {
                     Ok(request) => {
                         #[cfg(target_os = "macos")]
@@ -1435,7 +1436,11 @@ fn plain_box(style: &exact_kernel::StyleProps) -> bool {
 fn resize_changes_view(header: png_decode::Header, view: &View, scale: f32) -> bool {
     let (previous, next) = (view.requested_for, view.desired);
     if header.is_svg() {
-        return svg_picture::resize_changes(header, svg_ask(view, scale), previous, next);
+        let prev_ask = svg_picture::Ask {
+            fit: view.requested_fit,
+            scale: view.requested_scale,
+        };
+        return svg_picture::resize_changes(header, prev_ask, previous, svg_ask(view, scale), next);
     }
     if view.rendering != view.requested_rendering {
         return true;

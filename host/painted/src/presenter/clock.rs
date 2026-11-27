@@ -24,7 +24,7 @@ impl<D: DataSource> Presenter<D> {
         frame_ms: f64,
     ) -> (bool, Option<String>) {
         let motion = self.host.motion_due_ms().is_some_and(|due| due <= now);
-        if vsync && self.host.wants_frames() {
+        if vsync && self.wants_frames() {
             *last_tick = now;
             (false, self.animation_frame(now))
         } else if self.wake_due_ms().is_some_and(|due| due <= now)

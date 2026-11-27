@@ -78,6 +78,7 @@ impl<D: DataSource> Presenter<D> {
             alert: _,
             hatches: _,
             frame_partitions: _,
+            hosted: _,
             // The tree's, set by `restore_focus` from the place of the old
             // focus.
             focus: _,
@@ -115,7 +116,6 @@ impl<D: DataSource> Presenter<D> {
             // where the new tree differs.
             reader: _,
             colors: _,
-            hosted: _,
             access: _,
             // The window's, the device's and the session's.
             make_text: _,
@@ -248,6 +248,7 @@ impl<D: DataSource> Presenter<D> {
         self.brush.canvases.drawings = self.host.canvas_snapshots().clone();
         self.brush.lift = Default::default();
         // A picker's answer or a GPU surface is not the new tree's.
+        self.hosted_replaced();
         self.picks_replaced();
         self.close_menu();
         self.surfaces.replaced(&mut self.host);

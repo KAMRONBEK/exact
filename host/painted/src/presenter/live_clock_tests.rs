@@ -1288,3 +1288,89 @@ fn background_admission_releases_already_held_waits_before_their_caps() {
         assert_eq!(p.background_due_ms(), None);
     }
 }
+
+/// `android_clock()` checks `self.wants_frames()` rather than only frame tasks,
+/// so held `wait=frame` timers and hatch frame tickets advance on vsync without
+/// an `every(frame)` task.
+#[test]
+fn android_clock_dispatches_vsync_for_held_frame_waits_and_hatch_tickets() {
+    let source = TICKER.replace("every(1000, tick)", "after(50, tick, wait=frame)");
+    let (mut p, error) = Presenter::boot_with(
+        &crate::test_plan(&source),
+        NoData,
+        (80., 40.),
+        1.,
+        PathBuf::new(),
+        PainterChoice::Cpu,
+    )
+    .unwrap();
+    assert!(error.is_none());
+    let wall = Rc::new(Cell::new(0.0));
+    let read = wall.clone();
+    p.set_live_clock(Some(Rc::new(move || read.get())));
+    p.frame();
+    let mut last_tick = 0.0;
+    wall.set(50.0);
+    assert_eq!(
+        p.android_clock(50.0, false, &mut last_tick, 16.0),
+        (false, None)
+    );
+    assert_eq!(ticks(&p), 0.0);
+    assert!(!p.host().wants_frames());
+    assert!(p.host().runner().waits().frame.held);
+    assert!(p.wants_frames() && p.needs_animation_frame());
+    // Vsync arrives before the 100 ms starvation cap: `android_clock` admits it.
+    wall.set(56.0);
+    assert_eq!(
+        p.android_clock(56.0, true, &mut last_tick, 16.0),
+        (false, None)
+    );
+    assert_eq!(last_tick, 56.0);
+    assert_eq!(ticks(&p), 1.0);
+    assert!(!p.host().runner().waits().frame.held);
+    assert!(!p.wants_frames() && !p.needs_animation_frame());
+
+    // Hatch frame ticket without any `every(frame)` task.
+    thread_local! {
+        static TICKET_RUNS: Cell<usize> = const { Cell::new(0) };
+    }
+    #[derive(Default)]
+    struct FrameHatch {
+        _ticket: Option<crate::hatches::Ticket>,
+    }
+    impl crate::hatches::Hatches for FrameHatch {
+        fn element(
+            &mut self,
+            e: &crate::hatches::Element,
+            context: &mut crate::hatches::Context<'_, Self>,
+        ) {
+            if e.is_new() {
+                self._ticket = Some(context.frames(|_, _, _| {
+                    TICKET_RUNS.with(|n| n.set(n.get() + 1));
+                }));
+            }
+        }
+    }
+    TICKET_RUNS.with(|n| n.set(0));
+    let hatch_plan =
+        crate::test_plan("component App\n  view\n    box hatch=\"tick\" width=10 height=10\n");
+    let (mut hp, error) = Presenter::boot_with(
+        &hatch_plan,
+        (),
+        (80., 40.),
+        1.,
+        PathBuf::new(),
+        PainterChoice::Cpu,
+    )
+    .unwrap();
+    assert!(error.is_none());
+    hp.set_hatches(Some(crate::hatches::install::<FrameHatch>(&["tick"])));
+    hp.frame();
+    hp.first_pixel();
+    assert!(!hp.host().wants_frames());
+    assert!(hp.wants_frames() && hp.needs_animation_frame());
+    let mut last = 0.0;
+    assert_eq!(hp.android_clock(16.0, true, &mut last, 16.0), (false, None));
+    assert_eq!(last, 16.0);
+    assert_eq!(TICKET_RUNS.with(Cell::get), 1);
+}
