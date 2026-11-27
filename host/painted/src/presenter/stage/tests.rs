@@ -970,3 +970,229 @@ fn a_fit_content_sheet_taller_than_the_keyboard_leaves_goes_to_its_tallest() {
     let (_, frame) = p.top_sheet().unwrap();
     assert!(near(frame.1, STATUS), "{frame:?}");
 }
+
+#[test]
+fn terminal_fit_content_ceiling_adapts_stops_keyboard_and_resize() {
+    let source = r##"routes nav
+  home "/"
+    short "/short"
+    mid "/mid"
+    tall "/tall"
+    clamped "/clamped"
+component App
+  state extra = false
+  action open(url: string)
+    nav = push(nav, url)
+  action toggle
+    extra = not extra
+  view
+    main navigationKey=`${top(nav).id}` navigationBack="back" viewport-fit="cover" width="100%" height="100%"
+      for e in stack(nav) key=e.id
+        if e.name == "home"
+          column navigationKey=`${e.id}` position="absolute" inset=0 padding=16
+            button press=open("/short") testId="open-short" height=40
+              text "Short"
+            button press=open("/mid") testId="open-mid" height=40
+              text "Mid"
+            button press=open("/tall") testId="open-tall" height=40
+              text "Tall"
+            button press=open("/clamped") testId="open-clamped" height=40
+              text "Clamped"
+        if e.name == "short"
+          column navigationKey=`${e.id}` navigationPresentation="modal" navigationDetent="medium fit-content" testId="route-short" position="absolute" inset=0 padding=16
+            column height=120
+            if extra
+              column height=400
+            button press=toggle testId="grow" height=40
+              text "Grow"
+        if e.name == "mid"
+          column navigationKey=`${e.id}` navigationPresentation="modal" navigationDetent="medium fit-content" testId="route-mid" position="absolute" inset=0 padding=16
+            column height=(extra ? 120 : 480)
+            button press=toggle testId="shrink" height=40
+              text "Shrink"
+        if e.name == "tall"
+          column navigationKey=`${e.id}` navigationPresentation="modal" navigationDetent="medium fit-content" testId="route-tall" position="absolute" inset=0 padding=16
+            column height=1100
+        if e.name == "clamped"
+          column navigationKey=`${e.id}` navigationPresentation="modal" navigationDetent="30% 60% fit-content" navigationInitialDetent="60%" testId="route-clamped" position="absolute" inset=0 padding=16
+            column height=300
+"##;
+    let tallest = H - STATUS;
+    let medium = tallest / 2.0 + FOOT;
+
+    // 1. Short content <= 50%: single stop at content height; keyboard lifts without adding `medium`;
+    //    growing past 50% keeps the sheet expanded at `fit-content`.
+    let mut p = phone_source(source);
+    tap(&mut p, "open-short");
+    after(&mut p, 1000.0);
+    assert_eq!(
+        p.stage.sheets[0].heights.len(),
+        1,
+        "short sheet omits medium"
+    );
+    let short_h = p.stage.sheets[0].heights[0];
+    let resting = p.top_sheet().unwrap().1 .1;
+    assert!(short_h < medium, "short_h={short_h} medium={medium}");
+    assert_eq!(p.set_window(keyboard(300.0)), None);
+    after(&mut p, 1000.0);
+    assert_eq!(
+        p.stage.sheets[0].heights.len(),
+        1,
+        "keyboard lift on a short sheet never introduces a spurious medium stop"
+    );
+    assert!(near(p.top_sheet().unwrap().1 .1, resting - 300.0 + FOOT));
+    assert_eq!(p.set_window(WINDOW), None);
+    after(&mut p, 1000.0);
+    tap(&mut p, "grow");
+    after(&mut p, 1000.0);
+    assert_eq!(
+        p.stage.sheets[0].heights.len(),
+        2,
+        "grown sheet gains medium"
+    );
+    assert_eq!(
+        p.stage.sheets[0].at, 1,
+        "short sheet growing past medium stays expanded on fit-content"
+    );
+
+    // 1b. Under `interactive-widget="overlays-content"`, IME lift pushes display_fit above medium
+    //     while natural_fit stays below medium; medium must still stay omitted.
+    let overlay_source = source.replace(
+        r#"viewport-fit="cover""#,
+        r#"viewport-fit="cover" interactive-widget="overlays-content""#,
+    );
+    let mut p = phone_source(&overlay_source);
+    tap(&mut p, "open-short");
+    after(&mut p, 1000.0);
+    assert_eq!(p.stage.sheets[0].heights.len(), 1);
+    let short_overlay_h = p.stage.sheets[0].heights[0];
+    assert_eq!(p.set_window(keyboard(300.0)), None);
+    after(&mut p, 1000.0);
+    assert_eq!(
+        p.stage.sheets[0].heights.len(),
+        1,
+        "overlays-content IME lift past medium never introduces a spurious medium stop"
+    );
+    assert!(p.stage.sheets[0].heights[0] > medium);
+    assert!(near(
+        p.stage.sheets[0].heights[0],
+        short_overlay_h - FOOT + 300.0
+    ));
+
+    // 1c. Under default `resizes-content`, a 320 dp sheet stays below unobscured medium (456 dp)
+    //     even when a 300 dp keyboard shrinks `tallest` to 564 dp (half = 282 dp); medium stays omitted.
+    let resize_source = source.replace("height=220", "height=320");
+    let mut p = phone_source(&resize_source);
+    tap(&mut p, "open-short");
+    after(&mut p, 1000.0);
+    assert_eq!(p.stage.sheets[0].heights.len(), 1);
+    assert_eq!(p.set_window(keyboard(300.0)), None);
+    after(&mut p, 1000.0);
+    assert_eq!(
+        p.stage.sheets[0].heights.len(),
+        1,
+        "resizes-content keyboard shrinkage never introduces a spurious medium stop"
+    );
+
+    // 2. Medium-tall content (50% < content < tallest): opens at medium, expands to content height
+    //    (not tallest); shrinking <= 50% while resting at medium collapses cleanly to fit-content.
+    let mut p = phone_source(source);
+    tap(&mut p, "open-mid");
+    after(&mut p, 1000.0);
+    assert_eq!(p.stage.sheets[0].heights.len(), 2);
+    assert!(near(p.stage.sheets[0].heights[0], medium));
+    assert!(p.stage.sheets[0].heights[1] > medium && p.stage.sheets[0].heights[1] < tallest);
+    assert_eq!(p.stage.sheets[0].at, 0, "opens at medium");
+    tap(&mut p, "shrink");
+    after(&mut p, 1000.0);
+    assert_eq!(p.stage.sheets[0].heights.len(), 1);
+    assert_eq!(p.stage.sheets[0].at, 0);
+    assert!(p.stage.sheets[0].heights[0] < medium);
+
+    // 3. Overflowing content > tallest: opens at medium, expands to tallest.
+    let mut p = phone_source(source);
+    tap(&mut p, "open-tall");
+    after(&mut p, 1000.0);
+    assert_eq!(p.stage.sheets[0].heights.len(), 2);
+    assert!(near(p.stage.sheets[0].heights[0], medium));
+    assert!(near(p.stage.sheets[0].heights[1], tallest));
+    assert_eq!(p.stage.sheets[0].at, 0);
+
+    // 4. Dropped `navigationInitialDetent` ("60%" when content is ~45%) clamps to fit-content, not 30%.
+    let mut p = phone_source(source);
+    tap(&mut p, "open-clamped");
+    after(&mut p, 1000.0);
+    assert_eq!(p.stage.sheets[0].heights.len(), 2);
+    assert_eq!(
+        p.stage.sheets[0].at, 1,
+        "clamps to fit-content instead of 30%"
+    );
+
+    // 5. Collapsed tie keeps every authored alias word: "300 900 large" with initial="large"
+    //    on an 864 dp screen opens at the shared 864 dp stop, not 300.
+    let tie_source = r##"routes nav
+  home "/"
+    tied "/tied"
+component App
+  action open
+    nav = push(nav, "/tied")
+  view
+    main navigationKey=`${top(nav).id}` navigationBack="back" viewport-fit="cover" width="100%" height="100%"
+      for e in stack(nav) key=e.id
+        if e.name == "home"
+          column navigationKey=`${e.id}` position="absolute" inset=0 padding=16
+            button press=open testId="open" height=40
+              text "Open"
+        if e.name == "tied"
+          column navigationKey=`${e.id}` navigationPresentation="modal" navigationDetent="300 900 large" navigationInitialDetent="large" position="absolute" inset=0 padding=16
+            text "Tied"
+"##;
+    let mut p = phone_source(tie_source);
+    tap(&mut p, "open");
+    after(&mut p, 1000.0);
+    assert_eq!(p.stage.sheets[0].heights.len(), 2);
+    assert_eq!(
+        p.stage.sheets[0].at, 1,
+        "large opens at the collapsed 900/large stop, not 300"
+    );
+    assert!(near(p.stage.sheets[0].heights[1], tallest));
+}
+
+#[test]
+fn wide_screen_fit_content_sheet_measures_at_capped_sheet_width_on_first_frame() {
+    let source = r##"routes nav
+  home "/"
+    wrap "/wrap"
+component App
+  action open
+    nav = push(nav, "/wrap")
+  view
+    main navigationKey=`${top(nav).id}` navigationBack="back" viewport-fit="cover" width="100%" height="100%"
+      for e in stack(nav) key=e.id
+        if e.name == "home"
+          column navigationKey=`${e.id}` position="absolute" inset=0 padding=16
+            button press=open testId="open" height=40
+              text "Open"
+        if e.name == "wrap"
+          column navigationKey=`${e.id}` navigationPresentation="modal" navigationDetent="medium fit-content" testId="route-wrap" position="absolute" inset=0 padding=16
+            text "Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua ut enim ad minim veniam quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat duis aute irure dolor in reprehenderit."
+"##;
+    let wide = Window {
+        size: (1100.0, 900.0),
+        bars: [STATUS, 0.0, FOOT, 0.0],
+        ..WINDOW
+    };
+    let mut p = phone_source(source);
+    assert_eq!(p.set_window(wide), None);
+    tap(&mut p, "open");
+    let frame1_h = p.stage.sheets[0].heights.last().copied().unwrap();
+    after(&mut p, 1000.0);
+    let settled_h = p.stage.sheets[0].heights.last().copied().unwrap();
+    // A second sync after layout must produce the exact same height as frame 1 (not grow from 1100 dp width).
+    p.sync_stage();
+    let second_h = p.stage.sheets[0].heights.last().copied().unwrap();
+    assert!(
+        near(frame1_h, settled_h) && near(frame1_h, second_h),
+        "frame1={frame1_h} settled={settled_h} second={second_h}"
+    );
+}

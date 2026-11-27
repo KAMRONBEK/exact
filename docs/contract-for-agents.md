@@ -5240,7 +5240,12 @@ main navigationKey=`${top(nav).id}` navigationBack="close" navigate=follow displ
   `medium`, a point height, a percentage of the sheet's maximum height (`"45%"`,
   React Native's `sheetAllowedDetents: [0.45]`; above 0% and at most 100%) or
   `fit-content` (the route's content height; a menu or
-  a short dialog), which goes alone or as `"fit-content large"`. Write a share of
+  a short dialog), which goes alone, as `"fit-content large"`, or last after
+  ascending stops below `large` as a content-height ceiling (e.g.
+  `"medium fit-content"`, `"50% fit-content"`, `"300 fit-content"`: preceding
+  stops at or above content height are omitted, so short content opens fitted
+  and tall content opens at the preceding stop and expands to content height
+  within the available screen). Write a share of
   the screen as a percentage, never points computed from a measure. Heights go
   shortest to tallest on every screen, as UIKit takes them: before `large`, which
   goes last, use one kind (points, or percentages with `medium` as half), each

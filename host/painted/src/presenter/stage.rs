@@ -47,12 +47,14 @@ use std::rc::Rc;
 use tiny_skia::Transform;
 
 mod authored;
+mod detents;
 #[cfg(test)]
 pub(super) mod tests;
 mod touch;
 mod zoom;
 
 use authored::{Authored, Top};
+use detents::{fits, resolve_stops};
 use exact_kernel::StyleId;
 
 /// The room a sheet's drag handle takes at its top, points: Material's
@@ -187,6 +189,9 @@ struct Sheet {
     /// Its resting heights, shortest first, the bar under its foot
     /// included; points.
     heights: Vec<f32>,
+    /// The detent word(s) each entry in `heights` came from, in matching order
+    /// (collapsed ties keep every word that resolved to the same height).
+    words: Vec<Vec<String>>,
     at: usize,
     /// Its top edge in the page, points.
     top: Glide,
@@ -342,44 +347,8 @@ pub(super) struct State {
 
 /// What a sheet's heights are computed from: its `navigationDetent`, the
 /// page's height and the tallest, whether the keyboard is up, and its
-/// `fit-content` height.
-type Said = (Option<String>, (f32, f32), bool, Option<f32>);
-
-/// Whether `detent` names `fit-content`.
-fn fits(detent: Option<&str>) -> bool {
-    detent.is_some_and(|d| d.split_whitespace().any(|w| w == "fit-content"))
-}
-
-/// The sheet heights `detent` asks for on a page `tallest` high below the
-/// status bar, the bar under the foot `foot` high, its route's content
-/// `fit` high with that bar; unreadable words are left out, and none left
-/// is the tallest.
-fn heights(detent: Option<&str>, tallest: f32, foot: f32, fit: f32) -> Vec<f32> {
-    let mut out: Vec<f32> = (detent.unwrap_or("large").split_whitespace())
-        .filter_map(|d| match d {
-            "large" => Some(tallest),
-            "medium" => Some(tallest / 2.0 + foot),
-            "fit-content" => Some(fit),
-            d => match d.strip_suffix('%') {
-                Some(p) => p.parse::<f32>().ok().filter(|p| *p > 0.0).map(|p| {
-                    if p >= 100.0 {
-                        tallest
-                    } else {
-                        tallest * p / 100.0 + foot
-                    }
-                }),
-                None => d.parse::<f32>().ok().filter(|v| *v > 0.0).map(|v| v + foot),
-            },
-        })
-        .map(|v| v.clamp(1.0, tallest.max(1.0)))
-        .collect();
-    out.sort_by(f32::total_cmp);
-    out.dedup_by(|a, b| (*a - *b).abs() < 0.5);
-    if out.is_empty() {
-        out.push(tallest.max(1.0));
-    }
-    out
-}
+/// natural and IME-lifted `fit-content` heights.
+type Said = (Option<String>, (f32, f32), bool, Option<(f32, f32)>);
 
 impl<D: DataSource> Presenter<D> {
     /// Whether this presenter places sheets and moves routes itself: its
@@ -517,15 +486,48 @@ impl<D: DataSource> Presenter<D> {
             None => 0.0,
         };
         for (i, last) in wanted {
-            let kernel = self.host.kernel();
-            let node = kernel.node(stack[i]).expect("a live route");
-            let handle = sheet_handle(&node);
-            let detent = node.props.str(PropId::NavigationDetent).map(str::to_owned);
-            let initial = node
-                .props
-                .str(PropId::NavigationInitialDetent)
-                .map(str::to_owned);
-            let stamp = kernel.layout_stamp();
+            let (handle, detent, initial) = {
+                let kernel = self.host.kernel();
+                let node = kernel.node(stack[i]).expect("a live route");
+                (
+                    sheet_handle(&node),
+                    node.props.str(PropId::NavigationDetent).map(str::to_owned),
+                    node.props
+                        .str(PropId::NavigationInitialDetent)
+                        .map(str::to_owned),
+                )
+            };
+            // Measure `fit-content` at the sheet's actual width (capped at 640 dp)
+            // even on frame 1 before `place_sheets` runs. Only `.width` is checked
+            // because `Kernel::fit_content_height` depends only on the block's width
+            // axis, avoiding redundant re-layout once `place_sheets` sets final height.
+            if presents && fits(detent.as_deref()) {
+                let route_id = stack[i];
+                if self.host.kernel().host_block(route_id).map(|b| b.width)
+                    != Some(BlockAxis::Is(width))
+                {
+                    let block = HostBlock {
+                        tactic: Default::default(),
+                        width: BlockAxis::Is(width),
+                        height: BlockAxis::Is(tallest.round()),
+                    };
+                    if self
+                        .host
+                        .runner_mut()
+                        .kernel_mut()
+                        .set_host_block(route_id, Some(block))
+                        .is_ok()
+                    {
+                        if !self.stage.blocks.contains(&route_id) {
+                            self.stage.blocks.push(route_id);
+                        }
+                        if let Err(e) = self.host.layout_unauthored() {
+                            self.host.log(e);
+                        }
+                    }
+                }
+            }
+            let stamp = self.host.kernel().layout_stamp();
             let kept = (self.stage.sheets.iter())
                 .find(|s| s.modal == keys[i])
                 .and_then(|s| s.measured);
@@ -534,27 +536,68 @@ impl<D: DataSource> Presenter<D> {
                 (true, Some(m)) if m.0 == stamp => Some(m),
                 (true, _) => self.fit_content(keys[i]),
             };
-            // A `fit-content` sheet rests on the keyboard, as Compose's
-            // `ModalBottomSheet` rises with the IME inset.
-            let fit = measured.map(|(_, content)| (content + foot.max(lift)).clamp(1.0, tallest));
-            let said = (detent.clone(), (h, tallest), keyboard, fit);
-            let mut found = heights(detent.as_deref(), tallest, foot, fit.unwrap_or(tallest));
-            if !presents {
-                found = vec![h];
-            }
-            let fit_at = |found: &[f32]| {
-                fit.and_then(|fit| found.iter().position(|v| (v - fit).abs() < 0.5))
+            // Compare preceding stops against unobscured natural height (excluding
+            // both `resizes-content` shrinkage and `overlays-content` IME lift)
+            // while resting `fit-content` above the keyboard (LLP 1075.003 §9.11).
+            let unobscured_h = h + (self.window.keyboard - lift).max(0.0);
+            let natural_tallest = (unobscured_h - status).max(1.0);
+            let natural_foot = match self.window() {
+                Some(w) => {
+                    let frame = self.chrome().frame;
+                    let bottom = w.size.1 - w.bars[2].max(w.cutout[2]);
+                    (frame[1] + unobscured_h - bottom)
+                        .max(0.0)
+                        .min(unobscured_h)
+                }
+                None => foot,
             };
+            let natural_fit =
+                measured.map(|(_, content)| (content + natural_foot).clamp(1.0, natural_tallest));
+            let display_fit =
+                measured.map(|(_, content)| (content + foot.max(lift)).clamp(1.0, tallest));
+            let said = (
+                detent.clone(),
+                (h, tallest),
+                keyboard,
+                natural_fit.zip(display_fit),
+            );
+            let (stops, dropped) = if presents {
+                resolve_stops(
+                    detent.as_deref(),
+                    tallest,
+                    foot,
+                    natural_tallest,
+                    natural_foot,
+                    natural_fit.unwrap_or(natural_tallest),
+                    display_fit.unwrap_or(tallest),
+                )
+            } else {
+                (vec![(vec!["large".to_string()], h)], Vec::new())
+            };
+            let words: Vec<Vec<String>> = stops.iter().map(|(w, _)| w.clone()).collect();
+            let found: Vec<f32> = stops.iter().map(|(_, v)| *v).collect();
+            let fit_idx = words
+                .iter()
+                .position(|ws| ws.iter().any(|w| w == "fit-content"));
             // While the keyboard is up a sheet rests at its tallest, but
             // for one resting at `fit-content`, which keeps that height
             // above the keys (the tallest, where it does not fit there).
-            let rest = |found: &[f32]| -> usize {
-                let first = heights(initial.as_deref(), tallest, foot, fit.unwrap_or(tallest));
-                let at = (initial.is_some())
-                    .then(|| found.iter().position(|v| (v - first[0]).abs() < 0.5))
-                    .flatten()
-                    .unwrap_or(0);
-                match keyboard && fit_at(found) != Some(at) {
+            let rest = || -> usize {
+                let at = match initial.as_deref().filter(|s| !s.is_empty()) {
+                    Some(word) => words
+                        .iter()
+                        .position(|ws| ws.iter().any(|w| w == word))
+                        .or_else(|| {
+                            dropped
+                                .iter()
+                                .any(|w| w == word)
+                                .then_some(fit_idx)
+                                .flatten()
+                        })
+                        .unwrap_or(0),
+                    None => 0,
+                };
+                match keyboard && fit_idx != Some(at) {
                     true => found.len() - 1,
                     false => at,
                 }
@@ -577,20 +620,35 @@ impl<D: DataSource> Presenter<D> {
                         sheet.top = Glide::still(h - sheet.heights[sheet.at]);
                     }
                     if sheet.said != said {
-                        let was = (sheet.said.3)
-                            .filter(|fit| (sheet.heights[sheet.at] - fit).abs() < 0.5);
-                        sheet.at = match (was.and(fit_at(&found)), keyboard) {
-                            (Some(at), _) => at,
-                            (None, true) => found.len() - 1,
-                            (None, false) => sheet.at.min(found.len() - 1),
+                        let prev_words = sheet.words.get(sheet.at);
+                        let was_fit =
+                            prev_words.is_some_and(|ws| ws.iter().any(|w| w == "fit-content"));
+                        sheet.at = if keyboard && !was_fit {
+                            found.len() - 1
+                        } else if was_fit {
+                            fit_idx.unwrap_or_else(|| sheet.at.min(found.len() - 1))
+                        } else if let Some(pws) = prev_words {
+                            words
+                                .iter()
+                                .position(|ws| ws.iter().any(|w| pws.iter().any(|p| p == w)))
+                                .or_else(|| {
+                                    pws.iter()
+                                        .any(|p| dropped.iter().any(|d| d == p))
+                                        .then_some(fit_idx)
+                                        .flatten()
+                                })
+                                .unwrap_or_else(|| sheet.at.min(found.len() - 1))
+                        } else {
+                            sheet.at.min(found.len() - 1)
                         };
                         sheet.top = Glide::still(h - found[sheet.at]);
                         sheet.heights = found;
+                        sheet.words = words;
                         sheet.said = said;
                     }
                 }
                 None => {
-                    let at = rest(&found);
+                    let at = rest();
                     let to = h - found[at];
                     let top = match still {
                         true => Glide::still(to),
@@ -600,6 +658,7 @@ impl<D: DataSource> Presenter<D> {
                         modal: keys[i],
                         shown: keys[last],
                         heights: found,
+                        words,
                         at,
                         top,
                         said,
