@@ -697,8 +697,8 @@ package final class Presenter {
         for id in Array(leaving.keys) { _ = endExit(id) }
         views.values.forEach { $0.forget() }
         root.subviews.forEach { $0.removeFromSuperview() }
-        views.removeAll()
-        inlineOwners.removeAll()
+        views.removeAll(); inlineOwners.removeAll()
+        stickies.reset(); tableGrid.reset(); svg?.reset(); boxAnimations.reset(); canvas2d.reset()
         hoveredInline = nil
         hoveredNodes = []; hovered = nil
         chrome = ChromeIndex()

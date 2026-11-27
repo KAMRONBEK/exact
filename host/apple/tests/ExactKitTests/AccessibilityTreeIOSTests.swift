@@ -652,6 +652,32 @@ final class AccessibilityTreeIOSTests: XCTestCase {
         XCTAssertEqual(p.announcedModal?.id, 8)
     }
 
+    func testOnlyAnOpaqueFullCoverDisqualifiesAnAuthoredModal() throws {
+        let p = try fixture()
+        p.apply(wireBatch([
+            ["op": "create", "id": 10, "kind": "view", "props": ["accessibilityRole": "dialog", "accessibilityModal": "true"]],
+            ["op": "create", "id": 12, "kind": "view", "props": ["testId": "cover"]],
+            ["op": "children", "id": 1, "ids": [2, 3, 4, 10, 12]],
+            ["op": "frame", "id": 10, "x": 0.0, "y": 100.0, "w": 200.0, "h": 100.0],
+            ["op": "frame", "id": 12, "x": 180.0, "y": 180.0, "w": 40.0, "h": 40.0],
+        ]))
+        let modal = try XCTUnwrap(p.views[10]), cover = try XCTUnwrap(p.views[12])
+        XCTAssertTrue(modal.accessibilityViewIsModal, "an empty overlapping corner covers nothing")
+        p.apply(wireBatch([["op": "frame", "id": 12, "x": 0.0, "y": 100.0, "w": 200.0, "h": 100.0]]))
+        XCTAssertTrue(modal.accessibilityViewIsModal, "a full-size transparent sibling covers nothing")
+        p.apply(wireBatch([["op": "style", "id": 12, "style": ["background_color": [0, 0, 0, 255], "visibility": "hidden"]]]))
+        XCTAssertTrue(cover.cssVisibilityHidden)
+        XCTAssertTrue(modal.accessibilityViewIsModal, "visibility:hidden is not a cover")
+        p.apply(wireBatch([["op": "style", "id": 12, "style": ["background_color": [0, 0, 0, 255], "visibility": "visible"]]]))
+        XCTAssertFalse(modal.accessibilityViewIsModal, "a fully opaque painted cover hides the dialog")
+        p.apply(wireBatch([["op": "style", "id": 12, "style": ["background_color": [0, 0, 0, 128], "visibility": "visible"]]]))
+        XCTAssertTrue(modal.accessibilityViewIsModal, "a translucent cover leaves the dialog exposed")
+        p.apply(wireBatch([["op": "style", "id": 12, "style": ["background_color": [0, 0, 0, 255], "visibility": "visible"]]]))
+        XCTAssertFalse(modal.accessibilityViewIsModal)
+        p.apply(wireBatch([["op": "frame", "id": 12, "x": 180.0, "y": 180.0, "w": 40.0, "h": 40.0]]))
+        XCTAssertTrue(modal.accessibilityViewIsModal, "a painted corner leaves the dialog exposed")
+    }
+
     /// The post itself: once per change of the innermost modal, never for an
     /// unchanged batch, and once when the only modal is destroyed with no
     /// reference left to it (LLP 1080.003 D2).

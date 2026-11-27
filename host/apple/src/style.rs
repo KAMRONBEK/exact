@@ -1085,7 +1085,19 @@ fn style_json_shown(
         Some("tablist" | "radiogroup") => rows.union(StyleMask::of(StyleId::AccentColor)),
         _ => rows,
     };
-    let mut computed = node.computed_style(rows.union(node.style.written));
+    // A platform text style the author wrote on this node owns the style's
+    // weight (LLP 1115.000 D12.2): include `font_weight` in `"written"` so
+    // hosts merging authored typography over a platform font apply it.
+    let authored_text_style_weight = node.style.written.has(StyleId::FontSize)
+        && node.style_source_of(StyleId::FontWeight) == Some(node.id);
+    let mut ask = rows.union(node.style.written);
+    if authored_text_style_weight {
+        ask.set(StyleId::FontWeight);
+    }
+    let mut computed = node.computed_style(ask);
+    if authored_text_style_weight {
+        computed.written.set(StyleId::FontWeight);
+    }
     if node.node_type == NodeType::Video {
         computed.object_fit = exact_kernel::object::video_fit(
             computed.object_fit,

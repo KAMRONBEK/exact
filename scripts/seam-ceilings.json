@@ -19,7 +19,7 @@
   },
   "counts": {
     "nodeViewCasts": {
-      "ceiling": 597,
+      "ceiling": 596,
       "sites": [
         "host/apple/Sources/ExactAnimations/CssAnimationPlay.swift: (layer.delegate as? NodeView",
         "host/apple/Sources/ExactCollections/Collection.swift: current as? NodeView",
@@ -105,9 +105,8 @@
         "host/apple/Sources/ExactKit/Accessibility.swift: (view as? NodeView",
         "host/apple/Sources/ExactKit/Accessibility.swift: (view as? NodeView",
         "host/apple/Sources/ExactKit/Accessibility.swift: (view as? NodeView",
-        "host/apple/Sources/ExactKit/Accessibility.swift: (view as? NodeView",
-        "host/apple/Sources/ExactKit/Accessibility.swift: (view as? NodeView",
         "host/apple/Sources/ExactKit/Accessibility.swift: if (current as? NodeView",
+        "host/apple/Sources/ExactKit/Accessibility.swift: sibling as? NodeView",
         "host/apple/Sources/ExactKit/Accessibility.swift: sibling as? NodeView",
         "host/apple/Sources/ExactKit/Accessibility.swift: view as? NodeView",
         "host/apple/Sources/ExactKit/Accessibility.swift: view as? NodeView",
@@ -411,8 +410,8 @@
         "host/apple/Sources/ExactKit/Mac/ChainingScrollView.swift: (superview as? NodeView",
         "host/apple/Sources/ExactKit/Mac/ChainingScrollView.swift: (superview as? NodeView",
         "host/apple/Sources/ExactKit/Mac/ChainingScrollView.swift: (superview as? NodeView",
-        "host/apple/Sources/ExactKit/Mac/ChildOrderMac.swift: ((child as? NodeView",
         "host/apple/Sources/ExactKit/Mac/ChildOrderMac.swift: ($0 as? NodeView",
+        "host/apple/Sources/ExactKit/Mac/ChildOrderMac.swift: (child as? NodeView",
         "host/apple/Sources/ExactKit/Mac/ControlsMac.swift: $0 as? NodeView",
         "host/apple/Sources/ExactKit/Mac/DefaultButtonMac.swift: ($0 as? NodeView",
         "host/apple/Sources/ExactKit/Mac/DialogsMac.swift: !((previous as? NodeView",
@@ -621,7 +620,7 @@
       ]
     },
     "treeWalks": {
-      "ceiling": 590,
+      "ceiling": 588,
       "sites": [
         "host/apple/Sources/ExactCollections/Collection.swift: guard let parent = (node as? PlatformView)?.superview else { return nil }",
         "host/apple/Sources/ExactCollections/Collection.swift: parent = current.superview",
@@ -710,8 +709,6 @@
         "host/apple/Sources/ExactKit/Accessibility.swift: if parent.subviews.contains(where: { sibling in",
         "host/apple/Sources/ExactKit/Accessibility.swift: next = presenter?.menus.parent(of: view) ?? view.superview",
         "host/apple/Sources/ExactKit/Accessibility.swift: var next = presenter?.menus.parent(of: self) ?? superview",
-        "host/apple/Sources/ExactKit/Accessibility.swift: view.superview?.subviews.contains { $0 !== view && ($0 is NodeView || $0.next is UIViewController) && painted($0)",
-        "host/apple/Sources/ExactKit/Accessibility.swift: view.superview?.subviews.contains { $0 !== view && ($0 is NodeView || $0.next is UIViewController) && painted($0)",
         "host/apple/Sources/ExactKit/AgentAccessibility.swift: sequence(first: bar, next: { $0.superview }).allSatisfy({ view in",
         "host/apple/Sources/ExactKit/AgentAccessibility.swift: v = s.superview",
         "host/apple/Sources/ExactKit/AgentAccessibility.swift: v = s.superview",
@@ -1299,7 +1296,7 @@
         "host/apple/Sources/ExactCore/Bridge.swift: func preferPresented ( _ value : Bool ? ) -> Batch",
         "host/apple/Sources/ExactCore/Bridge.swift: func prepareModule ( _ plan : Data , module : ExactModule , token : UInt64 = 0 , width : CGFloat , height : CGFloat , letGo : Bool = false ) -> Batch",
         "host/apple/Sources/ExactCore/Bridge.swift: func preparePlan ( _ bytes : Data , width : CGFloat , height : CGFloat , token : UInt64 = 0 ) -> Batch",
-        "host/apple/Sources/ExactCore/Bridge.swift: func press ( _ view : UInt32 , held : String = <string> , at client : CGPoint ? = nil , now : Double ) -> Batch",
+        "host/apple/Sources/ExactCore/Bridge.swift: func press ( _ view : UInt32 , held : String = <string> , at client : CGPoint ? = nil , splitRow : ( row : UInt32 , list : UInt32 ) ? = nil , now : Double ) -> Batch",
         "host/apple/Sources/ExactCore/Bridge.swift: func previewTimeline ( at now : Double , configuration : Data ? = nil ) -> Data",
         "host/apple/Sources/ExactCore/Bridge.swift: func protocolLocation ( of href : String , protocol name : String , template : String ) -> String ?",
         "host/apple/Sources/ExactCore/Bridge.swift: func pump ( now : Double ) -> Batch",

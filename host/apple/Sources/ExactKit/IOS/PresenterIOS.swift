@@ -419,8 +419,8 @@ package final class Presenter {
         root.subviews.forEach { $0.removeFromSuperview() }
         chrome = ChromeIndex()
         AriaCarriers.forget(presenter: self)
-        views.removeAll()
-        inlineOwners.removeAll()
+        views.removeAll(); inlineOwners.removeAll()
+        stickies.reset(); tableGrid.reset(); svg?.reset(); boxAnimations.reset(); canvas2d.reset()
         scrollers.removeAll(); pendingScrolls.removeAll(); materialNodes.removeAll(); contextNodes.removeAll()
         hoveredInline = nil
         scrollPump.reset()
@@ -1448,7 +1448,7 @@ package final class Presenter {
         // The root's colour, resolved and compared only when what it is made
         // of changes: every batch asked UIKit for a colour it then compared.
         let first = root.subviews.first as? NodeView
-        let key = CanvasKey(root: first.map(ObjectIdentifier.init), channels: first?.channels("background_color"))
+        let key = CanvasKey(root: first.map(ObjectIdentifier.init), channels: first?.textChannels("background_color"))
         guard key != canvasKey else { return }
         canvasKey = key
         // A root without a background shows the platform's (LLP 1115 D2).

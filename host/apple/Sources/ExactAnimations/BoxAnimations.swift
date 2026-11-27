@@ -119,6 +119,23 @@ final class BoxAnimations: BoxAnimating {
         hiddenBoxes.remove(id)
         flyingBoxes.remove(id)
     }
+
+    func reset() {
+        for (id, entry) in boxSpecs {
+            CssAnimations.apply([], to: entry.layer, clock: nil, installed: &boxInstalled[id, default: [:]])
+        }
+        for redirect in fills.values { redirect.clear() }
+        for redirect in proxies.values { redirect.clear() }
+        for redirect in clips.values { redirect.clear() }
+        boxSpecs.removeAll()
+        boxInstalled.removeAll()
+        fills.removeAll()
+        proxies.removeAll()
+        clips.removeAll()
+        hiddenBoxes.removeAll()
+        flyingBoxes.removeAll()
+        seeked = nil
+    }
 }
 
 /// A layer other than the box's own that some of its animations play on, and what is installed there.

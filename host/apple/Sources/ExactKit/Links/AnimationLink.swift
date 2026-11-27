@@ -25,6 +25,7 @@ package protocol BoxAnimating: AnyObject {
     /// Whether `BoxAnimations` retains any animation, fill, proxy, clip or visibility state for `id`.
     func tracks(_ id: UInt32) -> Bool
     func forget(_ id: UInt32)
+    func reset()
     /// `id`'s box paints its background colour on `fill` (nil for its own layer), as a box's extension holds its
     /// picture (LLP 1123 D13): its background-colour animations play there.
     func setFill(_ id: UInt32, _ fill: CALayer?, clock: Double?)
@@ -50,6 +51,7 @@ package final class NoBoxAnimations: BoxAnimating {
     package func playsTransform(_ id: UInt32, flying: Bool, clock: Double?) -> Bool { false }
     package func tracks(_ id: UInt32) -> Bool { false }
     package func forget(_ id: UInt32) {}
+    package func reset() {}
 }
 
 /// The slots are set before any session is made; `read` is called on the
