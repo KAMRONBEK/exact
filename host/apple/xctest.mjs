@@ -19,7 +19,7 @@ export async function packageViewFixture(root, fixtureDir, triple, appId, env, r
   const dir = resolve(fixtureDir, 'package-screen'), fixtures = resolve(root, 'host/apple/tests/fixtures');
   const tags = ['probe-table', 'probe-plain', 'probe-cleared'];
   const packages = [{ extension: 'screen-probe', module: 'ScreenProbe', className: 'ScreenPackage', views: tags }];
-  packageCompiler({ packages, packageDir: dir, packagesRoot: dir, packageTargets: new Map([[dir, ['iphonesimulator', ['-target', triple]]]]),
+  await packageCompiler({ packages, packageDir: dir, packagesRoot: dir, packageTargets: new Map([[dir, ['iphonesimulator', ['-target', triple]]]]),
     seam: resolve(root, 'host/apple/modules/ExactPackage.swift'), packageCopies: [[resolve(fixtures, 'ScreenPackage.swift'), resolve(fixtures, 'AppearanceTable.swift')]],
     ios: true, swiftc: read('xcrun', ['swiftc', '--version']).stdout }).place(dir);
   const composition = resolve(dir, 'ExactComposed.swift');

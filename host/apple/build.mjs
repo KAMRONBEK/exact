@@ -29,7 +29,7 @@ import { captureSwiftNames, wantsSwiftNames, writeSwiftNames } from '../../scrip
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
 import { closeSync, copyFileSync, cpSync, existsSync, linkSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
-import { armArgs, armSourceKey, armOutput, evictArms, keepRoster, keptRoster, rosterRoutes, snapshotSources, moduleFrameworks, probeDigest } from './arms.mjs';
+import { armArgs, armSourceKey, armOutput, contentStamp, evictArms, hasIntentSignal, keepRoster, keptRoster, normalizeArmArgs, rosterRoutes, snapshotSources, moduleFrameworks, probeDigest } from './arms.mjs';
 import { HOST_MACOS, freeSpace, ROOM_GB } from '../../scripts/filesystem.mjs';
 import { documentTypes, exportedTypes, importedTypes, openingLinks, webPageTypes, browserEntitlements } from './documents.mjs';
 import { appleFrameSources, appleVariantBuildDir, appClip, associatedDomains as claimedDomains, appleExecutableName, HOST_DEV, PINNED_RUST, checkModuleRoster, moduleDirectory, copyShaders, cargoProductClaims, awaitBuildOutput, cargoLibraryTarget, claimBuildOutput, appSourceKey, bakeOutput, buildBake, contractLast, bakeTarget, developmentBuildEnv, developmentURLScheme, gpuModules, hermesBundle, injectedProfiles, resolveApp, verifyBakeFiles } from '../../scripts/app.mjs';
@@ -41,7 +41,7 @@ import { appleBuildRefusal, guardFlags, reportBuilt } from '../../scripts/help.m
 import { appleImplementations } from '../../js/bake/src/typescript.mjs';
 import { loadedDylibs, rebuildArgs } from './link.mjs';
 export { rebuildArgs };
-import { appleConfig, composedModule, moduleSeam, moduleLibraryLinkArgs, packageCompiler, rosterProbe, rosterProbeMain } from './compose.mjs';
+import { appleConfig, composedModule, moduleSeam, moduleLibraryLinkArgs, packageCompiler, rosterProbe, rosterProbeMain, swiftRoot } from './compose.mjs';
 import { associatedDomains, clipEntitlements, entitlementValue, grantEntitlements, grantEntitlementValues, macSigning, merchantEntitlement, signInEntitlement, signsGrant } from './presence.mjs';
 import { writeDataKeys } from './data-keys.mjs';
 import { alternativeNames, backgroundKeys, firstFrameKeys, declaredOrigin, interfaceStyle, layoutDirection, localNetworking, memoryEntitlements, modulePlist, nfcKeys, startLocation, storeKeys, transportSecurity, updateActivation, withPackageKeys, withVendorKeys } from './plist.mjs';
@@ -49,7 +49,7 @@ import { compileFixtures, packageViewFixture, iosTestRuns, macTests, onlyClasses
 import { APPLE_STATIC_TREES, appIcon, appleRefusals, buildInfo, iosAssets, appleAssets, appleAssetCatalogInventory, copyNativeResources, signingOrder, helperEntitlements, plistFile, wrapFramework, signedGpuProduct, assertArchiveFrameworks } from './assets.mjs';
 import { auditLaunchParts, launchModules, launchPartsObjects, launchServices, serviceArgs, writeLaunchParts } from './launch-parts.mjs';
 import { dylibArgs, keptModules } from './modules.mjs';
-import { nativeIntentModule, launchIntentModule, pressesTools, swiftPMImports } from './intents.mjs';
+import { gathered, nativeIntentModule, launchIntentModule, pressesTools, swiftPMImports } from './intents.mjs';
 import { appleLinkArgs, embedLibrary, prepareLibrary } from '../../scripts/package-libraries.mjs';
 import { quiet, quietFor } from './quiet.mjs';
 import { keptCrates } from './crates.mjs';
@@ -1021,7 +1021,7 @@ async function main(args, lockHeld = false) {
   // and the default is macosx — the same MacOSX-sysroot-for-an-iPhone-target the
   // presenter's link step hits above. The module cache stays in this app-owned
   // Swift scratch while the completed dylib remains invocation-private.
-  const frameSources = appleFrameSources.map(f => resolve(root, 'host/apple/webarm', f)), ownArgs = (args) => args.filter(value => !frameSources.includes(value)), webArgs = ['--sdk', sdkName, 'swiftc', '-module-cache-path', resolve(swiftBuildRoot, 'webarm-module-cache'), '-parse-as-library', '-emit-library', '-O', '-module-name', 'ExactWebArm', resolve(root, 'host/apple/webarm/WebArm.swift'), ...frameSources, '-o', webBuilt, '-framework', 'WebKit', '-framework', 'PDFKit']; // its other sources, a partitioned frame's browser, every frame's windows, dialogs and downloads, its pictures, a local PDF's view and its automation, its guest's inspector and its prints (LLP 1020.002), a page's given files (LLP 1020.001 D7), the other arms' arguments drop
+  const frameSources = appleFrameSources.map(f => resolve(root, 'host/apple/webarm', f)), ownArgs = (args) => args.filter(value => !frameSources.includes(value)), webArgs = ['--sdk', sdkName, 'swiftc', '-module-cache-path', resolve(packagesRoot, 'webarm-module-cache'), '-parse-as-library', '-emit-library', '-O', '-module-name', 'ExactWebArm', resolve(root, 'host/apple/webarm/WebArm.swift'), ...frameSources, '-o', webBuilt, '-framework', 'WebKit', '-framework', 'PDFKit']; // its other sources, a partitioned frame's browser, every frame's windows, dialogs and downloads, its pictures, a local PDF's view and its automation, its guest's inspector and its prints (LLP 1020.002), a page's given files (LLP 1020.001 D7), the other arms' arguments drop
   if (ios) {
     webArgs.push('-target', iosTripleFor(app, device, tv, compiled.ios), '-sdk', sdk);
   } else {
@@ -1038,20 +1038,27 @@ async function main(args, lockHeld = false) {
   const packageDir = resolve(webBuildDir, 'packages');
   // A roster probe route's packages compile for its own target, in a directory of its own (`rosterRoutes`).
   const packageTargets = new Map([[packageDir, [sdkName, ios ? ['-target', moduleTripleFor(app, true, device, tv), '-sdk', sdk] : ['-target', moduleTripleFor(app, false)]]]]);
-  const arm = (args, source, built, extra = '', own = false, optional = false) => { // optional: placing a failed one answers its log's path
-    args = armArgs(args, built); const key = armSourceKey(args, [].concat(source), { built, snapshot, packageDir, packageDirs: [...packageTargets.keys()], linkRoot, swiftc, extra });
-    const dir = resolve(own ? linkRoot : swiftBuildRoot, 'arms'), cached = resolve(dir, `${key}-${basename(built)}`);
+  const armKeyOptions = (built, extra = '') => ({ built, snapshot, packageDir, packageDirs: [...packageTargets.keys()], linkRoot, swiftc, extra, root, appDir: app.dir, swiftRootDir: swiftRoot(app) });
+  let aborted = false, stopPackages = () => {}; const background = [];
+  const arm = (args, source, built, extra = '', own = false, optional = false, prepare = null) => { // optional: placing a failed one answers its log's path
+    args = armArgs(args, built); const sources = [].concat(source), key = armSourceKey(args, sources, armKeyOptions(built, extra));
+    const dir = resolve(own ? linkRoot : packagesRoot, 'arms'), cached = resolve(dir, `${key}-${basename(built)}`);
     try { const now = new Date(); utimesSync(cached, now, now); copyFileSync(cached, built); return Object.assign(async () => true, { cached }); } catch {} // none, or evicted meanwhile
-    mkdirSync(dir, { recursive: true }); const packagesIn = args.find(a => packageTargets.has(a)); if (packagesIn) placePackages(packagesIn); // the packages' objects only for an arm compiled anew
-    const making = armOutput(dir, key, built);
-    const log = resolve(webBuildDir, `arm-${beside.length}.log`), compile = startApple('xcrun', args.map(a => a === built ? making : a), log, { authored: snapshot.authored });
-    beside.push(compile);
+    mkdirSync(dir, { recursive: true });
+    const start = () => {
+      if (aborted) throw new Error('host/apple: build aborted');
+      const making = armOutput(dir, key, built), log = resolve(webBuildDir, `arm-${beside.length}.log`);
+      const compile = startApple('xcrun', args.map(a => a === built ? making : a), log, { authored: snapshot.authored });
+      beside.push(compile); return { making, log, compile };
+    };
+    const running = prepare ? Promise.resolve(prepare()).then(start) : Promise.resolve(start());
+    running.catch(() => {}); background.push(running);
     return Object.assign(async () => {
+      const { making, log, compile } = await running;
       if (!await compile.done({ repeated: optional })) return log;
-      // Place this build's result before publishing it to the shared eviction pool.
       copyFileSync(making, built);
-      renameSync(making, cached); rmSync(dirname(making), { recursive: true, force: true });
-      evictArms(dir, basename(built)); return true;
+      if (!prepare || armSourceKey(args, sources, armKeyOptions(built, extra)) === key) { renameSync(making, cached); evictArms(dir, basename(built)); }
+      rmSync(dirname(making), { recursive: true, force: true }); return true;
     }, { cached }); // its copy's path: a probe's roster is kept beside it
   };
   const arms = [];
@@ -1066,15 +1073,14 @@ async function main(args, lockHeld = false) {
   const soundBuilt = resolve(webBuildDir, soundLoadName);
   if (hasSound) {
     const sound = (f) => resolve(root, 'host/apple/soundarm', f), triple = webArgs[webArgs.indexOf('-target') + 1], flags = ['-O2', '-fobjc-arc', '-fobjc-arc-exceptions'];
-    const objects = ['sound_mixer.c', 'sound_render.c', 'sound_engine.m'].map((file) => {
-      const object = resolve(swiftBuildRoot, 'arms', `${file.replace('.', '-')}-${createHash('sha256').update(readFileSync(sound(file))).update(readFileSync(sound('sound_render.h'))).update(readFileSync(sound('sound_mixer.h'))).update(`${triple} ${sdk} ${flags.join(' ')}`).digest('hex').slice(0, 16)}.o`);
-      if (existsSync(object)) return object;
-      mkdirSync(dirname(object), { recursive: true });
-      run('xcrun', ['--sdk', sdkName, 'clang', '-c', ...flags, '-target', triple, sound(file), '-o', `${object}.${process.pid}.tmp`]);
-      renameSync(`${object}.${process.pid}.tmp`, object); return object;
-    });
-    const soundArgs = [...ownArgs(webArgs).map(value => value === 'ExactWebArm' ? 'ExactSoundArm' : value === resolve(root, 'host/apple/webarm/WebArm.swift') ? sound('SoundArm.swift') : value === webBuilt ? soundBuilt : value === 'WebKit' ? 'AVFoundation' : value), '-import-objc-header', sound('sound_render.h'), ...objects];
-    arms.push(arm(soundArgs, [sound('SoundArm.swift'), sound('sound_mixer.c'), sound('sound_mixer.h'), sound('sound_render.c'), sound('sound_engine.m'), sound('sound_render.h')], soundBuilt));
+    const soundFiles = ['sound_mixer.c', 'sound_render.c', 'sound_engine.m'].map((file) => ({ file, object: resolve(packagesRoot, 'arms', `${file.replace('.', '-')}-${createHash('sha256').update(readFileSync(sound(file))).update(readFileSync(sound('sound_render.h'))).update(readFileSync(sound('sound_mixer.h'))).update(`${triple} ${sdk} ${flags.join(' ')} ${swiftc}`).digest('hex').slice(0, 16)}.o`) }));
+    const prepareSound = () => Promise.all(soundFiles.filter(({ object }) => !existsSync(object)).map(({ file, object }) => {
+      mkdirSync(dirname(object), { recursive: true }); const tmp = `${object}.${process.pid}.tmp`;
+      const log = resolve(webBuildDir, `sound-${file}.log`), compile = startApple('xcrun', ['--sdk', sdkName, 'clang', '-c', ...flags, '-target', triple, sound(file), '-o', tmp], log);
+      beside.push(compile); return compile.done().then(() => renameSync(tmp, object));
+    }));
+    const soundArgs = [...ownArgs(webArgs).map(value => value === 'ExactWebArm' ? 'ExactSoundArm' : value === resolve(root, 'host/apple/webarm/WebArm.swift') ? sound('SoundArm.swift') : value === webBuilt ? soundBuilt : value === 'WebKit' ? 'AVFoundation' : value), '-import-objc-header', sound('sound_render.h'), ...soundFiles.map(s => s.object)];
+    arms.push(arm(soundArgs, [sound('SoundArm.swift'), sound('sound_mixer.c'), sound('sound_mixer.h'), sound('sound_render.c'), sound('sound_engine.m'), sound('sound_render.h')], soundBuilt, '', false, false, prepareSound));
   }
   // The MIDI arm (LLP 1125 D6): CoreMIDI on a thread of its own; tvOS has none.
   const midiBuilt = resolve(webBuildDir, 'libexact_midi.dylib'), midiSource = resolve(root, 'host/apple/midiarm/MIDIArm.swift'), midiRing = resolve(root, 'host/apple/midiarm/midi_ring.h');
@@ -1103,9 +1109,10 @@ async function main(args, lockHeld = false) {
   // own sources do): what it compiles from and what an arm linking it is keyed by. Each copy says where it came from
   // (`#sourceLocation`), so a diagnostic names the package's file and `#filePath` its place in the package.
   const packageCopies = packages.map(p => p.sources.map((f, i) => {
-    const copy = resolve(packageDir, `src-${p.module}`, `${i}-${basename(f)}`);
+    const copy = resolve(packageDir, `src-${p.module}`, `${i}-${basename(f)}`), body = readFileSync(f, 'utf8');
+    const loc = /#file(?:Path)?\b/.test(body) ? realpathSync(f) : `${p.module}/${basename(f)}`;
     mkdirSync(dirname(copy), { recursive: true });
-    writeFileSync(copy, `#sourceLocation(file: ${JSON.stringify(realpathSync(f))}, line: 1)\n${readFileSync(f, 'utf8')}`);
+    writeFileSync(copy, `#sourceLocation(file: ${JSON.stringify(loc)}, line: 1)\n${body}`);
     return copy;
   })), packageSources = packages.length ? [seam, ...packageCopies.flat()] : [];
   if (composing) writeFileSync(composed, composedModule(packages, modules.apple.length > 0, configured));
@@ -1126,40 +1133,33 @@ async function main(args, lockHeld = false) {
   // archive needs but cannot say: `-lc++` for a static library with C++ inside.
   // tvOS links only what a package declares for `tvos`: AlarmKit is iOS's alone.
   const linkArgs = (forIos, os = forIos ? 'ios' : 'macos') => [...(app.manifest.host?.[os]?.link ?? [])];
-  // What the arm cache must see change: the flags, and each library's bytes.
-  const frameworkStamp = (forIos, simulator, arch) => JSON.stringify([linkArgs(forIos), ...frameworksFor(forIos, simulator, arch).stamped.map(f => { const st = statSync(f); return [f, st.size, st.mtimeMs]; })]);
+  // What the arm cache must see change: the flags, and each library/interface's bytes.
+  const frameworkStamp = (forIos, simulator, arch) => JSON.stringify([linkArgs(forIos), ...frameworksFor(forIos, simulator, arch).stamp]);
   const macArch = process.arch === 'arm64' ? 'arm64' : 'x86_64';
   const simulatorArch = iosTriple.startsWith('arm64') ? 'arm64' : 'x86_64', iosArch = device ? 'arm64' : simulatorArch;
-  const moduleArgs = (sdkFor, targetArgs, out, forIos = false, simulator = false, arch = macArch, packagesIn = packageDir, probe = false) => {
-    placePackages(packagesIn);
-    return ['--sdk', sdkFor, 'swiftc', '-module-cache-path', resolve(packagesRoot, 'modules-module-cache'), '-parse-as-library', '-emit-library', swiftOptimization(), '-swift-version', '5', '-module-name', 'ExactAppModules', ...moduleSources, ...(packages.length ? ['-I', packagesIn, '-L', packagesIn, ...packageObjects(packagesIn)] : []), ...packageImports(packagesIn), ...(app.manifest.host?.[forIos ? 'ios' : 'macos']?.swiftPackages?.length ? ['-D', 'SWIFT_PACKAGE', ...packageLink(packagesIn)] : []), ...frameworksFor(forIos, simulator, arch).args, ...(probe ? ['-Xlinker', '-rpath', '-Xlinker', '@loader_path/Frameworks'] : []), ...linkArgs(forIos), ...moduleLibraryLinkArgs({ wrapped: forIos && (production || embedOnly) && !probe }), '-o', out, ...targetArgs];
-  };
+  const moduleArgs = (sdkFor, targetArgs, out, forIos = false, simulator = false, arch = macArch, packagesIn = packageDir, probe = false) =>
+    ['--sdk', sdkFor, 'swiftc', '-module-cache-path', resolve(packagesRoot, 'modules-module-cache'), '-parse-as-library', '-emit-library', swiftOptimization(), '-swift-version', '5', '-module-name', 'ExactAppModules', ...moduleSources, ...(packages.length ? ['-I', packagesIn, '-L', packagesIn, ...packageObjects(packagesIn)] : []), ...packageImports(packagesIn), ...(app.manifest.host?.[forIos ? 'ios' : 'macos']?.swiftPackages?.length ? ['-D', 'SWIFT_PACKAGE', ...packageLink(packagesIn)] : []), ...frameworksFor(forIos, simulator, arch).args, ...(probe ? ['-Xlinker', '-rpath', '-Xlinker', '@loader_path/Frameworks'] : []), ...linkArgs(forIos), ...moduleLibraryLinkArgs({ wrapped: forIos && (production || embedOnly) && !probe }), '-o', out, ...targetArgs];
   const moduleLibraries = modulesBuilt ? frameworksFor(ios, ios && !device, ios ? iosArch : macArch).libraries : [];
   const macTarget = ['-target', moduleTripleFor(app, false)];
-  const { place: placePackages, libraries: packageLibraries, resources: packageResources, frameworks: packageFrameworks, imports: packageImports, link: packageLink, products: packageProducts } = packageCompiler({ packages, packageDir, packageTargets,
+  const { place: placePackages, stop: stopPkg, libraries: packageLibraries, resources: packageResources, frameworks: packageFrameworks, imports: packageImports, link: packageLink, products: packageProducts } = packageCompiler({ packages, packageDir, packageTargets,
     packageCopies, seam, packagesRoot, swiftc, production, distribution, ios, tv, frameworkBundles,
     app, extensions: buildReceipt.graph.extensions, swiftInputs: buildReceipt.binary.inventories, minimum: { ios: app.manifest.host?.ios?.minimumOS, tvos: app.manifest.host?.ios?.minimumOS,
       macos: app.manifest.host?.macos?.minimumOS } });
-  placePackages(packageDir);
-  moduleLibraries.push(...packageFrameworks);
-  // moduleArgs places each route's own dependencies before its key is computed.
-  // External framework stamps omit some interface files. Keep those builds private.
-  const packageStamp = dir => JSON.stringify([modules.frameworks?.length ? linkRoot : '',
-    ...packages.map(p => [p.module, createHash('sha256').update(readFileSync(resolve(dir, `${p.module}.dylib`))).digest('hex')]),
-    ...packageProducts(dir).map(p => p.digest)]);
-  const appModule = modulesBuilt ? arm(moduleArgs(sdkName, ios ? ['-target', moduleTripleFor(app, true, device, tv), '-sdk', sdk] : macTarget, modulesBuilt, ios, ios && !device, ios ? iosArch : macArch), [...moduleSources, ...packageSources], modulesBuilt, frameworkStamp(ios, ios && !device, ios ? iosArch : macArch) + packageStamp(packageDir), true) : null;
-  // A probe runs the module's table beside its dependencies and resources. iOS tries Catalyst, an iOS simulator,
-  // then macOS; tvOS has the macOS route alone and no first-frame tags. A failed route falls through, and the
-  // first roster read stands. Each route compiles only when needed.
+  stopPackages = stopPkg;
+  let packageFrameworksAdded = false;
+  const ensurePackages = async () => { await packagesReady; if (!packageFrameworksAdded) { packageFrameworksAdded = true; moduleLibraries.push(...packageFrameworks); } };
+  const packagesReady = placePackages(packageDir);
+  packagesReady.catch(() => {}); background.push(packagesReady);
+  const packageStamp = dir => JSON.stringify([...packages.map(p => [p.module, createHash('sha256').update(readFileSync(resolve(dir, `${p.module}.dylib`))).digest('hex')]), ...packageProducts(dir).map(p => p.digest)]);
+  const appModuleTarget = ios ? ['-target', moduleTripleFor(app, true, device, tv), '-sdk', sdk] : macTarget;
+  const appModuleTask = modulesBuilt ? ensurePackages().then(() => arm(moduleArgs(sdkName, appModuleTarget, modulesBuilt, ios, ios && !device, ios ? iosArch : macArch), [...moduleSources, ...packageSources], modulesBuilt, frameworkStamp(ios, ios && !device, ios ? iosArch : macArch) + packageStamp(packageDir), true)()) : null;
+  appModuleTask?.catch(() => {}); if (appModuleTask) background.push(appModuleTask);
   let rosterKeys = {}; if (process.platform === 'linux') rmSync(resolve(linkRoot, 'native-probes.json'), { force: true });
-  // On Linux no route's probe can run (no simulator, Catalyst or macOS loader): a development build without a simulator
-  // qualification (EXACT_NATIVE_ROSTERS) takes the manifest's roster, as it would after every route failed, without
-  // compiling three probes for it (85 s of a build with native modules).
   const probeless = process.platform === 'linux' && !production && !distribution && !process.env.EXACT_NATIVE_ROSTERS;
   if (probeless && modules.tags.length) console.log('host/apple: on Linux the manifest\'s native-module roster stands unprobed (EXACT_NATIVE_ROSTERS qualifies one)');
   const routes = probeless || !(modulesBuilt && modules.tags.length) ? [] : !ios ? [{ via: 'macOS', variant: false, packages: packageDir, built: resolve(webBuildDir, 'probe-' + modulesLoadName) }]
     : rosterRoutes({ tv, device, packageDir, missingSlice: (variant) => (modules.frameworks ?? []).find(fw => { try { frameworkSlice(fw, variant !== false, variant, variant === true ? simulatorArch : macArch); return false; } catch { return true; } }) }).map(route => ({ ...route, packages: `${route.packages}-probe`, built: resolve(webBuildDir, route.variant === false ? 'probe-' + modulesLoadName : `probe-roster-${route.variant === true ? 'simulator' : route.variant}`) }));
-  const compileProbe = ({ variant, built, packages: packagesIn }, probeMain = resolve(linkRoot, 'ExactRosterProbe.swift')) => {
+  const compileProbe = async ({ variant, built, packages: packagesIn }, probeMain = resolve(linkRoot, 'ExactRosterProbe.swift')) => {
     const place = (library, launcher) => rosterProbe({ library, launcher, built, packagesIn, packages, placePackages, swiftProducts: () => packageProducts(packagesIn),
       frameworks: frameworksFor(variant !== false, variant, variant === true ? simulatorArch : macArch).libraries });
     const probeLibrary = `${built}.dylib`;
@@ -1167,16 +1167,22 @@ async function main(args, lockHeld = false) {
     const on = variant === true ? 'iphonesimulator' : 'macosx', catalyst = variant !== false && variant !== true && resolve(read('xcrun', ['--sdk', 'macosx', '--show-sdk-path']).stdout.trim(), 'System/iOSSupport');
     const target = variant === false ? macTarget : catalyst ? ['-target', `${macArch}-apple-ios${targets.ios}-macabi`, '-Fsystem', `${catalyst}/System/Library/Frameworks`, '-I', `${catalyst}/usr/lib/swift`, '-L', `${catalyst}/usr/lib/swift`] : ['-target', `${simulatorArch}-apple-ios${targets.ios}-simulator`, '-sdk', read('xcrun', ['--sdk', on, '--show-sdk-path']).stdout.trim()];
     if (!packageTargets.has(packagesIn)) packageTargets.set(packagesIn, [on, target]);
+    await placePackages(packagesIn); if (aborted) throw new Error('host/apple: build aborted');
     const library = arm(moduleArgs(on, target, probeLibrary, variant !== false, variant, variant === true ? simulatorArch : macArch, packagesIn, true), [...moduleSources, ...packageSources], probeLibrary, frameworkStamp(variant !== false, variant, variant === true ? simulatorArch : macArch) + packageStamp(packagesIn), true, true);
     const launcher = arm(['--sdk', on, 'swiftc', '-parse-as-library', ...target, probeMain, '-o', built], [probeMain], built, '', true, true);
     return place(library, launcher);
   };
-  const firstRoute = routes.find(r => !r.lacking); if (firstRoute && !firstRoute.placed) try { firstRoute.placed = compileProbe(firstRoute); } catch (e) { firstRoute.placed = () => { throw e; }; }
+  const firstRoute = routes.find(r => !r.lacking); if (firstRoute && !firstRoute.placed) { firstRoute.placed = compileProbe(firstRoute).catch(e => () => { throw e; }); background.push(firstRoute.placed); }
   for (const svc of serviceDylibs) arms.push(arm(['--sdk', sdkName, 'swiftc', '-module-cache-path', resolve(packagesRoot, 'modules-module-cache'), ...serviceArgs(svc), ...(ios ? ['-target', iosTripleFor(app, device, tv, compiled.ios), '-sdk', sdk] : macTarget)], svc.sources, svc.built, '', true));
   await hostCompile?.done({ repeated: true });
-  if (appModule) await appModule();
-  if (!tv && packaged.has('intents') && modulesBuilt) nativeIntents.push(nativeIntentModule({ moduleName: 'ExactAppModules', binary: modulesBuilt, sources: moduleSources, args: moduleArgs(sdkName, ios ? ['-target', moduleTripleFor(app, true, device, tv), '-sdk', sdk] : macTarget, modulesBuilt, ios, ios && !device, ios ? iosArch : macArch), directory: resolve(linkRoot, 'native-intents'), swiftc, runApple }));
-  if (!embedOnly && packaged.has('intents') && nativeIntents.some(Boolean)) intents = buildIntents({ ...intentOptions, nativeModules: nativeIntents });
+  const needsNativeIntents = !tv && packaged.has('intents') && Boolean(modulesBuilt) && (Boolean(app.manifest.host?.[ios ? 'ios' : 'macos']?.swiftPackages?.length) || Boolean(modules.frameworks?.length) || hasIntentSignal(snapshot.copies, gathered));
+  if (needsNativeIntents) {
+    await appModuleTask;
+    const intentArgs = moduleArgs(sdkName, appModuleTarget, modulesBuilt, ios, ios && !device, ios ? iosArch : macArch);
+    const { keyArgs } = normalizeArmArgs(intentArgs, [...moduleSources, ...packageSources], armKeyOptions(modulesBuilt));
+    nativeIntents.push(nativeIntentModule({ moduleName: 'ExactAppModules', binary: modulesBuilt, sources: moduleSources, args: intentArgs, keyArgs, directory: resolve(linkRoot, 'native-intents'), swiftc, runApple }));
+    if (nativeIntents.some(Boolean)) intents = buildIntents({ ...intentOptions, nativeModules: nativeIntents });
+  }
   // The early build stands when it succeeded and the bake came out as it was expected to.
   const linkedEarly = early ? await early.step.done({ repeated: true }) && expected.capture === libDir && expected.composition === composition && expected.scratch === paths.scratch : false;
   let stripped = null;
@@ -1255,6 +1261,8 @@ async function main(args, lockHeld = false) {
   } finally { releaseSwift(); }
   }
   const tSwift = Date.now(); buildStep('arms');
+  await ensurePackages();
+  if (appModuleTask) await appModuleTask;
   for (const placed of arms) await placed();
   if (modules.tags.length) {
     // The manifest's roster stands when no route reads the artifact's; with no artifact, it serves nothing.
@@ -1268,7 +1276,7 @@ async function main(args, lockHeld = false) {
       if (route.lacking) { causes.push(`${route.via}: ${basename(route.lacking)} has no ${route.via} slice`); continue; }
       const log = resolve(linkRoot, `roster-probe-${route.via.replaceAll(' ', '-')}.log`);
       try {
-        const placed = route.placed ?? compileProbe(route), compiled = await placed();
+        const placed = await (route.placed ?? compileProbe(route)), compiled = await placed();
         if (compiled !== true) throw failed('compile', readFileSync(compiled, 'utf8'), log);
         if (process.platform === 'linux' && route.variant === true) writeFileSync(resolve(linkRoot, 'native-probes.json'), JSON.stringify({ version: 1, probes: [{ app: app.name, appId: app.id, file: basename(placed.cached), cachePath: relative(root, placed.cached), probeSha256: probeDigest(placed.cached) }] }));
         const artifact = placed.artifact ?? route.built;
@@ -1387,7 +1395,7 @@ async function main(args, lockHeld = false) {
     }
   };
   await (device ? place() : (await import('../../scripts/agent-launch.mjs')).simulatorApps(dev.udid, bundles.flatMap(([, kind]) => kind === 'clip' ? [] : [kind === 'host' ? `${app.id}.host` : app.id]), place, { name: dev.name }));
-  } finally { for (const step of beside) step.stop(); for (const path of cleanup.reverse()) rmSync(path, { recursive: true, force: true }); release(); }
+  } finally { aborted = true; stopPackages(); for (const step of beside) step.stop(); await Promise.allSettled(background); for (const path of cleanup.reverse()) rmSync(path, { recursive: true, force: true }); release(); }
 }
 
 /** `--test`: the Swift host tests (LLP 1033 D4a). They link `ExactKit`,

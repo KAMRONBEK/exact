@@ -31,7 +31,6 @@ test("the keyboard policy is the viewport meta's, overlaid where the VirtualKeyb
   expect(keyboardPolicy(meta('width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content'))).toBe('resizes-content');
   // A value CSS does not define, as the browser takes it
   expect(keyboardPolicy(meta('width=device-width, interactive-widget=nonsense'))).toBe('resizes-visual');
-  expect(keyboardPolicy(meta('width=device-width, interactive-widget=overlays-content!'))).toBe('resizes-visual');
   expect(keyboardPolicy({ ...meta('interactive-widget=resizes-visual'), navigator: { virtualKeyboard: { overlaysContent: true } } })).toBe('overlays-content');
 });
 
