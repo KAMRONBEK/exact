@@ -892,6 +892,9 @@ impl NodeInst {
             bridge::set_tuple(around);
             force = !fresh && (u.theme.retheme || around != before);
         }
+        let layered = Self::layered_styles(plan, &row);
+        let mut dirty_layered = exact_kernel::StyleMask::default();
+        let mut changed_layered = Vec::new();
         let order = mode
             .into_iter()
             .chain((0..row.bindings.len as usize).filter(|i| Some(*i) != mode));
@@ -912,6 +915,10 @@ impl NodeInst {
                 continue;
             }
             let binding = plan.binding(b);
+            let layered_style = (binding.kind == BindingKind::Style && !layered.is_empty())
+                .then(|| exact_kernel::StyleId::from_bit(binding.id as u32))
+                .flatten()
+                .filter(|s| layered.has(*s));
             let reads = &deps.bindings[b.0 as usize];
             let evaluated = u.work.bindings_evaluated;
             // A constant's value is the one it was created with.
@@ -942,7 +949,12 @@ impl NodeInst {
                         self.set_emitted(slot, None);
                     }
                     if first && !u.discard {
-                        self.unset_trapped(u, i, &binding);
+                        if let Some(style) = layered_style {
+                            dirty_layered.set(style);
+                            changed_layered.push(i);
+                        } else {
+                            self.unset_trapped(u, i, &binding);
+                        }
                     }
                     continue;
                 }
@@ -970,6 +982,14 @@ impl NodeInst {
                 if let Some(slot) = slot {
                     self.set_emitted(slot, Some(value));
                 }
+                continue;
+            }
+            if let Some(style) = layered_style {
+                if let Some(slot) = slot {
+                    self.set_emitted(slot, Some(value));
+                }
+                dirty_layered.set(style);
+                changed_layered.push(i);
                 continue;
             }
             // A binding is a declaration whose value is computed from state, as a `var()` reference
@@ -1008,114 +1028,23 @@ impl NodeInst {
                     }
                     Err(e) => return Err(InstanceError::Bridge(e)),
                 },
-                // A missing class row removes its declaration. An authored CSS
-                // clear keeps declaration intent while inheriting or using the initial value.
-                BindingKind::Style
-                    if matches!(value, Value::Option(None))
-                        || bridge::unsets(binding.id, &value) =>
-                {
-                    let style = exact_kernel::StyleId::from_bit(binding.id as u32)
-                        .expect("known to the bridge");
-                    let mut mask = exact_kernel::StyleMask::default();
-                    mask.set(style);
-                    u.ops.push(Op::ClearStyle {
-                        id: self.view,
-                        mask,
-                        written: binding.written && !matches!(value, Value::Option(None)),
-                    });
-                    self.unthemed(u, i, style);
-                }
                 BindingKind::Style => {
-                    let p = patch.get_or_insert_with(Box::default);
-                    let (family_value, family_id) =
-                        bridge::family_binding(plan, u.fonts.as_deref(), &binding, &value);
-                    // A row a runtime family or a refusal sets reads no token:
-                    // the index forgets what it read before.
-                    let row = exact_kernel::StyleId::from_bit(binding.id as u32);
-                    let styled = if let Some(id) = family_id {
-                        if let (true, Some(row)) = (themed_plan, row) {
-                            self.unthemed(u, i, row);
-                        }
-                        bridge::set_runtime_font_style(
-                            p,
-                            &binding,
-                            id,
-                            plan.stacks.len() + u.fonts.as_ref().unwrap().borrow().names().len(),
-                        )
-                    } else if let Err(e) = bridge::inherited_varying(
-                        &binding,
-                        family_value,
-                        |name| u.sites.varying_type(name),
-                        || u.sites.has_children(self.node),
-                    ) {
-                        if let (true, Some(row)) = (themed_plan, row) {
-                            self.unthemed(u, i, row);
-                        }
-                        Err(e)
-                    } else {
-                        exact_kernel::style::theme::take_named();
-                        let styled = bridge::set_binding_style(p, &binding, family_value, plan);
-                        if themed_plan {
-                            self.index(u, i, &binding, family_value, styled.is_ok());
-                        }
-                        styled
-                    };
-                    match styled {
-                        // Unlinked, the plan names no rule: it was refused at
-                        // boot (LLP 1047.001 D5).
-                        Ok(exact_kernel::StyleId::Animation) => {
-                            if let Some(resolve) = u.sites.resolve_keyframes {
-                                u.notes
-                                    .extend(resolve(&u.sites.keyframes, &mut p.animation));
-                            }
-                        }
-                        // An exit names keyframes as `animation` does (LLP 1063).
-                        Ok(exact_kernel::StyleId::ExitAnimation) => {
-                            if let Some(resolve) = u.sites.resolve_keyframes {
-                                u.notes.extend(resolve(
-                                    &u.sites.keyframes,
-                                    &mut p.rare.exit_animation,
-                                ));
-                            }
-                        }
-                        // So do a route's entrance and exit (LLP 1013.001 D1).
-                        Ok(
-                            row @ (exact_kernel::StyleId::ViewTransitionNew
-                            | exact_kernel::StyleId::ViewTransitionOld),
-                        ) => {
-                            if let Some(resolve) = u.sites.resolve_keyframes {
-                                let list = match row {
-                                    exact_kernel::StyleId::ViewTransitionNew => {
-                                        &mut p.rare.view_transition_new
-                                    }
-                                    _ => &mut p.rare.view_transition_old,
-                                };
-                                u.notes.extend(resolve(&u.sites.keyframes, list));
-                            }
-                        }
-                        Ok(_) => {}
-                        Err(
-                            bridge::BridgeError::Style(_) | bridge::BridgeError::StyleKind { .. },
-                        ) => {
-                            let style = exact_kernel::StyleId::from_bit(binding.id as u32)
-                                .expect("known to the bridge");
-                            let mut mask = exact_kernel::StyleMask::default();
-                            mask.set(style);
-                            u.ops.push(Op::ClearStyle {
-                                id: self.view,
-                                mask,
-                                written: binding.written,
-                            });
-                            let name = style.name().replace('_', "-");
-                            u.notes.push(invalid(self.view, &name, &value));
-                        }
-                        Err(e) => return Err(InstanceError::Bridge(e)),
-                    }
+                    self.apply_style_binding(u, i, &binding, &value, themed_plan, &mut patch)?;
                 }
             }
             if let Some(slot) = slot {
                 self.set_emitted(slot, Some(value));
             }
+        }
+        if !dirty_layered.is_empty() {
+            self.emit_layered_styles(
+                u,
+                &row,
+                dirty_layered,
+                &changed_layered,
+                themed_plan,
+                &mut patch,
+            )?;
         }
         if !tuned {
             let pin = mode.and_then(|m| self.emitted(plan, u.sites, m));

@@ -423,16 +423,12 @@ pub(super) fn alert_font<'a>(
     if role == crate::alert_role::AlertRole::Never {
         return None;
     }
-    let class = crate::class::rows(
-        attrs,
-        &|name| {
-            styles
-                .iter()
-                .find(|s| s.name == name)
-                .map(|s| s.attrs.as_slice())
-        },
-        &[],
-    )
+    let class = crate::class::rows(attrs, &|name| {
+        styles
+            .iter()
+            .find(|s| s.name == name)
+            .map(|s| s.attrs.as_slice())
+    })
     .ok()
     .flatten()
     .map_or_else(Vec::new, |(_, rows)| rows);
