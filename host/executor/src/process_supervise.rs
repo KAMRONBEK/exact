@@ -242,15 +242,17 @@ impl<'a> Supervisor<'a> {
             };
             self.ctl.begin(n, self.spec.pipes[0]);
             let spawned = json!({ "pid": child.pid(), "restarts": restarts, "incarnation": n, "ran": self.ran.words() });
+            // Sample the start time before delivering `spawn` so a caller that
+            // advances the agent clock on `spawn` cannot shift `at` steps later.
+            let started = self.clock.now();
             // Let go before its first event landed: the incarnation starts
             // by releasing its group, which then runs to its close.
             let gone = !deliver(self.shared, self.ticket, event("spawn", spawned), false);
-            let began = self.clock.now();
-            let (ended, ready) = self.incarnation(n, child, gone);
+            let (ended, ready) = self.incarnation(n, child, gone, started);
             self.ctl.end();
             // A child that became ready, or ran long enough, failed alone:
             // its restart waits only the delay again.
-            if ready || self.clock.now() - began >= STEADY_MS {
+            if ready || self.clock.now() - started >= STEADY_MS {
                 consecutive = 0;
             }
             let close = json!({ "code": ended.code, "signal": ended.signal, "drained": ended.drained, "incarnation": n });
@@ -310,8 +312,13 @@ impl<'a> Supervisor<'a> {
     }
 
     /// One incarnation, to its close: how it ended, and whether it became ready.
-    fn incarnation(&mut self, n: u32, mut child: Box<dyn Child>, gone: bool) -> (Ended, bool) {
-        let started = self.clock.now();
+    fn incarnation(
+        &mut self,
+        n: u32,
+        mut child: Box<dyn Child>,
+        gone: bool,
+        started: f64,
+    ) -> (Ended, bool) {
         let utf8 = self.spec.utf8;
         let (mut out, mut err) = (Utf8::default(), Utf8::default());
         let mut exit: Option<(Option<i64>, Option<String>, f64)> = None;

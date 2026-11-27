@@ -186,14 +186,14 @@ test('web, Linux and Apple builds publish the same discovery record', async () =
     for (const args of builds) {
       rmSync(resolve(dir,'.exact/typescript-inputs.json'), {force:true});
       assert.equal(appSourceInputs(dir), null);
-      const built = spawnSync(process.execPath,args,{cwd:root,env,encoding:'utf8',timeout:300_000});
+      const built = spawnSync(process.execPath,args,{cwd:root,env,encoding:'utf8',timeout:540_000});
       assert.equal(built.status,0,`${args.join(' ')}\n${built.stdout}\n${built.stderr}`);
       assert.ok(appSourceInputs(dir).modules.some(([file])=>file==='api.ts'));
       assert.deepEqual(sourceInputChanges(appSourceInputs(dir)), []);
       assert.equal(serverUrl(dir,{}),'http://127.0.0.1:8787');
     }
   } finally { rmSync(home,{recursive:true,force:true}); }
-}, 600_000);
+}, 720_000);
 
 test('server discovery excludes type-only edges and declarations, even after a setting refusal', () => {
   const dir = mkdtempSync(resolve(import.meta.dir, '../target/issue-859-server-types-'));

@@ -534,7 +534,7 @@ test('no web build ships inspect: it lives in dev.js, which no build copies', as
   expect(build).not.toContain('dev-inspect');
   const out = mkdtempSync(join(tmpdir(), 'exact-no-inspect-'));
   try {
-    const r = spawnSync(process.execPath, [resolve(ROOT, 'host/web-js/build.mjs'), 'theme-fixture', '--out', out], { cwd: ROOT, encoding: 'utf8', timeout: 120_000 });
+    const r = spawnSync(process.execPath, [resolve(ROOT, 'host/web-js/build.mjs'), 'theme-fixture', '--out', out], { cwd: ROOT, encoding: 'utf8', timeout: 300_000 });
     expect(r.status, r.stdout + r.stderr).toBe(0);
     const walk = dir => readdirSync(dir, { withFileTypes: true }).flatMap(e => e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]);
     const files = walk(out);
@@ -546,7 +546,7 @@ test('no web build ships inspect: it lives in dev.js, which no build copies', as
   } finally { rmSync(out, { recursive: true, force: true }); }
   expect(readFileSync(resolve(ROOT, 'host/web-js/dev.mjs'), 'utf8')).toContain("url.pathname === '/dev-inspect.json'");
   expect(readFileSync(resolve(ROOT, 'host/web-js/inspect-dev.js'), 'utf8')).toContain('exact-inspect');
-}, 120_000);
+}, 300_000);
 
 // LLP 1122 T2b: inspect mode in the wasm host, on the theme fixture's page.
 test('inspect on the wasm page: no tap reaches the app, a click selects the node the hit test finds and reports its site, instance and rows, a refresh reports it again, and Escape leaves', async () => {
@@ -559,12 +559,12 @@ test('inspect on the wasm page: no tap reaches the app, a click selects the node
     // The client, present by its long poll; the events it is told.
     const events = [];
     const poll = (async () => { let after = 0, epoch; while (polling) { const r = await post(epoch ? { after, epoch, client: 'tool' } : { after: 0, wait: false, client: 'tool' }, '/__forma/events'); events.push(...(r.events ?? [])); after = r.seq ?? after; epoch = r.epoch; } })();
-    const until = async (pass, ms = 30_000) => { const end = Date.now() + ms; for (;;) { const got = await pass(); if (got) return got; if (Date.now() > end) throw new Error('not seen'); await new Promise(ok => setTimeout(ok, 200)); } };
+    const until = async (pass, ms = 30_000, what = '') => { const end = Date.now() + ms; for (;;) { const got = await pass(); if (got) return got; if (Date.now() > end) throw new Error(`not seen${what ? `: ${what}` : ''}: ${said().slice(-1500)}`); await new Promise(ok => setTimeout(ok, 200)); } };
     const page = await browser.newPage({ viewport: { width: 420, height: 900 }, hasTouch: true });
     await page.goto(`${base}/`);
-    const build = await until(async () => (await post({ method: 'hello' })).ok?.builds?.find(b => b.host === 'web'), 120_000);
+    const build = await until(async () => (await post({ method: 'hello' })).ok?.builds?.find(b => b.host === 'web'), 120_000, 'web build');
     // The resident compiler's first plan, and its source map, are in.
-    await until(() => said().includes('plan ready'), 300_000);
+    await until(() => said().includes('plan ready'), 600_000, 'plan ready');
     expect(build.capabilities).toContain('inspect');
     const dim = () => page.locator('[data-testid="dim-preview"]').evaluate(e => getComputedStyle(e).backgroundColor);
     const before = await dim();

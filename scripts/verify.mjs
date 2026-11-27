@@ -724,7 +724,7 @@ async function onDuo(app, { pick, shots, running, freshServer, passed, selectedF
  * failed), and at the phone's width what it shows (`seen`), for the relaunch, and its accessibility tree (`ax`). */
 async function checkAt(host, app, size, store, shots, { baseline = null } = {}) {
   const [{ open }, { driveStore, removeBrowserProfile }] = await Promise.all([import('./agent.mjs'), import('./agent-launch.mjs')]);
-  const fresh = { EXACT_AGENT_STORAGE_FRESH: '1' };
+  const fresh = { EXACT_AGENT_STORAGE_FRESH: '1', EXACT_AGENT_EPHEMERAL_PORT: '1' };
   const s = await open({ host, app: app.selector, storage: store, env: fresh, ax: readsAx(host), ...(size ? { size } : hostOpen(host, app)) });
   try {
     await s.clock('data');
@@ -907,7 +907,7 @@ export function pinnedLaunch(test, defaults) {
 /** What a fresh launch shows under `launch`'s facts on an empty scratch store, for `seen`'s comparison. */
 async function freshUnder(host, app, launch, store) {
   const [{ open }, { driveStore, removeBrowserProfile }] = await Promise.all([import('./agent.mjs'), import('./agent-launch.mjs')]);
-  const s = await open({ host, app: app.selector, storage: store, env: { EXACT_AGENT_STORAGE_FRESH: '1' }, ax: readsAx(host), ...launchOf(launch), substitutes: launch?.substitutes, restoreSubstitutes: true, ...(host === 'web' ? { size: WEB_SIZES[0] } : hostOpen(host, app)) });
+  const s = await open({ host, app: app.selector, storage: store, env: { EXACT_AGENT_STORAGE_FRESH: '1', EXACT_AGENT_EPHEMERAL_PORT: '1' }, ax: readsAx(host), ...launchOf(launch), substitutes: launch?.substitutes, restoreSubstitutes: true, ...(host === 'web' ? { size: WEB_SIZES[0] } : hostOpen(host, app)) });
   try {
     for (const [name, value] of Object.entries(preferencesOf(launch))) await s.prefer({ [name]: value });
     await s.clock('data');

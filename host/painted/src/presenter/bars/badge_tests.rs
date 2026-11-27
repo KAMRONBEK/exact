@@ -415,10 +415,12 @@ fn disabled_large_font_and_rtl_badges_behave_cleanly() {
     );
 
     // 3. Descendant color-scheme resolves fill/ink in the badge box's own scheme.
-    let scheme_app = avatar_app(r##"text "DK" color="light-dark(#111111, #eeeeee)""##).replace(
-        r##"background-color="#2563eb""##,
-        r##"color-scheme="dark" background-color="light-dark(#f0f0f0, #101010)""##,
-    );
+    let scheme_app =
+        avatar_app(r##"                        text "DK" color="light-dark(#111111, #eeeeee)""##)
+            .replace(
+                r##"background-color="#2563eb""##,
+                r##"color-scheme="dark" background-color="light-dark(#f0f0f0, #101010)""##,
+            );
     let (mut p_scheme, _) = barred(&scheme_app);
     p_scheme.sync_bars();
     let scheme_badge = p_scheme.bar_plans().0.unwrap().leading[0]

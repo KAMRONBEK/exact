@@ -203,9 +203,13 @@ jobs:
               for (const f of buckets[shard]) console.log(f);
             '
           )
-          cargo build -q -p contract --bin contract
+          cargo build -q -p contract --bin contract -p exact-web-js --bin exact-web-js
           if [[ " ${files[*]} " == *"./scripts/agent-test.test.mjs"* ]]; then
             cargo build --profile host-dev -p caltrain-linux --bin caltrain-render
+          fi
+          if [[ " ${files[*]} " == *"./scripts/forma-server.test.mjs"* ]]; then
+            cargo build -q -p exact-gpu-reflect --bin exact-gpu-reflect -p caltrain-linux --bin caltrain-render
+            cargo build -q --profile host-dev -p theme-fixture-web --bin theme-fixture-dev
           fi
           echo "Running ${#files[@]} script test files (shard $SHARD)"
           bun test "${files[@]}"
