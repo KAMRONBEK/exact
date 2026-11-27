@@ -173,3 +173,52 @@ fn a_path_dependency_outside_the_workspace_is_identity() {
     }
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// `tree_identity` joins path components with `/` and sorts by UTF-8 bytes
+/// (matching `notification_service_identity`), so nested crates produce the
+/// same `dataCrate.tree` digest on POSIX and Windows regardless of separator
+/// or `PathBuf` component-wise sort order.
+#[test]
+fn tree_identity_uses_slash_joined_utf8_byte_order() {
+    use sha2::{Digest, Sha256};
+
+    let dir = app("tree-identity-canonical");
+    let data = dir.join("data");
+    std::fs::create_dir_all(data.join("src/a-b")).unwrap();
+    std::fs::create_dir_all(data.join("src/a")).unwrap();
+    std::fs::create_dir_all(data.join("src/mod")).unwrap();
+    std::fs::write(data.join("src/a-b/file.rs"), "pub const AB: u8 = 1;\n").unwrap();
+    std::fs::write(data.join("src/a/file.rs"), "pub const A: u8 = 2;\n").unwrap();
+    std::fs::write(data.join("src/mod.rs"), "pub const MOD: u8 = 3;\n").unwrap();
+    std::fs::write(data.join("src/mod/sub.rs"), "pub const SUB: u8 = 4;\n").unwrap();
+
+    let compat_tree = inputs(&dir)["dataCrate"]["tree"].clone();
+    let (digest, files) = super::super::tree_identity(&data).unwrap();
+    let names: Vec<&str> = files.iter().map(|(name, _)| name.as_str()).collect();
+    // `-` (0x2d) and `.` (0x2e) precede `/` (0x2f) in UTF-8 bytes, reversing
+    // component-wise `PathBuf` order for `a-b` vs `a/` and `mod.rs` vs `mod/`.
+    assert_eq!(
+        names,
+        [
+            "Cargo.lock",
+            "Cargo.toml",
+            "src/a-b/file.rs",
+            "src/a/file.rs",
+            "src/lib.rs",
+            "src/mod.rs",
+            "src/mod/sub.rs",
+        ]
+    );
+    let mut expected = Sha256::new();
+    for name in &names {
+        let bytes = std::fs::read(data.join(name)).unwrap();
+        expected.update(name.as_bytes());
+        expected.update([0]);
+        expected.update((bytes.len() as u64).to_le_bytes());
+        expected.update(&bytes);
+    }
+    let expected = super::super::hex(&expected.finalize());
+    assert_eq!(digest, expected);
+    assert_eq!(compat_tree, expected);
+    let _ = std::fs::remove_dir_all(&dir);
+}

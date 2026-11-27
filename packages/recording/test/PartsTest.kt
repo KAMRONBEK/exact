@@ -1,8 +1,10 @@
 package exact.recording
 
 import android.content.Context
+import android.media.MediaCodec
 import android.media.MediaFormat
 import java.io.File
+import java.io.IOException
 import java.nio.ByteBuffer
 import org.junit.After
 import org.junit.Assert.*
@@ -98,5 +100,45 @@ class PartsTest {
         assertEquals(listOf("recording: recovered ${file.path}"), lines)
         assertTrue(file.isFile)
         assertFalse(w.part.exists())
+    }
+
+    /** When writeSampleData or stop fails and MediaMuxer.release() throws IllegalStateException from its started
+     * state, mux() still deletes `<file>.mp4.tmp` and propagates the original failure unmasked. */
+    @Test fun muxFailureDeletesTempAndKeepsOriginalErrorWhenReleaseThrows() {
+        for (failIn in listOf("write", "stop")) {
+            val file = File(dir, "fail-$failIn.m4a")
+            val w = writer(file)
+            w.write(ByteBuffer.wrap(byteArrayOf(1, 2)), 2)
+            w.close()
+            var released = false
+            val open: (String) -> SampleMuxer = { path ->
+                File(path).writeBytes(byteArrayOf(0, 1))
+                object : SampleMuxer {
+                    override fun addTrack(format: MediaFormat) = 0
+                    override fun start() {}
+                    override fun writeSampleData(trackIndex: Int, byteBuf: ByteBuffer, bufferInfo: MediaCodec.BufferInfo) {
+                        if (failIn == "write") throw IOException("write failed")
+                    }
+                    override fun stop() {
+                        if (failIn == "stop") throw IllegalStateException("stop failed")
+                    }
+                    override fun release() {
+                        released = true
+                        throw IllegalStateException("muxer still started")
+                    }
+                }
+            }
+            if (failIn == "write") {
+                val error = assertThrows(IOException::class.java) { mux(w.part, file, open) }
+                assertEquals("write failed", error.message)
+            } else {
+                val error = assertThrows(IllegalStateException::class.java) { mux(w.part, file, open) }
+                assertEquals("stop failed", error.message)
+            }
+            assertTrue("release was called for $failIn failure", released)
+            assertFalse("temp mux file is deleted on $failIn failure", File(file.path + ".mp4.tmp").exists())
+            assertTrue("part is preserved on $failIn failure", w.part.exists())
+            assertFalse("target MP4 is not created on $failIn failure", file.exists())
+        }
     }
 }

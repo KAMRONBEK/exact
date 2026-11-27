@@ -251,10 +251,11 @@ export function binarySourceInputs({files, directories, absent, links, inventori
     const root = roots.find(root => under(root.contains ?? root.path, path));
     return root ? { root: root.name, path: relative(root.path, path).split(sep).join('/') } : null;
   };
+  const order = (a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b));
   const capture = (rows, pathOf, rest) => rows.flatMap(row => {
     const at = located(pathOf(row));
     return at ? [{ ...at, ...rest(row) }] : [];
-  });
+  }).sort((a, b) => order(a.root, b.root) || order(a.path, b.path) || order(a.kind ?? '', b.kind ?? ''));
   // The receipt holds this as JSON: an undefined field is absent there too.
   return { version: 1, metadata: JSON.parse(JSON.stringify(metadata)),
     files: capture(files, file => file.path, file => ({ sha256: file.sha256 })),

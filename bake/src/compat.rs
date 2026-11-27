@@ -1093,6 +1093,17 @@ fn notification_service_identity(dir: &Path) -> Result<(String, Vec<serde_json::
     Ok((hex(&tree.finalize()), files))
 }
 
+/// A path relative to `root`, joined with `/` regardless of host separator.
+fn canonical_relative(root: &Path, path: &Path) -> Result<String, String> {
+    path.strip_prefix(root)
+        .expect("a read_dir child stays below its root")
+        .components()
+        .map(|part| part.as_os_str().to_str())
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| format!("{} contains a non-UTF-8 source name", path.display()))
+        .map(|parts| parts.join("/"))
+}
+
 fn walk_notification_service(
     root: &Path,
     dir: &Path,
@@ -1111,14 +1122,7 @@ fn walk_notification_service(
         if name.starts_with('.') || name == "target" {
             continue;
         }
-        let relative = path
-            .strip_prefix(root)
-            .expect("a read_dir child stays below its root")
-            .components()
-            .map(|part| part.as_os_str().to_str())
-            .collect::<Option<Vec<_>>>()
-            .ok_or_else(|| format!("{} contains a non-UTF-8 source name", path.display()))?
-            .join("/");
+        let relative = canonical_relative(root, &path)?;
         let kind = entry.file_type().map_err(|e| format!("{relative}: {e}"))?;
         if kind.is_symlink() {
             return Err(format!(
@@ -1212,14 +1216,16 @@ fn tree_digest(dir: &Path) -> Result<(String, usize), String> {
     Ok((tree, files.len()))
 }
 
-fn tree_identity(dir: &Path) -> Result<(String, Vec<PathBuf>), String> {
+/// Every file under `dir`, ordered by the UTF-8 bytes of its `/`-joined
+/// relative path so the digest does not vary by host path separator.
+fn tree_identity(dir: &Path) -> Result<(String, Vec<(String, PathBuf)>), String> {
     let mut files = Vec::new();
     walk(dir, dir, &mut files)?;
-    files.sort();
+    files.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
     let mut h = Sha256::new();
-    for rel in &files {
-        let bytes = std::fs::read(dir.join(rel)).map_err(|e| format!("{}: {e}", rel.display()))?;
-        h.update(rel.to_string_lossy().as_bytes());
+    for (name, path) in &files {
+        let bytes = std::fs::read(path).map_err(|e| format!("{name}: {e}"))?;
+        h.update(name.as_bytes());
         h.update([0]);
         h.update((bytes.len() as u64).to_le_bytes());
         h.update(&bytes);
@@ -1247,9 +1253,10 @@ fn toolchain() -> Option<String> {
     version
 }
 
-/// Every file under `root`, as paths relative to it, skipping a `target`
-/// directory (a crate built in place) and dot files.
-fn walk(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
+/// Every file under `root` as `(relative, path)` pairs with `/`-joined
+/// relative names, skipping a `target` directory (a crate built in place) and
+/// dot files.
+fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, PathBuf)>) -> Result<(), String> {
     let entries = std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     for entry in entries {
         let entry = entry.map_err(|e| format!("{}: {e}", dir.display()))?;
@@ -1260,8 +1267,8 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
         }
         if path.is_dir() {
             walk(root, &path, out)?;
-        } else if let Ok(rel) = path.strip_prefix(root) {
-            out.push(rel.to_path_buf());
+        } else {
+            out.push((canonical_relative(root, &path)?, path));
         }
     }
     Ok(())
