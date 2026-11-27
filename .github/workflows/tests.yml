@@ -19,16 +19,17 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
-      # Bound linking and compile concurrency on the 16 GB hosted runner: GNU ld
-      # linking many large test binaries in parallel exhausts runner memory and
-      # kills the job (OOM exit 137 / lost communication). The two
-      # CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_* variables apply only to Linux
-      # host builds; CARGO_PROFILE_DEV_DEBUG and CARGO_BUILD_JOBS apply to every
-      # Cargo build in this job.
+      # Bound linking and compile concurrency on the 16 GB hosted runner:
+      # compiling and linking many large test binaries in parallel exhausts
+      # runner memory and kills the job (OOM exit 137 / lost communication).
+      # The two CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_* variables apply only to
+      # Linux host builds; CARGO_PROFILE_DEV_* and CARGO_BUILD_JOBS apply to
+      # every Cargo build in this job.
       CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_DEV_CODEGEN_UNITS: "4"
       CARGO_BUILD_JOBS: "2"
       CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER: "clang"
-      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=lld -C link-arg=-Wl,--threads=1"
     steps:
       - uses: actions/checkout@v4
 
