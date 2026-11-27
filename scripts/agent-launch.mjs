@@ -1199,7 +1199,7 @@ export function webInputPresent(app, path) {
 }
 
 /** Changed inputs of the build in `dist`; modification times nominate candidates, digests compare their bytes. */
-export function webChanges(dist, app) {
+export function webChanges(dist, app, sourceRoots = webSourceRoots) {
   const marker = resolve(dist, '.exact-build.json');
   if (!existsSync(marker)) return { app: [], shared: [], all: [] };
   const built = JSON.parse(readFileSync(marker, 'utf8'));
@@ -1210,7 +1210,7 @@ export function webChanges(dist, app) {
   const since = typeof built.inputsAt === 'number' ? built.inputsAt - 2000 : statSync(marker).mtimeMs;
   let inputRoots = built.inputRoots;
   // A root query that fails (Cargo's lock, a manifest) leaves the build unverified: the build says why.
-  if (!inputRoots) try { inputRoots = webSourceRoots(app, built.target === 'js'); } catch { return { app: [], shared: [shown(marker)], all: [shown(marker)] }; }
+  if (!inputRoots) try { inputRoots = sourceRoots(app, built.target === 'js'); } catch { return { app: [], shared: [shown(marker)], all: [shown(marker)] }; }
   const recorded = new Set(inputRoots.filter(root => root.file).map(root => resolve(root.file)));
   const unusedContract = notBuildInput(app.dir, shaderWatchRoots(app), new Set());
   const byContractReceipt = path => contract && path.endsWith('.contract') && !recorded.has(resolve(ROOT, path))

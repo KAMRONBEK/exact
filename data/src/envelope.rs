@@ -231,6 +231,7 @@ fn error_from(error: &Json) -> DataError {
 fn request_json(request: &Request) -> Json {
     json!({
         "continuation": request.continuation,
+        "local": request.local.then_some(true),
         "max_response_bytes": match request.http {
             HttpScheduling::Ordered => None,
             HttpScheduling::Independent { max_response_bytes } => Some(max_response_bytes),
@@ -291,7 +292,7 @@ fn request_from(json: &Json) -> Result<Request, DataError> {
         reach: Default::default(),
         listen: None,
         continuation: json["continuation"].as_u64(),
-        local: false,
+        local: json["local"].as_bool().unwrap_or(false),
         http: match &json["max_response_bytes"] {
             Json::Null => HttpScheduling::Ordered,
             value => HttpScheduling::Independent {
@@ -553,6 +554,18 @@ mod tests {
         match apply(outcome, &mut live, &mut logs).unwrap() {
             Answer::Later(r) => assert_eq!(r, storage),
             _ => panic!("a storage yield"),
+        }
+        let mut local_continuation = Request::get("");
+        local_continuation.continuation = Some(9);
+        local_continuation.local = true;
+        let outcome = encode(
+            Ok(Answer::Later(local_continuation.clone())),
+            &mut Store::default(),
+            vec![],
+        );
+        match apply(outcome, &mut live, &mut logs).unwrap() {
+            Answer::Later(r) => assert_eq!(r, local_continuation),
+            _ => panic!("a local continuation yield"),
         }
     }
 

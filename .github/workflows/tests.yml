@@ -97,7 +97,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
     env:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER: "clang"
@@ -172,12 +172,35 @@ jobs:
           mapfile -t files < <(
             bun -e '
               import { readdirSync, statSync } from "node:fs";
-              const shard = Number(process.env.SHARD);
+              const shards = 8, shard = Number(process.env.SHARD);
+              // Measured seconds on ubuntu-24.04 for the heavy Chrome/wasm suites, so
+              // greedy bin-packing keeps every shard under ~20 min (never stacking
+              // several slow suites into one shard and overrunning the hourly cron).
+              const slow = {
+                "forma-server.test.mjs": 1091, "design-tool-inspect.test.mjs": 530,
+                "forma-inspect-pages.test.mjs": 472, "forma-select-walk.test.mjs": 409,
+                "deploy.test.mjs": 389, "app-server.test.mjs": 369,
+                "web-build-rust.test.mjs": 364, "forma-select-reveal.test.mjs": 357,
+                "design-tool-noaxes.test.mjs": 345, "verify.test.mjs": 318,
+                "design-tool-kinds.test.mjs": 250, "app-rust.test.mjs": 235,
+                "design-tool-scrub.test.mjs": 196, "windows.test.mjs": 183,
+                "dev-copies.test.mjs": 175, "agent-test.test.mjs": 164,
+                "app-bake.test.mjs": 147, "smoke-inspect.test.mjs": 143,
+                "app-path.test.mjs": 119, "links.test.mjs": 103,
+                "agent-android.test.mjs": 98,
+              };
+              const weight = f => slow[f] ?? Math.max(1, statSync("scripts/" + f).size / 2048);
               const all = readdirSync("scripts")
                 .filter(f => f.endsWith(".test.mjs") && f !== "package-libraries-link.test.mjs")
-                .sort((a, b) => statSync("scripts/" + b).size - statSync("scripts/" + a).size || a.localeCompare(b))
-                .map(f => "./scripts/" + f);
-              for (const f of all.filter((_, i) => i % 4 === shard)) console.log(f);
+                .sort((a, b) => weight(b) - weight(a) || a.localeCompare(b));
+              const loads = Array(shards).fill(0), buckets = Array.from({ length: shards }, () => []);
+              for (const f of all) {
+                let best = 0;
+                for (let i = 1; i < shards; i++) if (loads[i] < loads[best]) best = i;
+                buckets[best].push("./scripts/" + f);
+                loads[best] += weight(f);
+              }
+              for (const f of buckets[shard]) console.log(f);
             '
           )
           cargo build -q -p contract --bin contract
