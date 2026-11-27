@@ -113,6 +113,9 @@ impl Module {
 
 impl Drop for Module {
     fn drop(&mut self) {
+        for inst in self.instances.values() {
+            inst.wake.kill();
+        }
         // The open frame's drawables, then each canvas's own, before their
         // surfaces.
         self.open = None;

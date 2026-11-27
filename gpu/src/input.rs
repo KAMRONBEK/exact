@@ -247,6 +247,15 @@ impl crate::Module {
     /// Whether a canvas has something to render: inputs it has not shown.
     pub fn dirty(&self, id: u32) -> bool {
         self.has_device(id)
+            && self.instances.get(&id).is_some_and(|i| {
+                i.dirty || i.input_dirty || i.wake_dirty() || i.surface.preparing()
+            })
+    }
+
+    /// Whether canvas `id` has pending work aside from an asynchronous
+    /// [`SurfaceWaker::wake`](crate::SurfaceWaker::wake).
+    pub fn dirty_without_wake(&self, id: u32) -> bool {
+        self.has_device(id)
             && self
                 .instances
                 .get(&id)
@@ -258,9 +267,17 @@ impl crate::Module {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn frame_pending(&self, id: u32) -> bool {
         self.instances.get(&id).is_some_and(|i| {
-            self.seekable
-                || i.dirty
+            #[cfg(windows)]
+            let unpresented = self
+                .window
+                .as_ref()
+                .is_some_and(|w| w.canvas == id && w.rested.is_none());
+            #[cfg(not(windows))]
+            let unpresented = false;
+            i.dirty
                 || i.input_dirty
+                || i.wake_dirty()
+                || unpresented
                 || i.surface.preparing()
                 || !i.messages.is_empty()
                 || i.published.is_some()
@@ -298,9 +315,18 @@ impl crate::Instance {
         }
     }
 
+    pub(crate) fn wake_dirty(&self) -> bool {
+        self.bound && self.wake.is_woken()
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn frame_dirty(&mut self, now_ms: f64, period_ms: f64, seekable: bool) -> bool {
-        if !self.dirty && self.input_dirty && !seekable && !self.surface.preparing() {
+        if !self.dirty
+            && self.input_dirty
+            && !self.wake_dirty()
+            && !seekable
+            && !self.surface.preparing()
+        {
             let decision = self.surface.redraw_for_input(now_ms, period_ms);
             self.drain();
             match decision {
@@ -315,7 +341,7 @@ impl crate::Instance {
                 std::task::Poll::Pending => return false,
             }
         }
-        self.dirty || self.input_dirty || self.surface.preparing()
+        self.dirty || self.input_dirty || self.wake_dirty() || self.surface.preparing()
     }
 }
 

@@ -226,10 +226,10 @@ export async function waitForInflight(deadline, includeRequests = false) {
   }
   return true;
 }
-async function settleGpu() {
+async function settleGpu(wakes = false) {
   loadGpuIfNeeded();
   await host.gpuLoading;
-  return await globalThis.exact.gpu?.settled() ?? [];
+  return await globalThis.exact.gpu?.settled(wakes) ?? [];
 }
 function gpuPendingReply(request, pending) {
   const names = pending.map((item) => item.name ?? "GPU work");
@@ -788,7 +788,7 @@ async function clock(request) {
     }
     // rows a list shows are built at this clock, before it moves (as the JS agent does): their animations start here
     if (gpuInPlay()) {
-      const pending = await settleGpu();
+      const pending = await settleGpu(true);
       if (pending.length) {
         return gpuPendingReply(request, pending);
       }
@@ -837,7 +837,7 @@ async function clock(request) {
       };
     }
     if (gpuInPlay()) {
-      const pending = await settleGpu();
+      const pending = await settleGpu(true);
       if (pending.length) {
         return gpuPendingReply(request, pending);
       }

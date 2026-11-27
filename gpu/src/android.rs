@@ -91,11 +91,15 @@ impl crate::Instance {
         if self.input_dirty {
             record("device-input");
         }
+        if self.wake.is_woken() {
+            record("wake");
+        }
         if self.surface.preparing() {
             record("preparation");
         } else if !self.draw_trace.wants
             && !self.dirty
             && !self.input_dirty
+            && !self.wake.is_woken()
             && self.draw_trace.attempts == 1
             && !self.draw_trace.polled
         {

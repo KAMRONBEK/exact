@@ -228,6 +228,31 @@ extension CanvasesHost {
         return e
     }
 
+    /// A resting surface called `SurfaceWaker::wake` (LLP 1009 D12): mark any
+    /// enclosing `through` ancestor dirty and ask a visible live session for a
+    /// display frame. Under an agent frozen clock (`session.clock != nil`), leave
+    /// the wake latched for the next clock advance.
+    func surfaceWoken() {
+        var dirty = false
+        for e in entries.values where live(e.view.id) === e && e.presentable {
+            guard let m = e.module, m.dirty(e.id) != 0 else { continue }
+            let nested = e.view.canvasAbove.flatMap { entries[$0.id]?.through == true ? $0 : nil }
+            if let outer = nested {
+                outer.needsCapture = true
+                dirty = true
+            } else {
+                #if os(macOS)
+                dirty = true
+                #else
+                if e.view.canvasMetal.map({ shown(e, $0) }) != false { dirty = true }
+                #endif
+            }
+        }
+        if dirty, visible, let session, session.clock == nil {
+            session.frames.requestCanvas()
+        }
+    }
+
     func restoreWorld(_ m: GpuModule, _ e: Entry) {
         guard !e.restoreAttempted, let bytes = worldInput.bytes else { return }
         e.restoreAttempted = true

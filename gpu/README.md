@@ -109,6 +109,22 @@ HDR keeps D12b's encoded extended-sRGB output, including values above 1.
 `apps/caltrain/gpu` is a complete GPU module; the
 [GPU module recipe](../docs/recipes/gpu-module.md) shows a minimal surface.
 
+## Asynchronous surface wakes
+
+A resting surface whose `render` returned `false` receives no further frames until inputs
+or host state change. To request a redraw from a background thread (or a timer/worker on
+the web), implement `Surface::set_waker(&mut self, waker: SurfaceWaker)` (called once at
+surface creation, before any other callback) and call `waker.wake()` after publishing the
+new state (LLP 1009 D12). Multiple wakes before the next render coalesce into one host
+notification; wakes raised during `render` re-arm the next frame; wakes after surface
+destruction or module unload are silent no-ops. Under a seekable agent clock, wakes stay
+latched and settle deterministically on the next clock advance instead of running wall-clock
+frames.
+
+Native hosts register their coalescing callback through the optional C ABI symbol
+`gpu_on_wake(Option<extern "C" fn()>)`, passing `None` before unload to clear and drain any
+in-flight wake. On the web, `SurfaceWaker::wake` notifies `globalThis.exact.gpu.wake()`.
+
 ## Dynamic buffer offsets
 
 Shader reflection (`exact-gpu-reflect`) emits a constant per binding and a `GROUP_n`

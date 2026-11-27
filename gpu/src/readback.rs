@@ -246,13 +246,19 @@ impl Module {
             return None;
         }
         if inst.surface.is_empty() {
-            if let Some(out) = out {
-                out[..len].fill(0);
+            let had_wake = inst.wake.take();
+            if inst.surface.is_empty() {
+                if let Some(out) = out {
+                    out[..len].fill(0);
+                }
+                inst.input_dirty = false;
+                inst.dirty = false;
+                inst.drain();
+                return Some(inst.wake.is_woken());
             }
-            inst.input_dirty = false;
-            inst.dirty = false;
-            inst.drain();
-            return Some(false);
+            if had_wake {
+                inst.wake.rearm();
+            }
         }
         let mut capture_target = ColorTarget::readback(format);
         let presentation_target = inst.config.as_ref().map_or(capture_target, ColorTarget::of);
@@ -297,6 +303,7 @@ impl Module {
         }
         let target = inst.readback.as_mut().unwrap();
         let mut recording = crate::frame::Recording::begin(&gpu.device);
+        inst.wake.take();
         let wants = inst.surface.render(
             &frame,
             &gpu.device,
@@ -390,7 +397,7 @@ impl Module {
                     inst.presented.now();
                 }
                 let wants = wants || (!self.seekable && !inst.surface.frame_ready());
-                Some(wants || present && !ready)
+                Some(wants || (present && !ready) || inst.wake.is_woken())
             }
             Err(e) => {
                 self.error = e;

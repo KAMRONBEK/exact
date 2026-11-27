@@ -884,11 +884,11 @@ impl<D: DataSource> Presenter<D> {
 
     /// Whether the picture is stale.
     pub fn dirty(&self) -> bool {
-        // A hold no picture has carried owes one, to carry it to a present
-        // (LLP 1003.001 D9).
+        // A hold no picture has carried owes one (LLP 1003.001 D9).
         self.dirty
             || self.picture_dirty
             || !self.surfaces.captures.is_empty()
+            || self.surfaces.has_pending_readback(self.host.kernel())
             || self.host.holds_uncarried()
             || self.host.press_picture_owed()
             || self.host.runner().canvas_owed(&|_| true)
@@ -919,7 +919,7 @@ impl<D: DataSource> Presenter<D> {
 
     /// A display needs another animation or GPU canvas frame.
     pub fn wants_display_frames(&self) -> bool {
-        self.wants_frames() || self.surfaces.has_rendered_canvas()
+        self.wants_frames() || self.surfaces.wants_rendered_frame(self.host.kernel())
     }
 
     /// The viewport changed.

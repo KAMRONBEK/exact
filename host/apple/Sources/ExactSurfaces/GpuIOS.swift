@@ -648,7 +648,9 @@ final class CanvasesHost {
     var wantsFrames: Bool {
         guard !modules.isEmpty, visible else { return false }
         return entries.values.contains { e in
-            e.needsFrame(dirty:(e.module?.dirty(e.id) ?? 0) != 0 || e.resized(e.view.canvasMetal.map(box)), editing:e.through && e.view.overlay.map { editing(under: $0) } == true)
+            let offscreen = e.view.canvasMetal.map { !shown(e, $0) } == true && (e.view.canvasAbove.map { entries[$0.id]?.through == true } != true)
+            if offscreen { return false }
+            return e.needsFrame(dirty:(e.module?.dirty(e.id) ?? 0) != 0 || e.resized(e.view.canvasMetal.map(box)), editing:e.through && e.view.overlay.map { editing(under: $0) } == true)
         }
     }
 
@@ -740,9 +742,9 @@ final class CanvasesHost {
             guard live(e.view.id) === e, let metal = e.view.canvasMetal, e.offscreenBox != nil || e.wants && (!settling || e.presentedAt != now) || m.dirty(e.id) != 0 || e.resized(box(metal)) else { continue }
             // D4: a canvas renders when the host judges it on screen. A
             // virtualized list keeps rows mounted past the viewport; their
-            // canvases keep what they want (and their dirty inputs) and render
-            // the first frame they are seen.
-            guard shown(e, metal) else { more = true; continue }
+            // canvases keep what they want (and their dirty inputs or wakes)
+            // and render the first frame they are seen.
+            guard shown(e, metal) else { if e.wants { more = true }; continue }
             // Under its frame-rate cap (`Surface::max_fps`), a canvas skips the frames before its deadline.
             if let due = m.due, due(e.id, now) == 0 { more = true; continue }
             e.shownTick = ticks

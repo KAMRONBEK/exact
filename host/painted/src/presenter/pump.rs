@@ -24,6 +24,7 @@ impl<D: DataSource> Presenter<D> {
         // Completion during the readiness probe must keep its wake, even
         // when there is no request reply to deliver.
         self.agent_reader_turn();
+        self.poll_surfaces();
         self.executor.begin_pump();
         self.host.runner_mut().take_fault_logs();
         if self.unshown {

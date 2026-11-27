@@ -280,5 +280,10 @@ export function helperClassifications(group) {
     ["painted:host/painted/src/presenter/top.rs", "Presenter::surface_clock"],
     ["painted:host/painted/src/presenter/top/status.rs", "Presenter::place_status_items Presenter::status_icon Presenter::status_items Presenter::status_menu Presenter::status_menu_ancestors Presenter::status_menu_pixels Presenter::status_popover Presenter::status_quit_removed Presenter::with_exit"],
   ]),
+  group("surface wakes", ["subscription"], "process-local surface wake pipe for the live host event loop", "UI-owned",
+    "host/painted/src/surfaces/wake.rs and canvas/surface.rs expose the non-blocking socketpair fd signaled by SurfaceWaker::wake (LLP 1009 D12) so Linux and Android event loops poll resting surfaces without creating any runner request.", [
+    ["painted:host/painted/src/canvas/surface.rs", "CanvasHost::surface_wake_fd"],
+    ["painted:host/painted/src/surfaces/wake.rs", "Presenter::surface_wake_fd"],
+  ]),
   ];
 }

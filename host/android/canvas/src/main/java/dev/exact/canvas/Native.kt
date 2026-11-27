@@ -101,7 +101,7 @@ object Native {
     /** The picture [token] reached the screen at [at] (`System.nanoTime`): whether a turn is now wanted. */
     @JvmStatic external fun picturePresented(token: Long, at: Long): Boolean
     /** The wake descriptors, -1 where absent: executor replies, decoded images, the GPU module's acquired images
-     * ([Wakes.ACQUIRED]) and the update store's finished checks. */
+     * ([Wakes.ACQUIRED]), the update store's finished checks, and GPU surface redraw wakes. */
     @JvmStatic external fun fds(): IntArray
     /** A driver from outside scrolls the feed by [dy] px ([ExactActivity.drive]). A finger's scroll is the
      * calls below. */

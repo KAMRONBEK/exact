@@ -472,6 +472,7 @@ macro_rules! canvas_jni {
                 let mut fds = with(|h| h.fds()).unwrap_or([-1, -1]).to_vec();
                 fds.push(with(|h| h.acquire_fd()).unwrap_or(-1));
                 fds.push(with(|h| h.update_fd()).unwrap_or(-1));
+                fds.push(with(|h| h.surface_wake_fd()).unwrap_or(-1));
                 let arr = ((**env).NewIntArray.expect("jni"))(env, fds.len() as i32);
                 ((**env).SetIntArrayRegion.expect("jni"))(env, arr, 0, fds.len() as i32, fds.as_ptr());
                 arr

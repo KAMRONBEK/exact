@@ -183,16 +183,22 @@ impl Module {
             return Some(false);
         }
         if inst.surface.is_empty() {
-            inst.held = None;
-            #[cfg(not(target_arch = "wasm32"))]
-            {
-                inst.scratch = None;
+            let had_wake = inst.wake.take();
+            if inst.surface.is_empty() {
+                inst.held = None;
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    inst.scratch = None;
+                }
+                inst.input_dirty = inst.surface.input_pending();
+                inst.dirty = false;
+                #[cfg(exact_android_draw_trace)]
+                inst.draw_trace.empty();
+                return Some(inst.wake.is_woken());
             }
-            inst.input_dirty = inst.surface.input_pending();
-            inst.dirty = false;
-            #[cfg(exact_android_draw_trace)]
-            inst.draw_trace.empty();
-            return Some(false);
+            if had_wake {
+                inst.wake.rearm();
+            }
         }
         #[cfg(exact_android_draw_trace)]
         inst.draw_trace.attempt();
@@ -317,6 +323,7 @@ impl Module {
         #[cfg(exact_android_draw_trace)]
         let reasons = inst.trace_draw_begin(id, &frame);
         inst.surface.timing(&timing);
+        inst.wake.take();
         let wants = inst.surface.render(
             &frame,
             &gpu.device,
@@ -328,9 +335,10 @@ impl Module {
         inst.drain();
         let mut failure = inst.surface.take_error();
         let ready = cfg!(target_arch = "wasm32") || inst.surface.frame_presentable();
+        let woken = inst.wake.is_woken();
         let cap = inst.surface.max_fps();
         inst.cadence
-            .after(cap, frame.now_ms, self.period_ms, wants || !ready);
+            .after(cap, frame.now_ms, self.period_ms, wants || !ready || woken);
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(s) = inst
             .scratch
@@ -387,7 +395,7 @@ impl Module {
             drawn,
             texture,
             failed,
-            request: off_thread && wants && ready,
+            request: off_thread && (wants || woken) && ready,
             buffer: None,
         });
         if let Some(SurfaceError(e)) = failure {
@@ -396,7 +404,7 @@ impl Module {
         }
         inst.input_dirty = inst.surface.input_pending();
         inst.dirty = !ready;
-        Some(wants || !ready)
+        Some(wants || !ready || woken)
     }
 
     /// [`Module::render`] for a canvas with buffers: the frame goes into
@@ -450,6 +458,7 @@ impl Module {
         #[cfg(exact_android_draw_trace)]
         let reasons = inst.trace_draw_begin(id, &frame);
         inst.surface.timing(&timing);
+        inst.wake.take();
         let wants = inst.surface.render(
             &frame,
             &gpu.device,
@@ -468,9 +477,10 @@ impl Module {
             }
         };
         let ready = inst.surface.frame_presentable();
+        let woken = inst.wake.is_woken();
         let cap = inst.surface.max_fps();
         inst.cadence
-            .after(cap, frame.now_ms, self.period_ms, wants || !ready);
+            .after(cap, frame.now_ms, self.period_ms, wants || !ready || woken);
         let drawn = inst.surface.frame_ready() && failure.is_none();
         #[cfg(exact_android_draw_trace)]
         inst.trace_draw_end(&frame, id, reasons, wants, drawn);
@@ -492,7 +502,7 @@ impl Module {
         }
         inst.input_dirty = inst.surface.input_pending();
         inst.dirty = !ready;
-        Some(wants || !ready)
+        Some(wants || !ready || woken)
     }
 
     /// Submit the open frame once, then present each canvas's drawable in

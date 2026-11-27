@@ -96,6 +96,11 @@ impl<D: DataSource + Default> CanvasHost<D> {
         crate::surfaces::acquire_fd()
     }
 
+    /// The descriptor signaled when a resting GPU surface calls `SurfaceWaker::wake`.
+    pub fn surface_wake_fd(&self) -> i32 {
+        self.p.surface_wake_fd()
+    }
+
     /// Drain drawable arrivals and finish owed canvases while the reader runs.
     pub fn acquired(&mut self, running: bool) {
         self.p.render_starved(running);

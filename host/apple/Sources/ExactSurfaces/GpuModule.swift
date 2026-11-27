@@ -414,6 +414,7 @@ final class GpuModule {
         if module.starved != nil { sym("gpu_on_acquire", OnAcquireFn.self)?(gpuAcquired) }
         module.seen = sym("gpu_seen", WantsFn.self)
         if module.seen != nil { sym("gpu_on_presented", OnAcquireFn.self)?(gpuPresented) }
+        sym("gpu_on_wake", OnAcquireFn.self)?(gpuWoken)
         return .success(module)
     }
 
@@ -442,6 +443,13 @@ final class GpuModule {
     static func acquired() {
         for case .success(let module) in shared.values {
             for owner in module.canvases.allObjects { owner.renderStarved() }
+        }
+    }
+
+    /// A resting surface called `SurfaceWaker::wake` (LLP 1009 D12).
+    static func woken() {
+        for case .success(let module) in shared.values {
+            for owner in module.canvases.allObjects { owner.surfaceWoken() }
         }
     }
 
@@ -561,6 +569,30 @@ private enum AcquiredPass {
     nonisolated(unsafe) static var queued = false
     static let lock = NSLock()
     /// True when this call queued the pass.
+    static func schedule() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        if queued { return false }
+        queued = true
+        return true
+    }
+    static func begin() {
+        lock.lock(); queued = false; lock.unlock()
+    }
+}
+
+/// The module's callback on any thread when a resting surface calls
+/// `SurfaceWaker::wake` (LLP 1009 D12): coalesces onto one main-thread pass.
+private let gpuWoken: GpuModule.AcquiredFn = {
+    guard WakePass.schedule() else { return }
+    DispatchQueue.main.async {
+        WakePass.begin()
+        GpuModule.woken()
+    }
+}
+
+private enum WakePass {
+    nonisolated(unsafe) static var queued = false
+    static let lock = NSLock()
     static func schedule() -> Bool {
         lock.lock(); defer { lock.unlock() }
         if queued { return false }

@@ -158,7 +158,7 @@ const pendingRecovery = () => {
   const entries = [...surfaces.values()].filter(entry => !entry.terminal);
   return entries.length ? entries.map(entry => ({name:`GPU recovery ${entry.name}`,canvas:entry.view})) : [{name:"GPU recovery"}];
 };
-async function settleModule() {
+async function settleModule(wakes = false) {
   await ready;
   await Promise.all([...surfaces.values()].map(e => e.refusalPage?.ready));
   if (trapped()) return [];
@@ -166,35 +166,28 @@ async function settleModule() {
   while ((recoveringDevice || recoveryTimer) && performance.now() < deadline) await new Promise(resolve => setTimeout(resolve, 0));
   if (recoveringDevice || recoveryTimer) return pendingRecovery();
   const pending = await delivery.settled(() => surfaces.values());
-  // Presentation keeps at least the 2.5 s it has when nothing is delivered,
-  // counted from the moment every asset is in: a world declaring hundreds of
-  // models (garden's 202) can spend the shared wait on delivery and leave its
-  // first frame's preparation none. A recovery that begins while presenting
-  // is waited for within the same budget.
   const presented = Math.max(deadline, performance.now() + 2500);
   if (!pending.length) {
-      // Agent operations return after presentation reaches the committed clock,
-      // including a child-text update published by the rendered world.
-      // GPU pipeline validation completes on browser promises, independently of
-      // simulation time. Surface::preparing keeps gpu_dirty true until usable.
-      if (exact.now) for (;;) {
+      // Settle preparation and committed-clock renders; pure async wakes stay
+      // latched until an explicit clock step (`wakes = true`, bounded once).
+      const nonWake = e => gpu.gpu_dirty_no_wake ? gpu.gpu_dirty_no_wake(e.id) : gpu.gpu_dirty(e.id);
+      if (exact.now) for (const wokeOnce = new Set(); ;) {
         if (recoveringDevice || recoveryTimer) {
-          if (performance.now() >= presented) {
-            pending.push(...pendingRecovery());
-            break;
-          }
+          if (performance.now() >= presented) { pending.push(...pendingRecovery()); break; }
           await new Promise(resolve => setTimeout(resolve, 0));
           continue;
         }
         if (trapped()) return [];
         let drew = false;
-        for (const entry of surfaces.values()) if (entry.id && !entry.terminal && (gpu.gpu_dirty(entry.id) || entry.renderedAt !== exact.now())) {
-          render(entry, exact.now()); drew = true;
+        for (const entry of surfaces.values()) if (entry.id && !entry.terminal) {
+          const base = nonWake(entry) || entry.renderedAt !== exact.now();
+          const woke = !base && wakes && !wokeOnce.has(entry.id) && gpu.gpu_dirty(entry.id);
+          if (base || woke) { if (woke) wokeOnce.add(entry.id); render(entry, exact.now()); drew = true; }
         }
         flush();
         if (!drew) break;
         if (performance.now() >= presented) {
-          for (const entry of surfaces.values()) if (entry.id && !entry.terminal && gpu.gpu_dirty(entry.id)) pending.push({name:`GPU presentation ${entry.name}`,canvas:entry.view});
+          for (const entry of surfaces.values()) if (entry.id && !entry.terminal && nonWake(entry)) pending.push({name:`GPU presentation ${entry.name}`,canvas:entry.view});
           break;
         }
         await new Promise(resolve => setTimeout(resolve, 0));
@@ -204,8 +197,8 @@ async function settleModule() {
   return pending;
 }
 
-async function settled() {
-  try { return await settleModule(); }
+async function settled(wakes = false) {
+  try { return await settleModule(wakes); }
   catch (error) { retainTrap(error); return []; }
 }
 
@@ -529,7 +522,7 @@ function render(entry, now) {
 // lattice (pace.js): a world drawn at the raw timestamp judders by the
 // timestamp's own jitter. The agent's clock (exact.now) bypasses this in clockFor.
 const pace = pacer();
-let liveWindow = false; // `perf frames live` (frames.js liveFrames): the world draws on its own frames at the lent clock
+let liveWindow = false, wakeQueued = false; // `perf frames live` (frames.js liveFrames): the world draws on its own frames at the lent clock
 let frameAt = null; // the last paced frame time: a render outside the frame loop redraws at it, never ahead of it
 let sentPeriod = 0, frameGeneration = 0, frameRaw = 0;
 function frame(now) {
@@ -996,6 +989,15 @@ function worlds(request) {
 
 const api = {
   deviceLost() { if (recoveringDevice) lossDuringRecovery = true; else queueMicrotask(() => recoverDevice()); },
+  wake() {
+    if (wakeQueued) return;
+    wakeQueued = true;
+    queueMicrotask(() => {
+      wakeQueued = false;
+      if (!loaded || recoveringDevice || terminalDevice || trapped() || (exact.now && !liveWindow)) return;
+      if ([...surfaces.values()].some(e => e.id && !e.terminal && gpu.gpu_dirty(e.id))) schedule();
+    });
+  },
   drainRecords,
   syncPerformance,
   agent,
@@ -1137,7 +1139,8 @@ const api = {
   // The existing clock loop owns the 16-round bound; this is its next candidate.
   clock(settle) {
     const world = worlds({ op: "clock", settle });
-    const pending = settle && world.some((w) => w.quiescent === false);
+    const dirty = loaded && !trapped() && [...surfaces.values()].some(e => e.id && !e.terminal && gpu.gpu_dirty(e.id));
+    const pending = settle && (world.some((w) => w.quiescent === false) || dirty);
     const candidates = world.filter((w) => w.quiescent === false && Number.isFinite(w.settleAt)).map((w) => w.settleAt);
     const ticks = world.map(w => w.nextTickAt).filter(Number.isFinite);
     return { pending, settleAt: candidates.length ? Math.max(...candidates) : undefined, nextTickAt: ticks.length ? Math.min(...ticks) : undefined,

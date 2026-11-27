@@ -278,6 +278,7 @@ pub(crate) fn run<D: DataSource>(
         let mut fds = events.fds();
         fds.push(p.executor_fd());
         fds.push(p.image_fd());
+        fds.push(p.surface_wake_fd());
         if let Some(fd) = p.content_region_fd() {
             fds.push(fd);
         }

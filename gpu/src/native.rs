@@ -301,6 +301,7 @@ pub fn storage_path(bytes: &[u8]) -> Option<std::path::PathBuf> {
 /// wgpu's own thread-locals may already be gone by then, and dropping a device
 /// without them aborts the process.
 pub fn unload() {
+    crate::wake::unload();
     let module = MODULE.with(|m| m.borrow_mut().take());
     drop(module);
 }
@@ -824,6 +825,11 @@ pub fn seen(id: u32) -> bool {
 /// (whose `presented` changed) on its own thread. `None` removes it.
 pub fn on_presented(callback: Option<extern "C" fn()>) {
     crate::frame::on_presented(callback);
+}
+
+/// Register the presenter's callback for [`crate::SurfaceWaker::wake`]; `None` removes and drains it.
+pub fn on_wake(callback: Option<extern "C" fn()>) {
+    crate::wake::on_wake(callback);
 }
 
 /// Drop a canvas's surface.
@@ -1437,6 +1443,12 @@ macro_rules! module {
         #[no_mangle]
         pub extern "C" fn gpu_on_presented(callback: Option<extern "C" fn()>) {
             $crate::native::on_presented(callback)
+        }
+
+        /// The presenter's callback for `SurfaceWaker::wake` (LLP 1009 D12); null removes and drains it.
+        #[no_mangle]
+        pub extern "C" fn gpu_on_wake(callback: Option<extern "C" fn()>) {
+            $crate::native::on_wake(callback)
         }
 
         /// Drop a canvas's surface.

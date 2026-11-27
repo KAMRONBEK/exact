@@ -72,6 +72,8 @@ pub use tier::{set_thread_tier, set_tier, tier, GpuTier};
 #[cfg(not(target_arch = "wasm32"))]
 mod storage;
 mod uniform;
+mod wake;
+pub use wake::SurfaceWaker;
 #[cfg(windows)]
 mod window;
 pub use uniform::FrameUniform;
@@ -219,6 +221,11 @@ impl AssetChanges {
 
 /// What an app implements per canvas.
 pub trait Surface {
+    /// Receive this canvas's wake handle, once at surface creation before any
+    /// other callback (LLP 1009 D12). Call [`SurfaceWaker::wake`] from any
+    /// thread when asynchronous work finishes and a resting canvas needs
+    /// another frame.
+    fn set_waker(&mut self, _waker: SurfaceWaker) {}
     /// This canvas's native session directories, once before its first bind.
     /// Copy paths you keep; create directories only when needed. The paths map
     /// to `app:/data`, `app:/cache` and `app:/tmp`, including named agent stores.
@@ -679,6 +686,7 @@ struct Instance {
     destination: ColorTarget,
     dirty: bool,
     input_dirty: bool,
+    wake: wake::WakeState,
     #[cfg(exact_android_draw_trace)]
     draw_trace: android::DrawTrace,
     /// Its first frame has been handed to the compositor (`Module::seen`);
@@ -933,13 +941,17 @@ impl Module {
         else {
             return self.fail(format!("no surface named `{name}` in this module"));
         };
-        self.insert(name, factory(), None)
+        let mut surface = factory();
+        let (wake, waker) = wake::WakeState::new();
+        surface.set_waker(waker);
+        self.insert(name, surface, wake, None)
     }
 
     fn insert(
         &mut self,
         name: &str,
         mut surface: Box<dyn Surface>,
+        wake: wake::WakeState,
         presentation: Option<(wgpu::Surface<'static>, wgpu::SurfaceConfiguration)>,
     ) -> Option<u32> {
         self.next += 1;
@@ -995,6 +1007,7 @@ impl Module {
                 destination,
                 dirty: false,
                 input_dirty: false,
+                wake,
                 #[cfg(exact_android_draw_trace)]
                 draw_trace: Default::default(),
                 seen: Default::default(),
@@ -1307,6 +1320,9 @@ impl Module {
     /// Drop a canvas's surface.
     pub fn destroy(&mut self, id: u32) {
         self.settle(id);
+        if let Some(inst) = self.instances.get(&id) {
+            inst.wake.kill();
+        }
         self.release(id);
         self.instances.remove(&id);
     }

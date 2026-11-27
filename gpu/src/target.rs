@@ -153,12 +153,14 @@ impl Module {
         if self.frame_samples && caps.usages.contains(wgpu::TextureUsages::COPY_SRC) {
             config.usage |= wgpu::TextureUsages::COPY_SRC;
         }
-        let surface = factory();
+        let mut surface = factory();
+        let (wake, waker) = crate::wake::WakeState::new();
+        surface.set_waker(waker);
         let hdr = configure(&*surface, &gpu.adapter, &caps, &mut config);
         config.present_mode = wgpu::PresentMode::AutoVsync;
         config.desired_maximum_frame_latency = FRAME_LATENCY;
         swapchains(|| target.configure(&gpu.device, &config));
-        let id = self.insert(name, surface, Some((target, config)))?;
+        let id = self.insert(name, surface, wake, Some((target, config)))?;
         if let Some(inst) = self.instances.get_mut(&id) {
             inst.hdr = hdr;
             inst.alpha_modes = caps.alpha_modes;

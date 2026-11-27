@@ -1348,6 +1348,10 @@ impl<D: DataSource + Default> CanvasHost<D> {
         if let Some(e) = self.p.pump(now) {
             eprintln!("exact: {e}");
         }
+        #[cfg(target_os = "android")]
+        if agent::clock(&self.p).is_none() && self.p.has_pending_window_canvas() {
+            self.surfaces = true;
+        }
         // Read on an idle screen too, or its level-triggered descriptor
         // wakes the looper forever (LLP 1030.006 D5); a line asks for a
         // turn, which applies an `immediate` activation it staged.

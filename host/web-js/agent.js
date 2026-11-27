@@ -370,7 +370,7 @@ export function install(exact, { passive = false } = {}) {
   const unwaited = () => holds().length + (exact.extensions?.spans?.() ?? 0);
   // Asks the server holds (`exactHeld`, LLP 1016.000 D9): no clock waited on them; the reply says which.
   const heldNamed = r => { const h = exact.heldAsks?.() ?? []; return h.length && r && !r.error ? { ...r, held: h.length, heldTargets: h.map(x => x.name) } : r; };
-  const settleGpu = async () => await exact.gpu?.settled?.() ?? [];
+  const settleGpu = async (wakes = false) => await exact.gpu?.settled?.(wakes) ?? [];
   const gpuPendingReply = (req, pending) => {
     const names = pending.map(item => item.name ?? 'GPU work');
     return req.op === 'clock' ? heldNamed({ ...tags(), settled: false, reason: 'gpu', pending: names })
@@ -545,7 +545,7 @@ export function install(exact, { passive = false } = {}) {
             // round, so a run of sends never spends the rounds. Past the deadline,
             // or 4096 stops, the rest is one advance.
             // An answer's own timer (ts-fetch.js) is due as a task is: the settle goes to it, while its answer is live.
-            const gpuPending = await settleGpu();
+            const gpuPending = await settleGpu(true);
             if (gpuPending.length) return gpuPendingReply(req, gpuPending);
             world = exact.gpu?.clock?.(true) ?? {};
             const at = exact.clock.now, epoch = exact.clock.epoch, to = Math.max(anim.settle(), world.settleAt ?? 0, ...exact.clock.timers.filter(t => t.data && t.live()).map(t => t.due));
@@ -570,7 +570,7 @@ export function install(exact, { passive = false } = {}) {
             seek();
             await new Promise(r => requestAnimationFrame(() => r()));
           }
-          const gpuPending = await settleGpu();
+          const gpuPending = await settleGpu(true);
           if (gpuPending.length) return gpuPendingReply(req, gpuPending);
           const waiting = holds();
           if (waiting.length) return { clock: exact.clock.now, settled: false, reason: 'device', tickets: waiting.map(h => h.ticket) };
@@ -612,7 +612,7 @@ export function install(exact, { passive = false } = {}) {
         for (const end = performance.now() + 20000; exact.extensions?.polling?.() && performance.now() < end;) await new Promise(r => setTimeout(r, 1));
         seek();
         await new Promise(r => requestAnimationFrame(() => r()));
-        const gpuPending = await settleGpu();
+        const gpuPending = await settleGpu(true);
         if (gpuPending.length) return gpuPendingReply(req, gpuPending);
         // Requests still in flight on real time, which a jump does not wait for (`clock settle` does): the driver says so.
         const inflight = exact.inflight.n - unwaited(), b = exact.data?.background?.(), background = b ? b.queued + b.inFlight : 0;
