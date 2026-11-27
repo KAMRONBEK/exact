@@ -719,6 +719,20 @@ fn a_symbol_effect_is_the_stand_ins_property() {
     }
 }
 
+#[test]
+fn accent_color_auto_resets_authored_spinner_accent() {
+    use exact_kernel::StyleId;
+    assert_eq!(
+        declared(&[(StyleId::AccentColor, text("auto"))]),
+        "accent-color:auto;--exact-accent:AccentColor;--exact-accent-said:var(--exact-accent-design);"
+    );
+    let authored = declared(&[(StyleId::AccentColor, text("#ff0000"))]);
+    assert_eq!(
+        authored,
+        "accent-color:rgba(255,0,0,1);--exact-accent:rgba(255,0,0,1);--exact-accent-said:rgba(255,0,0,1);"
+    );
+}
+
 /// The pressed paint is three custom properties input-glue.js reads from
 /// the pressed element's own style (LLP 1061 D7); a written 1 is still
 /// the author's, and a clear writes nothing.

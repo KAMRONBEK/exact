@@ -514,9 +514,11 @@ export function renderer(dist, { closed = false, buildOrigin, read = path => rea
     } finally { clearTimeout(timer); made?.dispose(); }
   };
   render.markdown = async () => {
-    const { ctx } = realm();
-    await ctx.__start();
-    return ctx.__markdown();
+    const made = realm();
+    try {
+      await made.ctx.__start();
+      return await made.ctx.__markdown();
+    } finally { made.dispose(); }
   };
   return render;
 }

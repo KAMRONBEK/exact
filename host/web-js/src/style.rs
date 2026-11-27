@@ -1093,6 +1093,7 @@ pub fn style_writes(id: u16, timeline: bool, written: bool) -> Result<Vec<Write>
         StyleId::AccentColor => vec![
             with("accent-color", "v=>v"),
             with("--exact-accent", "v=>v==null||typeof v===\"string\"&&v.trim()===\"var(--exact-accent, AccentColor)\"?null:/^\\s*auto\\s*$/i.test(v)?\"AccentColor\":typeof v===\"string\"&&v.trim()===\"var(--exact-accent-text, AccentColorText)\"?\"AccentColorText\":v"),
+            with("--exact-accent-said", "v=>typeof v===\"string\"&&/^\\s*auto\\s*$/i.test(v)?\"var(--exact-accent-design)\":null"),
         ],
         StyleId::PositionTryFallbacks => vec![with(
             "position-try-fallbacks",

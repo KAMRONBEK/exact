@@ -607,6 +607,11 @@ fn rules(plan: &Plan, props: &[(String, String)]) -> (String, Vec<String>) {
                     css,
                     "{selector}[data-x-accent=\"{prop}\"]{{--exact-accent-said:var(--exact-accent)}}"
                 );
+            } else {
+                let _ = write!(
+                    css,
+                    "{selector}[data-x-accent=\"{prop}\"]{{--exact-accent-said:var(--exact-accent-design)}}"
+                );
             }
         }
     }

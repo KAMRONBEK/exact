@@ -576,7 +576,9 @@ pub(crate) fn css_text_in(
                 // --exact-accent: what a spinner reads (LLP 1121 D9). The
                 // page's sheet takes a bound or live one from the element
                 // that writes --exact-accent itself (neutral.css).
-                if !auto {
+                if auto {
+                    out.push_str("--exact-accent-said:var(--exact-accent-design);");
+                } else {
                     out.push_str("--exact-accent-said:");
                     declared(&mut out, id, &value);
                     out.push(';');

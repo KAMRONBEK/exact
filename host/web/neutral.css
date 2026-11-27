@@ -298,7 +298,8 @@
      live rows, not `auto`'s AccentColor nor inherit/unset) or takes a mode's (modes.rs), or the design's AccentColor
      at :root; not the page's own accent, which :root keeps in
      --exact-accent); else the secondary label's ink. */
-  #exact-root [style*="--exact-accent:"]:not([style*="--exact-accent: AccentColor;"], [style*="--exact-accent: inherit;"], [style*="--exact-accent: unset;"]) { --exact-accent-said: var(--exact-accent); }
+  #exact-root [style*="--exact-accent:"]:not([style*="--exact-accent: AccentColor;"], [style*="--exact-accent:AccentColor;"], [style$="--exact-accent: AccentColor"], [style$="--exact-accent:AccentColor"], [style*="--exact-accent: inherit;"], [style*="--exact-accent:inherit;"], [style$="--exact-accent: inherit"], [style$="--exact-accent:inherit"], [style*="--exact-accent: unset;"], [style*="--exact-accent:unset;"], [style$="--exact-accent: unset"], [style$="--exact-accent:unset"]) { --exact-accent-said: var(--exact-accent); }
+  #exact-root :is([style*="--exact-accent: AccentColor;"], [style*="--exact-accent:AccentColor;"], [style$="--exact-accent: AccentColor"], [style$="--exact-accent:AccentColor"]) { --exact-accent-said: var(--exact-accent-design); }
   [data-exact-progress]:not([data-exact-said~="color"])::before { background: conic-gradient(transparent 10%, var(--exact-accent-said, var(--exact-secondary-label))); }
   @media (forced-colors: active) { #exact-root [data-exact-progress]::before { background: none; } }
 

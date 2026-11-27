@@ -1,4 +1,4 @@
-import { navigation, clickFromInput, suppressPointerClick, focusStack, viewChildren, viewParent } from './navigation.js';
+import { navigation, clickFromInput, suppressPointerClick, focusStack, viewChildren, viewParent, modalLayers } from './navigation.js';
 import { receive, takes } from './drag-in.js';
 // Input-only glue: loaded after the baked first pixel, independently of data readiness.
 import "./prompt-glue.js"; // a prompt's Return
@@ -233,13 +233,14 @@ export function createInputHandlers({ root, views, retiredViews, ready, inertAnc
         && event.altKey === modifiers.has("Alt") && event.shiftKey === modifiers.has("Shift")
         && (event.key?.toLowerCase() === key.toLowerCase() || physical === key.toLowerCase());
     };
-    // Nothing behind the frontmost modal — a modal `dialog`, or the last
-    // shown `aria-modal` view (gallery F22) — and never Enter or Space while
-    // the focus is a control they activate (onboarding F27).
-    const modal = document.activeElement.closest("dialog:modal") ?? [...root.querySelectorAll('[aria-modal="true"]')].findLast(m => m.getClientRects().length && !inertAncestor(m));
+    // Nothing behind the frontmost modal — a modal `dialog` (and popovers opened
+    // above it), or the last visible `aria-modal` view (gallery F22) — and never
+    // Enter or Space while the focus is a control they activate (onboarding F27).
+    const layers = modalLayers();
+    const ariaModal = [...root.querySelectorAll('[aria-modal="true"]')].findLast(m => (!layers || layers.some(l => l.contains(m))) && m.getClientRects().length && !inertAncestor(m) && getComputedStyle(m).visibility === "visible");
     const focus = document.activeElement, activates = focus?.matches?.("button, a[href], summary, input[type=checkbox], input[type=radio], [data-exact-on~=press]");
     for (const el of root.querySelectorAll("button[aria-keyshortcuts]")) {
-      if (modal && !modal.contains(el)) continue;
+      if (ariaModal ? !ariaModal.contains(el) : layers && !layers.some(l => l.contains(el))) continue;
       if (activates && focus !== el && (event.key === "Enter" || event.key === " ") && !(event.metaKey || event.ctrlKey || event.altKey || event.shiftKey)) continue;
       // A hidden Back control takes its shortcut through the visible bar button, in a header or in content.
       const target = backButton(el) ?? el;

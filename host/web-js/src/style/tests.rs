@@ -179,6 +179,10 @@ fn a_bound_accent_role_leaves_the_inherited_accent_unset() {
             (
                 "--exact-accent",
                 serde_json::json!([null, null, "#5856d6", "AccentColor", "inherit"])
+            ),
+            (
+                "--exact-accent-said",
+                serde_json::json!([null, null, null, "var(--exact-accent-design)", null])
             )
         ]
     );
