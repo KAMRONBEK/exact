@@ -20,14 +20,16 @@ jobs:
     timeout-minutes: 90
     env:
       # Bound linking and compile concurrency on the 16 GB hosted runner:
-      # compiling and linking many large test binaries in parallel exhausts
-      # runner memory and kills the job (OOM exit 137 / lost communication).
+      # compiling and linking two large integration test crates concurrently
+      # exhausts runner memory and kills the job (OOM exit 137 / shutdown 143).
+      # CARGO_BUILD_JOBS=1 runs one rustc/lld at a time while 4 codegen units
+      # still use all 4 vCPUs during LLVM codegen.
       # The two CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_* variables apply only to
       # Linux host builds; CARGO_PROFILE_DEV_* and CARGO_BUILD_JOBS apply to
       # every Cargo build in this job.
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_DEV_CODEGEN_UNITS: "4"
-      CARGO_BUILD_JOBS: "2"
+      CARGO_BUILD_JOBS: "1"
       CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER: "clang"
       CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=lld -C link-arg=-Wl,--threads=1"
     steps:
