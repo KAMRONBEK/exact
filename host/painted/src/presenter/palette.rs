@@ -418,6 +418,14 @@ pub(super) struct State {
     /// and the palette, whose roles past the table's (read by [`material`])
     /// can change while the table does not.
     seen: Option<(u64, Palette)>,
+    revision: u64,
+}
+
+impl State {
+    /// Monotonic counter bumped whenever the reported or seeded palette changes.
+    pub(super) fn revision(&self) -> u64 {
+        self.revision
+    }
 }
 
 impl<D: DataSource> Presenter<D> {
@@ -503,6 +511,7 @@ impl<D: DataSource> Presenter<D> {
         }
         let first = self.colors.seen.is_none();
         self.colors.seen = Some((generation, *palette));
+        self.colors.revision += 1;
         self.host.colors_changed(first);
         self.brush.colors_changed();
         self.dirty = true;

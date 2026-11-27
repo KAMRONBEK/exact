@@ -53,11 +53,15 @@ impl<D: DataSource> Presenter<D> {
                 enabled: !choice.disabled,
                 cancel: false,
                 checked: chosen == Some(at),
+                checkable: true,
                 opens: None,
             })
         });
         let rows: Vec<Entry> = rows.collect();
-        (!rows.is_empty()).then_some(Plan::Menu(rows))
+        (!rows.is_empty()).then_some(Plan::Menu {
+            entries: rows,
+            surface: None,
+        })
     }
 
     /// How wide select `id` is painted: its menu is no narrower.

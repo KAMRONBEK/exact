@@ -456,7 +456,7 @@ impl<D: DataSource> Presenter<D> {
                     return None;
                 }
                 let plan = self.surface_plan(node.id, modal)?;
-                (!(modal && matches!(plan, super::Plan::Menu(_)))).then_some((node.id, plan))
+                (!(modal && matches!(plan, super::Plan::Menu { .. }))).then_some((node.id, plan))
             })
             .flatten();
         if valid.is_some() {

@@ -38,7 +38,7 @@ use super::top::SurfacePainter;
 use super::*;
 
 mod badge;
-mod look;
+pub(super) mod look;
 use crate::paint::ripple::Ripple;
 pub use look::{Badge, BadgePicture, Bottom, Button, Tab, Target, Top, What};
 use look::{BarColors, Inputs, Layout, Lit};

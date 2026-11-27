@@ -43,7 +43,7 @@ use material_colors::{color::Rgb, dynamic_color::DynamicScheme, scheme::variant:
 use std::rc::Rc;
 use tiny_skia::Transform;
 
-pub(super) mod ink;
+pub(in crate::presenter) mod ink;
 use ink::Accent;
 
 const TITLE_LARGE: Type = Type(22.0, 28.0, 400, 0.0);

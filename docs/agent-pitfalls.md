@@ -801,6 +801,15 @@ This list holds what the [agent guide](contract-for-agents.md)'s rules don't mak
   tap anywhere in the row reaches it), the web and macOS a field with its line, corners
   and height (LLP 1116.005 D2), as `apps/shelf`'s add sheet shows. (Shelf recipe,
   2026-10-10; round 7, 2026-10-11.)
+- **A `popover="auto" role="menu"` styled with a literal `background-color` for the web
+  keeps that fill on Android.** Cause: Android's projected dropdown menu honors an
+  explicitly written `background-color` and uniform circular `border-radius` on the menu
+  popover container (LLP 1115.001 D10), deriving legible ink from the fill's luminance;
+  if you write a hardcoded light color such as `#ffffff` solely for the browser, Android
+  will paint a light menu in dark mode too. Fix: omit `background-color` to inherit the
+  platform's Material surface, or use `light-dark(...)` / system color roles so light and
+  dark modes both look right. Non-uniform or elliptical `border-radius` falls back to
+  Material's 4 dp and logs once. (LLP 1115.001 D10, #1956.)
 
 ## Porting a React Native app
 
