@@ -984,8 +984,7 @@ export function bakedBackendOrigin(baked) {
   const moduleReceipt = resolve(baked, 'app.module.json');
   return existsSync(moduleReceipt) ? JSON.parse(readFileSync(moduleReceipt, 'utf8')).backendOrigin : null;
 }
-
-function completeBuild(app, platform, target, graph, messages, roots, env, prepared = new Map(), generatedInputs = {products:[], watchedDirectories:[]}, privacyManifests = [], since = Infinity) {
+function completeBuild(app, platform, target, graph, messages, roots, env, prepared = new Map(), generatedInputs = {products:[], watchedDirectories:[]}, privacyManifests = [], since = Infinity, captureBake) {
   const scripts = messages.filter((m) => m.reason === 'build-script-executed' && graph.roles.has(m.package_id));
   const targetDirs = [app.target, graph.metadata.build_directory].map(dir => resolve(dir, target));
   const roleOf = (path) => targetDirs.some(dir => under(dir, path)) ? target : 'host';
@@ -1070,6 +1069,7 @@ function completeBuild(app, platform, target, graph, messages, roots, env, prepa
       for (const path of compilerPaths(dep,compiler.cargo.workspace)) add(path, false, pkg);
     }
     const output = scriptOutput(m); const environment = [];
+    if (resolve(m.out_dir) === rootOutput && baked === rootOutput) captureBake?.(baked, output, compat.embedded?.plan?.sha256);
     for (const line of output.split('\n')) {
       const changed = /^cargo::?(rerun-if-changed|metadata=exact-optional-input)=(.*)$/.exec(line);
       if (changed) sourceInputs.add(resolve(dirname(pkg.manifest_path), changed[2]));
@@ -1331,7 +1331,7 @@ export function buildBake(app, platform, target, options = {}) {
     // host bake output to classify when only the surface graph was selected.
     return {products:messages.filter(m=>m.reason==='compiler-artifact' && bakeSelection(graph,'gpu').some(pkg=>pkg.id===m.package_id)).flatMap(m=>m.filenames).map(f=>preparedProducts.get(f)??f)};
   }
-  const receipt=completeBuild(app,platform,target,graph,messages,roots,env,preparedProducts,generatedInputs,privacyManifests,started);
+  const receipt=completeBuild(app,platform,target,graph,messages,roots,env,preparedProducts,generatedInputs,privacyManifests,started,options.captureBake);
   if (options.record !== false) writeFileSync(resolve(env.EXACT_BAKE_OUTPUT,`${platform}-${target}.build.json`),JSON.stringify(receipt)+'\n');
   options.capture?.(receipt);
   return receipt;

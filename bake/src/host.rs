@@ -134,9 +134,18 @@ pub fn bake<D: DataSource>(
     } else {
         None
     };
-    let (plan, map) =
-        contract::compile_path_all(canonical.as_deref().unwrap_or(&source), canonical.is_some())
-            .unwrap_or_else(|errors| panic!("app.contract: {}", errors[0]));
+    let path = canonical.as_deref().unwrap_or(&source);
+    let mapped = canonical.is_some();
+    let project_swift = matches!(platform, "ios" | "macos") && {
+        println!("cargo:rerun-if-env-changed=EXACT_FORMA_SWIFT");
+        env::var("EXACT_FORMA_SWIFT").as_deref() == Ok("1")
+    };
+    let (plan, map, swift) = if project_swift {
+        contract::forma_gen::compile_path_swift(path, mapped)
+    } else {
+        contract::compile_path_all(path, mapped).map(|(plan, map)| (plan, map, None))
+    }
+    .unwrap_or_else(|errors| panic!("app.contract: {}", errors[0]));
     if shape.shortcuts {
         for warning in contract::shortcut_findings(&app.join("app.contract")).unwrap_or_default() {
             println!("cargo:warning={}", warning.to_string().replace('\n', " "));
@@ -149,7 +158,21 @@ pub fn bake<D: DataSource>(
     }
     let grants = data.grants().to_string();
     let baked = contract::bake(boot_plan, data).unwrap_or_else(|e| panic!("bake: {e}"));
-    fs::write(out.join("app.plan"), baked.encode()).unwrap();
+    let bytes = baked.encode();
+    if let Some(names) = swift {
+        let file = out.join("forma.swift");
+        if fs::read(&file).ok().as_deref() != Some(names.as_bytes()) {
+            fs::write(file, &names).unwrap();
+        }
+        // Cargo preserves stdout for the selected run even when OUT_DIR has
+        // files from earlier runs. Bind the projection to both exact byte sets.
+        println!(
+            "cargo:metadata=exact-forma-swift={}:{}",
+            contract::plan_digest(&bytes),
+            contract::plan_digest(names.as_bytes())
+        );
+    }
+    fs::write(out.join("app.plan"), bytes).unwrap();
     let target = env::var("TARGET").unwrap();
     // Android's Canvas host is the Linux host's presenter under Android's own Canvas, so its
     // cohort is Linux's for this target (as apps/caltrain/android/build.rs computes it).

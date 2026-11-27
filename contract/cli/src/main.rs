@@ -48,6 +48,7 @@ mod forma;
 mod forma_contract;
 mod forma_explain;
 mod forma_export;
+#[path = "forma_gen_cli.rs"]
 mod forma_gen;
 mod forma_history;
 mod forma_import;

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { within } from '../../scripts/paths.mjs';
 import { directDependencies, swiftPackageFiles, swiftPackageInventories, swiftPackageOutputs } from '../../scripts/package-libraries.mjs';
 import { spawnSync, swiftOptimization } from './toolchain.mjs';
-import { evictArms, probeDigest } from './arms.mjs';
+import { evictArms, packageKeyArgs, probeDigest } from './arms.mjs';
 import { swiftPackagesProblems } from '../../scripts/app.mjs';
 import { appleImplementations, moduleInterfaces } from '../../js/bake/src/typescript.mjs';
 import { packageConfig, sourceString } from '../../js/bake/src/package-config.mjs';
@@ -156,8 +156,9 @@ export function packageCompiler({ packages, packageDir, packageTargets, packageC
     ...(linkName ? ['-module-link-name', linkName] : []),
     '-emit-module', '-emit-module-path', resolve(dir, `${name}.swiftmodule`),
     '-I', dir, '-c', ...sources, '-o', resolve(dir, `${name}.o`)];
+  const copies = new Set(packageCopies?.flat());
   const kept = (name, args, sources, imports, dir, compile) => {
-    const key = createHash('sha256').update(JSON.stringify([name, args.map(a => a.replaceAll(dir, '<dir>')), sources.map(f => readFileSync(f, 'utf8')), imports, swiftc])).digest('hex').slice(0, 20);
+    const key = createHash('sha256').update(JSON.stringify([name, packageKeyArgs(args, dir, packageDir, copies, name), sources.map(f => readFileSync(f, 'utf8')), imports, swiftc])).digest('hex').slice(0, 20);
     const entry = resolve(packagesRoot, 'packages-kept', `${name}-${key}`);
     const outputs = d => readdirSync(d).filter(f => f.startsWith(`${name}.`));
     if (existsSync(entry)) {

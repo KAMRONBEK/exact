@@ -24,10 +24,11 @@ import { metalVersion, svgFilterLibrary, svgFilterLibraryName } from './svg-filt
 export { metalVersion, svgFilterLibrary, svgFilterLibraryName };
 import { distributionToolchain } from './sdk.mjs';
 import { createHash, randomBytes } from 'node:crypto';
+import { captureSwiftNames, wantsSwiftNames, writeSwiftNames } from '../../scripts/forma-names.mjs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
 import { closeSync, copyFileSync, cpSync, existsSync, linkSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
-import { armArgs, armKey, armOutput, evictArms, keepRoster, keptRoster, rosterRoutes, snapshotSources, moduleFrameworks, probeDigest } from './arms.mjs';
+import { armArgs, armSourceKey, armOutput, evictArms, keepRoster, keptRoster, rosterRoutes, snapshotSources, moduleFrameworks, probeDigest } from './arms.mjs';
 import { HOST_MACOS, freeSpace, ROOM_GB } from '../../scripts/filesystem.mjs';
 import { documentTypes, exportedTypes, importedTypes, openingLinks, webPageTypes, browserEntitlements } from './documents.mjs';
 import { appleFrameSources, appleVariantBuildDir, appClip, associatedDomains as claimedDomains, appleExecutableName, HOST_DEV, PINNED_RUST, checkModuleRoster, moduleDirectory, copyShaders, cargoProductClaims, awaitBuildOutput, cargoLibraryTarget, claimBuildOutput, appSourceKey, bakeOutput, buildBake, contractLast, bakeTarget, developmentBuildEnv, developmentURLScheme, gpuModules, hermesBundle, injectedProfiles, resolveApp, verifyBakeFiles } from '../../scripts/app.mjs';
@@ -704,7 +705,7 @@ async function main(args, lockHeld = false) {
   const cargoLibDir = resolve(app.target, target, cargoProfile);
   // Named Cargo products can alias in external workspaces or two checkouts
   // sharing a target. Claim those names through bake-and-capture only.
-  let bakedPlan, paths;
+  let bakedPlan, paths, swiftNames;
   const development = cargoEnv.EXACT_UPDATE_TRUST === 'development' && args.includes('--url') ? developmentAdmission(app, launchEnv.EXACT_DEV_PLAN) : null;
   cargoEnv.EXACT_BAKE_OUTPUT = bakeOutput(app, cargoEnv);
   const hermes = ios && existsSync(resolve(app.dir, 'app.ts')) && cargoEnv.EXACT_JS_ENGINE !== 'stub' && hermesBundle(target, cargoEnv);
@@ -791,6 +792,7 @@ async function main(args, lockHeld = false) {
   // SwiftPM's own lock's; the claim below is the link's. `--embed` alone
   // builds no Swift.
   const embedOnly = appleEmbedOnly(args);
+  cargoEnv.EXACT_FORMA_SWIFT = wantsSwiftNames(app, modules.apple, embedOnly) ? '1' : '0';
   // The compiler, by its version: part of the name of what is kept from one build to the next.
   const swiftc = read('xcrun', ['--sdk', sdkName, 'swiftc', '--version']).stdout ?? '';
   // Where SwiftPM puts its products, once it has been asked (below).
@@ -878,6 +880,8 @@ async function main(args, lockHeld = false) {
   const hostModules = embedOnly || fixedPlan ? null : buildModules(['exact-svg-raster', ...(metal ? ['exact-canvas-vello'] : []), ...(ios ? [] : ['exact-listen'])], 'host-modules.log'); // the listener: macOS's (LLP 1133.005 §8)
   const buildReceipt = contractLast(() => buildBake(app, ios ? 'ios' : 'macos', target, { env: cargoEnv, profile: cargoProfile, link: !args.includes('--embed'), prepareGpu(product, privacyManifest) {
     return prepareGpuProduct(product, { gpuArtifacts, sha1, app, privacyManifest, frameworkBundles, frameworkPlatform, ios, distribution, preparedGpu });
+  }, captureBake(dir, output, plan) {
+    if (cargoEnv.EXACT_FORMA_SWIFT === '1') swiftNames = captureSwiftNames(dir, output, plan);
   }, capture(buildReceipt) {
     const composition = buildReceipt.compat.inputs?.store?.L === '0' ? 'embedded' : 'updating';
     paths = appleArtifacts(app, { destination, composition, trust: cargoEnv.EXACT_UPDATE_TRUST, optimize: production ? optimize : 'speed' });
@@ -1046,7 +1050,7 @@ async function main(args, lockHeld = false) {
   // A roster probe route's packages compile for its own target, in a directory of its own (`rosterRoutes`).
   const packageTargets = new Map([[packageDir, [sdkName, ios ? ['-target', moduleTripleFor(app, true, device, tv), '-sdk', sdk] : ['-target', moduleTripleFor(app, false)]]]]);
   const arm = (args, source, built, extra = '', own = false, optional = false) => { // optional: placing a failed one answers its log's path
-    args = armArgs(args, built); const key = armKey(args.map(a => a === built ? '<out>' : snapshot.key(a).replace(packageDir, '<packages>')), [].concat(source).map(f => readFileSync(f, 'utf8')), swiftc, extra);
+    args = armArgs(args, built); const key = armSourceKey(args, [].concat(source), { built, snapshot, packageDir, packageDirs: [...packageTargets.keys()], linkRoot, swiftc, extra });
     const dir = resolve(own ? linkRoot : swiftBuildRoot, 'arms'), cached = resolve(dir, `${key}-${basename(built)}`);
     try { const now = new Date(); utimesSync(cached, now, now); copyFileSync(cached, built); return Object.assign(async () => true, { cached }); } catch {} // none, or evicted meanwhile
     mkdirSync(dir, { recursive: true }); const packagesIn = args.find(a => packageTargets.has(a)); if (packagesIn) placePackages(packagesIn); // the packages' objects only for an arm compiled anew
@@ -1118,8 +1122,7 @@ async function main(args, lockHeld = false) {
   })), packageSources = packages.length ? [seam, ...packageCopies.flat()] : [];
   if (composing) writeFileSync(composed, composedModule(packages, modules.apple.length > 0, configured));
   if (composing) writeDataKeys(app, dataKeys, ios ? 'ios' : 'macos');
-  // @ref LLP 1121 D12 — the token names `contract forma gen swift` writes from the design (never committed).
-  if (composing) (await import('../../scripts/forma-names.mjs')).writeFormaNames(app, 'swift'); const formaNames = resolve(app.dir, '.exact/forma/forma.swift');
+  const formaNames = composing ? writeSwiftNames(app, swiftNames, bakedPlan, linkRoot) : null; // @ref LLP 1121 D12
   const moduleSources = composing ? [...moduleSeam(resolve, root), composed, ...(existsSync(formaNames) ? [formaNames] : []), dataKeys, ...snapshot.copies] : [];
   const modulesBuilt = moduleSources.length ? resolve(webBuildDir, modulesLoadName) : null;
   const frameworkTarget = (forIos, simulator, arch) => ({ platform: forIos ? (tv ? 'tvos' : 'ios') : 'macos', variant: forIos && simulator ? (simulator === true ? 'simulator' : simulator) : undefined, arch });
@@ -1151,8 +1154,12 @@ async function main(args, lockHeld = false) {
       macos: app.manifest.host?.macos?.minimumOS } });
   placePackages(packageDir);
   moduleLibraries.push(...packageFrameworks);
-  const packageStamp = JSON.stringify([...packages.map(p => [p.module, createHash('sha256').update(readFileSync(resolve(packageDir, `${p.module}.dylib`))).digest('hex')]), ...packageProducts(packageDir).map(p => p.digest)]);
-  const appModule = modulesBuilt ? arm(moduleArgs(sdkName, ios ? ['-target', moduleTripleFor(app, true, device, tv), '-sdk', sdk] : macTarget, modulesBuilt, ios, ios && !device, ios ? iosArch : macArch), [...moduleSources, ...packageSources], modulesBuilt, frameworkStamp(ios, ios && !device, ios ? iosArch : macArch) + packageStamp, true) : null;
+  // moduleArgs places each route's own dependencies before its key is computed.
+  // External framework stamps omit some interface files. Keep those builds private.
+  const packageStamp = dir => JSON.stringify([modules.frameworks?.length ? linkRoot : '',
+    ...packages.map(p => [p.module, createHash('sha256').update(readFileSync(resolve(dir, `${p.module}.dylib`))).digest('hex')]),
+    ...packageProducts(dir).map(p => p.digest)]);
+  const appModule = modulesBuilt ? arm(moduleArgs(sdkName, ios ? ['-target', moduleTripleFor(app, true, device, tv), '-sdk', sdk] : macTarget, modulesBuilt, ios, ios && !device, ios ? iosArch : macArch), [...moduleSources, ...packageSources], modulesBuilt, frameworkStamp(ios, ios && !device, ios ? iosArch : macArch) + packageStamp(packageDir), true) : null;
   // A probe runs the module's table beside its dependencies and resources. iOS tries Catalyst, an iOS simulator,
   // then macOS; tvOS has the macOS route alone and no first-frame tags. A failed route falls through, and the
   // first roster read stands. Each route compiles only when needed.
@@ -1172,7 +1179,7 @@ async function main(args, lockHeld = false) {
     const on = variant === true ? 'iphonesimulator' : 'macosx', catalyst = variant !== false && variant !== true && resolve(read('xcrun', ['--sdk', 'macosx', '--show-sdk-path']).stdout.trim(), 'System/iOSSupport');
     const target = variant === false ? macTarget : catalyst ? ['-target', `${macArch}-apple-ios${targets.ios}-macabi`, '-Fsystem', `${catalyst}/System/Library/Frameworks`, '-I', `${catalyst}/usr/lib/swift`, '-L', `${catalyst}/usr/lib/swift`] : ['-target', `${simulatorArch}-apple-ios${targets.ios}-simulator`, '-sdk', read('xcrun', ['--sdk', on, '--show-sdk-path']).stdout.trim()];
     if (!packageTargets.has(packagesIn)) packageTargets.set(packagesIn, [on, target]);
-    const library = arm(moduleArgs(on, target, probeLibrary, variant !== false, variant, variant === true ? simulatorArch : macArch, packagesIn, true), [...moduleSources, ...packageSources], probeLibrary, frameworkStamp(variant !== false, variant, variant === true ? simulatorArch : macArch) + packageStamp, true, true);
+    const library = arm(moduleArgs(on, target, probeLibrary, variant !== false, variant, variant === true ? simulatorArch : macArch, packagesIn, true), [...moduleSources, ...packageSources], probeLibrary, frameworkStamp(variant !== false, variant, variant === true ? simulatorArch : macArch) + packageStamp(packagesIn), true, true);
     const launcher = arm(['--sdk', on, 'swiftc', '-parse-as-library', ...target, probeMain, '-o', built], [probeMain], built, '', true, true);
     return place(library, launcher);
   };
