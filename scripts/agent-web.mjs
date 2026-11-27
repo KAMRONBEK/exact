@@ -1055,6 +1055,7 @@ async function openWebUnlocked({
           );
         const tags = await readPicture();
         if (tags.error) throw new Error(tags.error);
+        const heldFirst = typeof tags.moving === 'number' ? tags.moving : 0;
         delete tags.moving;
         await frame();
         // Images in the viewport finish loading first, up to 3 s: a picture
@@ -1074,6 +1075,7 @@ async function openWebUnlocked({
         // Frame and image callbacks can start GPU work after the first read.
         const settled = await readPicture();
         if (settled.error) throw new Error(settled.error);
+        const held = film ? 0 : Math.max(heldFirst, typeof settled.moving === 'number' ? settled.moving : 0);
         // A viewport-only capture can retain a rounded background painted before its image became opaque.
         const { cssVisualViewport: v, cssLayoutViewport: l, cssContentSize: c } = await call('Page.getLayoutMetrics');
         // That capture's origin is the left edge of the page's scrollable overflow, which a right-to-left page has
@@ -1085,7 +1087,8 @@ async function openWebUnlocked({
           clip: { x: v.pageX + left, y: v.pageY, width: v.clientWidth, height: v.clientHeight, scale: v.scale },
         });
         writeFileSync(path, Buffer.from(data, 'base64'));
-        return { ...tags, screenshot: path, w: size[0], h: size[1], ...(pending ? { imagesPending: pending } : {}) };
+        const note = held > 0 ? `held ${held} finite animation${held === 1 ? '' : 's'} at end for this still screenshot (LLP 1116.003 D8); use \`screenshot <png> over <ms> every <ms>\` to capture mid-flight motion` : undefined;
+        return { ...tags, screenshot: path, w: size[0], h: size[1], ...(pending ? { imagesPending: pending } : {}), ...(note ? { note } : {}) };
       },
       close,
     };

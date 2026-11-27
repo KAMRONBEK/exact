@@ -46,7 +46,7 @@ component App
   `:focus-visible` grows paint and hits.
 - **Keyframes:** literals or app `fn` on constants.
 - **Exit:** an `if` arm or `for` row leaves layout and becomes inert at once.
-  Give the exit an end. Siblings use layout transitions. Apple and web outside popped screens.
+  Give the exit an end. Siblings use layout transitions. Refused on route elements.
 - **Routes:** `::view-transition-new` / `::view-transition-old` animate opacity,
   translate, scale and rotate. `animation="none"` cuts. Modal sheets and routes
   with a literal nonempty `navigationSource` reject these parts.
