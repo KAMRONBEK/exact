@@ -679,7 +679,7 @@ class Collection {
     // The document may have painted before adoption; this is the row's live mount.
     if (served && w.hasAttribute("data-exact-await-view")) {
       for (const a of w.getAnimations({ subtree: true })) {
-        if (a.animationName !== undefined && (!a.timeline || a.timeline instanceof DocumentTimeline)
+        if (a.animationName !== undefined && a.timeline instanceof DocumentTimeline
           && a.effect?.target?.getAttribute("data-exact-animation-trigger") !== "none") a.currentTime = 0;
       }
     }
