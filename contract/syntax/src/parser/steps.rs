@@ -561,10 +561,12 @@ impl Parser {
             },
             "tap" => {
                 let target = self.str_lit("a testId")?;
-                if self.at_ident("drag") {
+                if target.starts_with('@') {
+                    self.ticket_step(&target, span, false)?
+                } else if self.at_ident("drag") {
                     self.next();
                     return self.drag_step(target, span);
-                }
+                } else {
                 let form = match self.peek_kind().clone() {
                     TokenKind::Ident(w) if w == "hover" || w == "dblclick" || w == "contextmenu" || w == "into" || w == "pinch" || w == "swipe" || w == "wheel" => {
                         self.next();
@@ -677,10 +679,13 @@ impl Parser {
                     modifiers,
                     span,
                 }
+                }
             }
             "type" => {
                 let target = self.str_lit("a testId")?;
-                if self.at_ident("key") {
+                if target.starts_with('@') {
+                    self.ticket_step(&target, span, true)?
+                } else if self.at_ident("key") {
                     self.next();
                     let key = self.str_lit("the key's name")?;
                     // `down` / `up` / `for <ms>`: one of them, on the virtual clock (platformer R7).

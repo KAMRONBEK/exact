@@ -36,6 +36,7 @@ mod state_step;
 mod states;
 mod steps;
 mod theme;
+mod ticket_step;
 mod tool;
 mod view;
 pub use steps::{is_launch, same_launch, TEST_HOSTS};

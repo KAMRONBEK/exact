@@ -177,7 +177,7 @@ action log
   days = days.concat([formatDate(at, time.utcOffset, "iso")])
 ```
 ### a test, and verify
-Fresh store per test. `reload` keeps it. `clock data` lands replies, `clock settle` ends transitions. `bun exact.mjs verify` checks ends and relaunches. Run `verify ios` last. Keep its `contract verify` receipt and `--shots <dir>`.
+Fresh store per test; `reload` keeps it. `clock data` lands replies, `clock settle` ends motion. `bun exact.mjs verify` checks ends and relaunches (`verify ios` last; keep receipt and `--shots <dir>`).
 ```contract-test
 test "a pick survives a relaunch"
   tap "pick"

@@ -90,6 +90,7 @@ parts: use X from "exact:content"; an option is none or some(…)
 test steps (app.test.contract, docs/contract-grammar.md)
   tap "id" (… contextmenu)
   type "id" "text", type "id" key "Enter"
+  tap "@browser" dismissed, type "@date" "…"
   expect text "id" == "…"
   expect tree has "id" (missing) · expect disabled "id" (enabled) · expect focused "id" · expect state draft == ""
   clock data · clock settle · clock +5000 · reload
@@ -180,7 +181,7 @@ a dated record: The write reads the clock, not a ticked `now`; `performanceNow()
   action log
     let at = time.epochAtZero + performanceNow()
     days = days.concat([formatDate(at, time.utcOffset, "iso")])
-a test, and verify: Fresh store per test. `reload` keeps it. `clock data` lands replies, `clock settle` ends transitions. `bun exact.mjs verify` checks ends and relaunches. Run `verify ios` last. Keep its `contract verify` receipt and `--shots <dir>`.
+a test, and verify: Fresh store per test; `reload` keeps it. `clock data` lands replies, `clock settle` ends motion. `bun exact.mjs verify` checks ends and relaunches (`verify ios` last; keep receipt and `--shots <dir>`).
   test "a pick survives a relaunch"
     tap "pick"
     clock data

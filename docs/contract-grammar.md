@@ -857,6 +857,7 @@ extension-preference = "prefer" "extension" extension-key "=" ( json | "clear" )
 extension-key = ? a drive key of the form extension.name or extension.name#import-path ? ;
 step          = "tap" "midi" STRING ( HEX { HEX } | "clock" NUMBER NUMBER ) NL
                                                      (* bytes into an input; or clock ticks: bpm, ms *)
+              | "tap" STRING ( IDENT | STRING ) NL   (* when target starts with `@`: answer a held ticket by capability or target, e.g. `tap "@browser" dismissed` *)
               | "tap" STRING [ "hover" | "dblclick" | "contextmenu"
                   | "pinch" NUMBER [ "at" NUMBER NUMBER ]
                   | "wheel" [ "-" ] NUMBER [ "-" ] NUMBER
@@ -869,6 +870,7 @@ step          = "tap" "midi" STRING ( HEX { HEX } | "clock" NUMBER NUMBER ) NL
                   | "from" NUMBER NUMBER | "mouse" | "into" "keyboard" | "during" STRING { STRING } }
                   { "then" [ "-" ] NUMBER [ "-" ] NUMBER
                     { ( "over" | "hold" ) NUMBER | "during" STRING { STRING } } } NL
+              | "type" STRING STRING NL                (* when target starts with `@`: type text into a held ticket, e.g. `type "@date" "2026-10-10"` *)
               | "type" STRING ( STRING [ "append" ]
                   | "key" STRING [ "down" | "up" | "for" NUMBER ]
                   | "copy" | "cut" | "paste" STRING ) NL
@@ -956,6 +958,15 @@ block in a run under platform timing. `query` and `built` read the same on every
 `evaluated` is each runtime's own, so a test that compares it names one host. The development
 source map names components; a host without one says so. A drive's `perf <target> during "…"`
 shows the same counts while a test is being written.
+
+`tap "@<target>" <choice>` and `type "@<target>" "<text>"` wait as `clock data` does,
+with the virtual clock frozen, then answer the held device or package ticket named by
+capability or target (for example `tap "@browser" dismissed` or `type "@date" "2026-10-10"`).
+Numeric ticket ids (`"@1"`) are refused in authored tests because ticket numbers vary across
+runs. For a package `choose` ticket declared by the app, the compiler checks the choice
+against the package's declared choices (plus `cancel`) and refuses typed text when the
+ticket takes choices only. For file pickers, use `pick` so paths resolve from the test file.
+Run `clock data` after the answer before checking the resulting state.
 
 `presence <answer>` waits as `clock data` does, with the virtual clock frozen, then
 answers the pending user-presence prompt through the driver's `tap @presence`.

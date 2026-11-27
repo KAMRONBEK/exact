@@ -569,7 +569,11 @@ impl Lexer {
                     let c = trimmed[pos..].chars().next().unwrap_or(c);
                     LexError {
                         id: "syntax-unexpected-char",
-                        message: format!("unexpected `{c}`"),
+                        message: if c == '@' {
+                            "unexpected `@`: quote a held ticket target in a test step, as `tap \"@browser\" dismissed` or `type \"@date\" \"2026-10-10\"`".into()
+                        } else {
+                            format!("unexpected `{c}`")
+                        },
                         span: Span {
                             end_col: col_of(pos + c.len_utf8()).col,
                             ..span

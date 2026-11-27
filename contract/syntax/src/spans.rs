@@ -97,6 +97,7 @@ leaves!(
     TaskKind,
     MutationMode,
     TapForm,
+    TicketAnswer,
     crate::DragLeg,
     PropertyKind,
     PropertyForm,
@@ -187,7 +188,7 @@ record_variants! {
         Scroll { target, span }, Tap { target, form, modifiers, span }, Drag { target, dx, dy, to, from, mouse, into, press, over, hold, during, modifiers, path, span },
         Size { width, height, span }, At { location, span }, Epoch { value, span }, TimeZone { zone, span },
         Locale { tag, span }, Prefer { name, value, span }, PreferExtension { key, value, span }, Seed { seed, span }, SignedIn { key, account, span }, Secret { name, value, span }, Stored { name, value, window, span }, Fresh { seed, span }, BeforeData { span }, FailFetch { prefix, times, span }, AnswerFetch { prefix, method, response, span }, AnswerSource { source, value, span }, PassFetch { prefix, span }, Request { method, path, body, persona, status, span }, Type { target, text, append, span }, Key { target, key, phase, duration, span },
-        DropStream { prefix, span }, Pick { target, paths, span }, Authorize { cancel, span }, Presence { answer, span }, Clipboard { target, edit, text, span },
+        DropStream { prefix, span }, Pick { target, paths, span }, Authorize { cancel, span }, Presence { answer, span }, Ticket { target, answer, span }, Clipboard { target, edit, text, span },
         Clock { arg, span }, Background { ms, span }, Fold { degrees, span }, Rotate { orientation, span }, Reload { span }, Close { span }, Back { span }, Resize { width, height, span }, Screenshot { path, span }, ExpectRefusal { target, span }, ExpectTree { target, present, span }, ExpectDisabled { target, disabled, span }, ExpectFocused { target, span },
         ExpectSample { target, x, y, color, tolerance, span }, ExpectScreenshot { target, reference, span },
         ExpectLayout { target, dimension, comparison, value, tolerance, span },
@@ -341,6 +342,7 @@ impl Step {
             | Step::Pick { span, .. }
             | Step::Authorize { span, .. }
             | Step::Presence { span, .. }
+            | Step::Ticket { span, .. }
             | Step::Clipboard { span, .. }
             | Step::Clock { span, .. }
             | Step::Background { span, .. }

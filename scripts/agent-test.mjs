@@ -700,12 +700,13 @@ async function propertyFailure(p, line, state, previous, s, file, test, step, in
     : step.op === 'rotate' ? `rotate ${step.orientation}`
     : step.op === 'fold' ? `fold ${step.degrees}`
     : step.op === 'presence' ? `presence ${step.answer}`
+    : step.op === 'ticket' ? (step.text !== undefined ? `type ${JSON.stringify(`@${step.target}`)} ${JSON.stringify(step.text)}` : `tap ${JSON.stringify(`@${step.target}`)} ${/^\S+$/.test(step.choice) ? step.choice : JSON.stringify(step.choice)}`)
     : `${step.op} ${JSON.stringify(step.target)}${step.op === 'type' ? ` ${JSON.stringify(step.text)}` : ''}`;
   const location = at => `${at.file}:${at.line}:${at.col}`;
   const out = [`PROPERTY ${JSON.stringify(p.name)} is false on ${host}`,
     `  property line: ${file}:${line.line}`,
     `  at step ${index + 1}: ${label} (${file}:${step.line}; test ${JSON.stringify(test)})`];
-  if (step.target) {
+  if (step.target && step.op !== 'ticket') {
     const at = (await s.layout(step.target).catch(() => null))?.node?.sourceMap;
     if (at?.status === 'compatible') out.push(`  the element ${JSON.stringify(step.target)} is ${location(at)}`);
   }
@@ -1027,7 +1028,7 @@ export async function runTests({ host, browser, file, plan, app, size, env, webD
       };
       // Before an input while counted faults are outstanding: those that fired leave the check, so a press the app
       // answers with `close()` cannot take an unfired one's evidence with it (LLP 1103 D3).
-      const INPUTS = new Set(['tap', 'drag', 'type', 'key', 'pick', 'authorize', 'presence', 'clipboard', 'resize', 'fold', 'rotate', 'back']);
+      const INPUTS = new Set(['tap', 'drag', 'type', 'key', 'pick', 'authorize', 'presence', 'ticket', 'clipboard', 'resize', 'fold', 'rotate', 'back']);
       const settleFired = async () => {
         if (!armed.size) return;
         const faults = (await s.state()).faults ?? [];
@@ -1149,6 +1150,16 @@ export async function runTests({ host, browser, file, plan, app, size, env, webD
               error.message = `presence: ${error.message}${missing ? '; tap the control that calls authenticate or unlocks a presence secret first' : ''}`;
               throw error;
             }
+            input = st.line; break;
+          }
+          case 'ticket': {
+            const r = await s.clock('data');
+            if (r?.error || r?.settled === false) throw new Error(`@${st.target}: waiting for held ticket: ${r.error ?? r.diagnostic ?? r.reason}`);
+            if (st.text !== undefined) {
+              const held = ((await s.state())?.pending ?? []).find((p) => p.device && (p.device.capability === st.target || p.name === st.target));
+              if (['pick', 'open-file', 'open-directory', 'save-file', 'export'].includes(held?.device?.capability ?? st.target)) throw new Error(`type "@${st.target}": file pickers use \`pick "${st.target}" "<path>"\` (or \`pick "${st.target}" cancel\`) so paths resolve from the test file`);
+            }
+            delivered(st.text !== undefined ? await s.type(`@${st.target}`, st.text) : await s.tap(`@${st.target}`, { choice: st.choice }));
             input = st.line; break;
           }
           // The held sign-in, completed against the app's own server (LLP 1146 D4): its authorization URL is
@@ -1338,7 +1349,7 @@ export async function runTests({ host, browser, file, plan, app, size, env, webD
           default: failures.push(`${at}: unknown step ${st.op}`);
         }
         if (closedAt == null) await mutationClock.advance(s, properties.length ? async (state, delta) => {
-          if (delta || ['tap', 'type', 'clock', 'key', 'reload', 'presence', 'fold', 'rotate'].includes(st.op)) {
+          if (delta || ['tap', 'type', 'clock', 'key', 'reload', 'presence', 'ticket', 'fold', 'rotate'].includes(st.op)) {
             await checkProperties(state, delta ? { ...st, op: 'clock', arg: '+' + delta } : st, n);
           } else previous = state;
         } : undefined);

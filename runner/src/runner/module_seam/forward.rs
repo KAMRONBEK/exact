@@ -708,6 +708,11 @@ impl<D: DataSource> Runner<D> {
         self.seams.modules.holds_token(self, token)
     }
 
+    /// Whether pending request `ticket` is waiting on a held data-code module call.
+    pub(in crate::runner) fn holds_data_request(&self, ticket: u64) -> bool {
+        self.seams.modules.holds_data_request(self, ticket)
+    }
+
     /// The module readers as a commit found them, for its checkpoint.
     pub(in crate::runner) fn readers_saved(&self) -> Readers {
         self.seams.modules.readers_saved(self)

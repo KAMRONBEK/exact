@@ -318,6 +318,7 @@ mod tab_accessory;
 mod tables;
 mod target_names;
 mod tests_decl;
+mod tests_ticket;
 mod text_item;
 mod text_px_width;
 mod text_selection;

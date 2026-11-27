@@ -321,6 +321,11 @@ impl Extensions {
     pub(super) fn holds_token(&self, token: Option<u64>) -> bool {
         token.is_some_and(|t| self.held.iter().any(|h| h.token == t))
     }
+
+    /// Whether pending request `ticket` is waiting on a held data-code module call.
+    pub(super) fn holds_data_request(&self, ticket: u64) -> bool {
+        self.letgo.holds_ticket(ticket, &self.held)
+    }
 }
 
 impl<D: DataSource> Runner<D> {
@@ -1046,6 +1051,7 @@ impl<D: DataSource> Runner<D> {
             return;
         };
         let held = self.extensions.held.remove(at);
+        self.extensions.letgo.release(token);
         let answer = self.ceremony_ended(&held, answer);
         match held.reply {
             Some(slot) => {
@@ -1066,6 +1072,7 @@ impl<D: DataSource> Runner<D> {
             return;
         };
         let held = self.extensions.held.remove(at);
+        self.extensions.letgo.release(token);
         let Some(body) = held.forward else {
             return;
         };

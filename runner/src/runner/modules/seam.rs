@@ -519,6 +519,10 @@ impl<D: DataSource> Modules<D> for LinkedModules {
         r.extensions.holds_token(token)
     }
 
+    fn holds_data_request(&self, r: &Runner<D>, ticket: u64) -> bool {
+        r.extensions.holds_data_request(ticket)
+    }
+
     fn readers_saved(&self, r: &Runner<D>) -> Readers {
         r.extensions.readers.clone()
     }

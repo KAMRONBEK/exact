@@ -829,6 +829,11 @@ pub trait Modules<D: DataSource> {
         false
     }
 
+    /// Whether pending request `ticket` is waiting on a held data-code module call.
+    fn holds_data_request(&self, r: &Runner<D>, ticket: u64) -> bool {
+        false
+    }
+
     /// The module readers as a commit found them, for its checkpoint.
     fn readers_saved(&self, r: &Runner<D>) -> Readers {
         Readers::new()

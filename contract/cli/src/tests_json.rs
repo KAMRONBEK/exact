@@ -1,6 +1,6 @@
 //! The tests as JSON for the driver (LLP 1012).
 
-use contract_syntax::{Expr, Step, TapForm, TestDecl};
+use contract_syntax::{Expr, Step, TapForm, TestDecl, TicketAnswer};
 
 /// A JSON string.
 fn q(s: &str, out: &mut String) {
@@ -406,6 +406,20 @@ fn step_json(step: &Step, s: &mut String) {
         Step::Presence { answer, .. } => {
             s.push_str("{\"op\":\"presence\",\"answer\":");
             q(answer, s);
+        }
+        Step::Ticket { target, answer, .. } => {
+            s.push_str("{\"op\":\"ticket\",\"target\":");
+            q(target, s);
+            match answer {
+                TicketAnswer::Choice(choice) => {
+                    s.push_str(",\"choice\":");
+                    q(choice, s);
+                }
+                TicketAnswer::Text(text) => {
+                    s.push_str(",\"text\":");
+                    q(text, s);
+                }
+            }
         }
         Step::Clipboard {
             target, edit, text, ..
