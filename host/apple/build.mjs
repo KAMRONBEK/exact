@@ -632,7 +632,7 @@ async function main(args, lockHeld = false) {
   let widgets = !tv && (ios ? hasEntries(app) : platformWidgetEntries(app, 'macos').length > 0);
   // Another build may take the claim first after that wait: this one waits again rather than refusing as busy.
   const release = lockHeld ? () => {} : awaitBuildOutput(app, appleArtifacts(app, { optimize }).lock, () => console.error(`waiting for the Apple build of ${app.name} already running`));
-  const cleanup = [], beside = []; // what to remove, and the steps started beside the build, when it ends
+  const cleanup = [], beside = [], background = []; let aborted = false, stopPackages = () => {}; // what to remove, and the steps started beside the build, when it ends
   try {
   if (!forceRebuild && chosenSim && canFastSimulatorRun(args, { ios, device, tv, ipa, unsigned, production: process.env.EXACT_UPDATE_TRUST === 'production', distribution, packaged, gallery })) {
     const fast = await tryFastSimulatorRun({ app, dev: chosenSim, args, launchEnv, install });
@@ -1039,7 +1039,6 @@ async function main(args, lockHeld = false) {
   // A roster probe route's packages compile for its own target, in a directory of its own (`rosterRoutes`).
   const packageTargets = new Map([[packageDir, [sdkName, ios ? ['-target', moduleTripleFor(app, true, device, tv), '-sdk', sdk] : ['-target', moduleTripleFor(app, false)]]]]);
   const armKeyOptions = (built, extra = '') => ({ built, snapshot, packageDir, packageDirs: [...packageTargets.keys()], linkRoot, swiftc, extra, root, appDir: app.dir, swiftRootDir: swiftRoot(app) });
-  let aborted = false, stopPackages = () => {}; const background = [];
   const arm = (args, source, built, extra = '', own = false, optional = false, prepare = null) => { // optional: placing a failed one answers its log's path
     args = armArgs(args, built); const sources = [].concat(source), key = armSourceKey(args, sources, armKeyOptions(built, extra));
     const dir = resolve(own ? linkRoot : packagesRoot, 'arms'), cached = resolve(dir, `${key}-${basename(built)}`);
