@@ -14,8 +14,9 @@ extension NodeView {
         // A layout transition's surface clips with a mask of its own
         // (`Surface.swift`) until it ends.
         guard surface == nil, let layer else { return }
-        let outline = shapedOutline(), effect = materialView as? NSVisualEffectView
-        let key = BoxMaskState.Key(image: style["mask_image"], clip: style["clip_path"], outline: outline, size: bounds.size, dark: drawsDark,
+        let outline = shapedOutline(), effect = materialView as? NSVisualEffectView, image = style["mask_image"]
+        let key = BoxMaskState.Key(image: image, clip: style["clip_path"], outline: outline, size: bounds.size, dark: drawsDark,
+                                   scale: pixelScale ?? 2, tint: gradientTintKey(for: image),
                                    clipBox: clipBox != nil, filter: hasBoxFilter, material: effect != nil, materialOutline: nil)
         let state = BoxMaskState.of(self)
         if state.key == key, clipBox?.layer?.mask === state.boxMask, hasBoxFilter || layer.mask === state.layerMask,

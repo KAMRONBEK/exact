@@ -310,9 +310,9 @@ package final class DialogHost {
     /// `start` when it is a responder in the dialog.
     private func stops(_ dialog: NodeView, start: NSView? = nil) -> (views: [(view: NSView, order: Int)], before: Int?) {
         guard let presenter else { return ([], nil) }
-        var views: [(view: NSView, order: Int)] = [], before: Int?
+        var views: [(view: NSView, order: Int)] = [], before: Int?, seen = Set<ObjectIdentifier>()
         func walk(_ node: NodeView) {
-            guard !node.inert, !node.isHidden else { return }
+            guard !node.inert, !node.isHidden, seen.insert(ObjectIdentifier(node)).inserted else { return }
             let view = presenter.keyView(of: node)
             if Presenter.tabbable(node) { views.append((view, node.tabOrder)) }
             else if node === start || view === start { before = views.count }

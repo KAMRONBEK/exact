@@ -867,8 +867,8 @@ package final class MenuHost {
     /// Out of the top layer, hidden, back where it was; the popovers nested
     /// in it first, as hiding a popover hides those above it in the stack.
     func drop(_ name: String) {
-        for (nested, entry) in agentOpen where entry.ancestor == name { drop(nested) }
         guard let entry = agentOpen.removeValue(forKey: name) else { return }
+        for (nested, child) in agentOpen where child.ancestor == name { drop(nested) }
         if let pop = entry.popover { presenter?.tellRegion(pop.id, nil, told: &entry.block) }
         coverClosed()
         entry.popover?.endEditing(true)
@@ -948,8 +948,9 @@ package final class MenuHost {
         #endif
     }
     func agentShow(_ pop: NodeView, named name: String, from row: UInt32?, context: Bool = false, invoked: Bool = false) {
+        guard agentOpen[name] == nil, !agentOpen.values.contains(where: { $0.popover === pop }) else { return }
         layOut(pop)
-        guard let presenter, live(pop) else { return }
+        guard let presenter, live(pop), agentOpen[name] == nil, !agentOpen.values.contains(where: { $0.popover === pop }) else { return }
         // A row of an open menu opens a popover that is no menu as the menu's own invoker would (LLP 1021's menu rule).
         let holder = { (id: UInt32?) in self.agentOpen.values.first { m in
             guard m.substitutesMenu, let menu = m.popover else { return false }
@@ -995,13 +996,12 @@ package final class MenuHost {
             props = run.props
         } else { props = node.props }
         guard let name = props["contextPopover"] else { return false }
-        // `agentShow` nests it in the open popovers holding `node`, as HTML's
-        // stack does, and closes every other auto popover, as a tap outside
-        // them would; a manual one stays.
+        // `agentShow` nests in open popovers holding `node` and closes other auto popovers; manual ones stay.
         guard let pop = presenter.carrying("popover").first(where: { $0.props["id"] == name && !isConfirmation($0) }) else {
             presenter.session?.log("context menu \(name) refused: no popover has that id")
             return false
         }
+        guard !isOpen(pop), agentOpen[name] == nil else { return false }
         agentShow(pop, named: name, from: node.id, context: true)
         return true
     }

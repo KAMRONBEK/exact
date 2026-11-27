@@ -36,6 +36,7 @@ extension NodeView {
         // put on (`BorderPaint.clip`), so it carries that outline too.
         let effectOutline = effect == nil || image == nil ? nil : BorderPaint.uncircular(in: bounds, radii: cornerSizes(in: bounds))
         let key = BoxMaskState.Key(image: image, clip: style["clip_path"], outline: outline, size: bounds.size, dark: drawsDark,
+                                   scale: traitCollection.displayScale, tint: gradientTintKey(for: image),
                                    clipBox: clipBox != nil, filter: hasBoxFilter, material: effect != nil, materialOutline: effectOutline)
         let state = BoxMaskState.of(self)
         if state.key == key, clipBox?.layer.mask === state.boxMask, hasBoxFilter || ownMask === state.layerMask,

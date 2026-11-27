@@ -56,14 +56,15 @@ extension NodeView {
     /// a filtered box's picture.
     func resolvedClipMask() -> CALayer? {
         let outline = clipBox == nil ? shapedOutline() : nil
+        let image = style["mask_image"]
         #if os(macOS)
         let scale = pixelScale ?? 2
         #else
         let scale = traitCollection.displayScale
         #endif
         let shown = surface?.bounds ?? bounds
-        let key = BoxMaskState.FilterKey(image: style["mask_image"], clip: style["clip_path"], outline: outline,
-                                         bounds: shown, dark: drawsDark, scale: scale)
+        let key = BoxMaskState.FilterKey(image: image, clip: style["clip_path"], outline: outline,
+                                         bounds: shown, dark: drawsDark, scale: scale, tint: gradientTintKey(for: image))
         let state = BoxMaskState.of(self)
         if state.filterKey == key { return state.filterMask }
         state.filterKey = key
@@ -81,6 +82,7 @@ extension NodeView {
 final class BoxMaskState {
     struct Key: Equatable {
         var image: BatchValue?, clip: BatchValue?, outline: CGPath?, size: CGSize, dark: Bool
+        var scale: CGFloat, tint: [[Double]]?
         var clipBox: Bool, filter: Bool, material: Bool, materialOutline: CGPath?
     }
     struct FilterKey: Equatable {
@@ -88,6 +90,7 @@ final class BoxMaskState {
         var bounds: CGRect
         var dark: Bool
         var scale: CGFloat
+        var tint: [[Double]]?
     }
     var key: Key?
     var filterKey: FilterKey?
