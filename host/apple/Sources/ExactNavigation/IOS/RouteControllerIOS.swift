@@ -424,6 +424,9 @@ final class RouteController: UIViewController, UIScrollViewDelegate {
         }
         presenter.owners.publish()
         presenter.stickies.scrolled(node.id)
+        #if os(iOS)
+        presenter.textSelection.scrolled(scrollView)
+        #endif
         presenter.transformGeometry.changed()
         presenter.videoVisibility?.changed()
         presenter.scrollPump.scrolled(nil)
@@ -436,6 +439,9 @@ final class RouteController: UIViewController, UIScrollViewDelegate {
     private var dragOrigin: CGPoint?
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
         if scrollView === contentViewport { dragOrigin = scrollView.contentOffset }
+        #if os(iOS)
+        host?.presenter.textSelection.scrollWillBeginDragging(scrollView)
+        #endif
         host?.presenter.elementScrolls.userScrolled(scrollView)
         if let session = host?.presenter.session { session.frameHealth.beginScroll(scrollView, session: session) }
     }

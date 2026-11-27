@@ -253,6 +253,9 @@ package final class ScrollPump: NSObject, UIScrollViewDelegate {
     package func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
         presenter?.elementScrolls.userScrolled(scrollView)
         if let session = presenter?.session { session.frameHealth.beginScroll(scrollView, session: session) }
+        #if os(iOS)
+        presenter?.textSelection.scrollWillBeginDragging(scrollView)
+        #endif
     }
     #if os(iOS)
     package func scrollViewWillEndDragging(_ scrollView: UIScrollView, withVelocity velocity: CGPoint, targetContentOffset: UnsafeMutablePointer<CGPoint>) {

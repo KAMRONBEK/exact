@@ -35,15 +35,31 @@ final class SelectionDocument {
         return result
     }
 
-    static func container(of node: NodeView) -> NodeView? {
-        if let outer = node.selectAllElement, outer !== node { return outer }
+    /// The shared selection container of `node`, and whether `node` can route
+    /// touches to it without crossing a nested scroll view or pressable ancestor.
+    private static func containerInfo(of node: NodeView) -> (owner: NodeView, sharesSurface: Bool)? {
+        let selectAll = node.selectAllElement.flatMap { $0 === node ? nil : $0 }
+        var crossedBoundary = false
         for view in ancestors(from: node.superview) {
-            if let parent = view as? NodeView {
-                if ["text", "all"].contains(parent.style["user_select"]?.string ?? "") { return parent }
+            guard let parent = view as? NodeView else { continue }
+            if let selectAll {
+                if parent === selectAll { return (selectAll, !crossedBoundary) }
+                if parent.scrollView != nil || parent.pressable { crossedBoundary = true }
+            } else {
+                if ["text", "all"].contains(parent.style["user_select"]?.string ?? "") {
+                    return (parent, !crossedBoundary)
+                }
                 if parent.scrollView != nil || parent.pressable { return nil }
             }
         }
-        return nil
+        return selectAll.map { ($0, false) }
+    }
+    static func container(of node: NodeView) -> NodeView? { containerInfo(of: node)?.owner }
+    /// Whether `node` can route touches to `owner`'s shared surface without
+    /// crossing an intervening `UIScrollView` or pressable ancestor.
+    static func sharesTouchSurface(_ node: NodeView, with owner: NodeView) -> Bool {
+        guard let info = containerInfo(of: node) else { return false }
+        return info.owner === owner && info.sharesSurface
     }
     static func paragraphs(in owner: NodeView, host: TextSelectionHost) -> [NodeView] {
         var result: [NodeView] = []
@@ -115,7 +131,10 @@ final class SelectionDocument {
         return true
     }
     func contains(_ node: NodeView) -> Bool { parts.contains { $0.node === node } }
-    func containsView(_ view: UIView) -> Bool { parts.contains { $0.node === view } }
+    func part(for view: UIView) -> Part? { parts.first { $0.node === view } }
+    func selects(_ view: UIView, in range: NSRange) -> Bool {
+        range.length > 0 && parts.contains { $0.node === view && NSIntersectionRange(range, $0.range).length > 0 }
+    }
     func settle(host: TextSelectionHost) -> Bool {
         guard let owner else { return false }
         syncFrame()
@@ -127,14 +146,14 @@ final class SelectionDocument {
     }
     func part(at offset: Int) -> Part? { parts.last { $0.start <= offset } ?? parts.first }
     func paragraph(at point: CGPoint) -> NodeView? {
-        parts.first { $0.node.bounds.contains($0.node.convert(point, from: surface)) }?.node
+        parts.first { clipRect($0.node.convert($0.node.bounds, to: surface), from: $0.node)?.contains(point) == true }?.node
     }
     func index(at point: CGPoint) -> Int {
         guard let part = parts.min(by: { distance(point, to: $0.node) < distance(point, to: $1.node) }) else { return 0 }
         return part.start + part.input.index(at: part.node.convert(point, from: surface))
     }
     private func distance(_ point: CGPoint, to node: NodeView) -> CGFloat {
-        let box = node.convert(node.bounds, to: surface)
+        guard let box = clipRect(node.convert(node.bounds, to: surface), from: node) else { return .greatestFiniteMagnitude }
         let x = max(box.minX - point.x, 0, point.x - box.maxX), y = max(box.minY - point.y, 0, point.y - box.maxY)
         return x * x + y * y
     }

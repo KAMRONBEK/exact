@@ -36,6 +36,9 @@ final class TextSelectionHost: TextSelecting {
     /// Passive observers mounted on session roots while a selection is active,
     /// so tapping any view or native control outside the selection clears it.
     private var dismissObservers: [SelectionDismissObserver] = []
+    /// Touch whose dismissal tap landed on highlighted text, recorded before
+    /// `clear()` so `NodeView.touchesEnded` still suppresses press activation.
+    private weak var suppressedTapTouch: UITouch?
     /// How many paragraphs keep their interaction once a finger has left.
     static let kept = 3
     /// Where Copy writes: the system's pasteboard (a test names its own,
@@ -49,17 +52,24 @@ final class TextSelectionHost: TextSelecting {
         node.isParagraph && presenter?.views[node.id] === node && !node.inert && !node.isHidden
             && (node.textSelectable || node.inlineText.contains(where: \.selectsAll))
     }
+    /// The input that owns touches on `node`. Paragraphs inside a nested
+    /// `UIScrollView` or pressable ancestor stay local so hit testing never
+    /// routes their touches out of the nested scroller to an outer surface.
+    private func touchText(for node: NodeView) -> SelectableText? {
+        if let exact = texts.first(where: { $0.document == nil && $0.node === node }) { return exact }
+        return texts.first { held in
+            guard let doc = held.document, let owner = doc.owner, doc.contains(node) else { return false }
+            return SelectionDocument.sharesTouchSurface(node, with: owner)
+        }
+    }
     func text(for node: NodeView) -> SelectableText? {
-        // An active selection wins so an idle standalone input inside a nested
-        // scroller cannot shadow an active spanning document.
+        // An active selection wins for selection queries (`copy`, `selectAll`,
+        // `hasSelection`) so an idle standalone input inside a nested scroller
+        // cannot shadow an active spanning document.
         if let active = texts.first(where: { $0.selected.length > 0 && ($0.node === node || $0.document?.contains(node) == true) }) {
             return active
         }
-        if let exact = texts.first(where: { $0.document == nil && $0.node === node }) { return exact }
-        return texts.first { held in
-            guard let doc = held.document, doc.contains(node) else { return false }
-            return SelectionDocument.container(of: node) === doc.owner
-        }
+        return touchText(for: node)
     }
     /// The selection, if there is one: its paragraph, and its range in that
     /// paragraph's own text (its source, as `selectionchange` reports it).
@@ -69,39 +79,55 @@ final class TextSelectionHost: TextSelecting {
     }
 
     func touched(_ node: NodeView) {
-        guard text(for: node) == nil, admits(node) else { return }
+        guard touchText(for: node) == nil, admits(node) else { return }
         install(node)
     }
-    func surface(for node: NodeView) -> UIView? { text(for: node)?.document?.surface }
+    func surface(for node: NodeView) -> UIView? { touchText(for: node)?.document?.surface }
     func routesToSurface(_ node: NodeView) -> Bool {
-        if let held = text(for: node) { return held.document != nil }
-        return admits(node) && documentParagraphs(for: node) != nil
+        if let held = touchText(for: node) { return held.document != nil }
+        guard admits(node), let found = documentParagraphs(for: node) else { return false }
+        return SelectionDocument.sharesTouchSurface(node, with: found.owner)
     }
-    func hasSelection(in node: NodeView) -> Bool { text(for: node)?.selected.length ?? 0 > 0 }
+    func hasSelection(in view: UIView) -> Bool {
+        texts.contains { held in
+            guard held.selected.length > 0 else { return false }
+            if let doc = held.document { return doc.selects(view, in: held.selected) }
+            return held.node === view
+        }
+    }
     var hasActiveSelection: Bool { texts.contains { $0.selected.length > 0 } }
+    func dismissedSelection(for touch: UITouch) -> Bool { suppressedTapTouch === touch }
+    func recordSuppressedTap(_ touch: UITouch) { suppressedTapTouch = touch }
     func owns(_ view: UIView) -> Bool {
         texts.contains { held in
             guard held.selected.length > 0 else { return false }
             let hostView = held.textInputView
-            return view === hostView || view.isDescendant(of: hostView)
-                || held.node === view || held.document?.containsView(view) == true
+            if view === hostView || view.isDescendant(of: hostView) { return true }
+            if let doc = held.document {
+                guard let owner = doc.owner, let part = doc.part(for: view) else { return false }
+                return SelectionDocument.sharesTouchSurface(part.node, with: owner)
+            }
+            return held.node === view
         }
     }
     func canSelectAll(in node: NodeView) -> Bool { text(for: node)?.canSelectAll == true }
     @discardableResult
     func selectAll(_ node: NodeView) -> Bool { text(for: node)?.selectAllDocument() == true }
     func interactionHolds(_ gesture: UIGestureRecognizer, on paragraph: NodeView) -> Bool {
-        text(for: paragraph)?.interaction.gesturesForFailureRequirements.contains { $0 === gesture } == true
+        touchText(for: paragraph)?.interaction.gesturesForFailureRequirements.contains { $0 === gesture } == true
     }
     @discardableResult
     func install(_ node: NodeView) -> SelectableText {
-        if let held = text(for: node) { return held }
-        for old in texts where !old.busy && old.document?.contains(node) == true { drop(old) }
+        if let held = touchText(for: node) { return held }
         while texts.count >= Self.kept, let old = texts.first(where: { !$0.busy }) { drop(old) }
-        let document = documentParagraphs(for: node).map { SelectionDocument(owner: $0.owner, paragraphs: $0.paragraphs, host: self) }
-        if let document {
+        let document = documentParagraphs(for: node).flatMap {
+            SelectionDocument.sharesTouchSurface(node, with: $0.owner)
+                ? SelectionDocument(owner: $0.owner, paragraphs: $0.paragraphs, host: self)
+                : nil
+        }
+        if let document, let owner = document.owner {
             for old in texts where !old.busy && old.document == nil {
-                if let n = old.node, document.contains(n) { drop(old) }
+                if let n = old.node, document.contains(n), SelectionDocument.sharesTouchSurface(n, with: owner) { drop(old) }
             }
         }
         let made = SelectableText(node: node, host: self, document: document)
@@ -116,7 +142,9 @@ final class TextSelectionHost: TextSelecting {
         guard paragraphs.count > 1, paragraphs.allSatisfy({ $0.contextMenuSource == nil && !$0.hasInlineContextMenu }) else { return nil }
         return (owner, paragraphs)
     }
-    func remove(_ node: NodeView) { if let held = text(for: node) { drop(held) } }
+    func remove(_ node: NodeView) {
+        for held in texts where held.node === node || held.document?.contains(node) == true { drop(held) }
+    }
     private func drop(_ held: SelectableText) {
         texts.removeAll { $0 === held }
         held.detach()
@@ -125,31 +153,69 @@ final class TextSelectionHost: TextSelecting {
     /// After a batch: text that changed drops its selection, text
     /// that is no longer selectable gives its interaction back, and a
     /// selection whose paragraph was laid out again is shown where it is.
+    /// Idle standalone inputs whose scroll or pressable boundary went away
+    /// are reconciled back to their enclosing document.
     func batchEnded() {
         for held in texts where !held.settle() { drop(held) }
+        for held in texts where !held.busy && held.document == nil {
+            guard let n = held.node else { continue }
+            if let found = documentParagraphs(for: n), SelectionDocument.sharesTouchSurface(n, with: found.owner) {
+                drop(held)
+            }
+        }
         syncDismissObservers()
+    }
+    private func selectionAffected(by scrollView: UIScrollView, held: SelectableText) -> Bool {
+        if let doc = held.document {
+            return doc.owner?.scrollView === scrollView || doc.parts.contains(where: { $0.node.isDescendant(of: scrollView) })
+        }
+        return held.node?.isDescendant(of: scrollView) == true
     }
     func scrolled(_ scrollView: UIScrollView) {
         guard hasActiveSelection else { return }
-        for held in texts where held.selected.length > 0 {
-            guard let doc = held.document else { continue }
-            if doc.owner?.scrollView === scrollView || doc.parts.contains(where: { $0.node.isDescendant(of: scrollView) }) {
+        for held in texts where held.selected.length > 0 && selectionAffected(by: scrollView, held: held) {
+            if let doc = held.document {
                 doc.syncFrame()
                 doc.syncSurfaceMask(for: held.selected)
-                held.invalidateDisplay()
             }
+            held.invalidateDisplay()
+        }
+    }
+    func scrollWillBeginDragging(_ scrollView: UIScrollView) {
+        guard hasActiveSelection else { return }
+        for held in texts where held.selected.length > 0 && selectionAffected(by: scrollView, held: held) {
+            held.dismissMenu()
         }
     }
     func clear() {
+        suppressedTapTouch = nil
         texts.forEach { $0.clear() }
         syncDismissObservers()
     }
     /// One selection on the page: `keep`'s.
     func selected(in keep: SelectableText) {
+        suppressedTapTouch = nil
+        if keep.document == nil, let node = keep.node, node.textSelectable,
+           let owner = node.selectAllElement, owner !== node,
+           let found = documentParagraphs(for: node), found.owner === owner {
+            let shared: SelectableText
+            if let existing = texts.first(where: { $0.document?.owner === owner }) {
+                shared = existing
+            } else {
+                while texts.count >= Self.kept, let old = texts.first(where: { !$0.busy && $0 !== keep }) { drop(old) }
+                let doc = SelectionDocument(owner: owner, paragraphs: found.paragraphs, host: self)
+                let anchor = found.paragraphs.first { SelectionDocument.sharesTouchSurface($0, with: owner) } ?? found.paragraphs[0]
+                let made = SelectableText(node: anchor, host: self, document: doc)
+                texts.append(made)
+                shared = made
+            }
+            _ = shared.selectAllDocument()
+            return
+        }
         for held in texts where held !== keep { held.clear() }
-        if let doc = keep.document {
+        if let doc = keep.document, let owner = doc.owner {
             for old in texts where old !== keep && !old.busy && old.document == nil {
-                if let n = old.node, doc.contains(n) { drop(old) }
+                if let n = old.node, doc.contains(n), SelectionDocument.sharesTouchSurface(n, with: owner) { drop(old) }
             }
         }
         syncDismissObservers()
@@ -192,13 +258,14 @@ final class TextSelectionHost: TextSelecting {
         let held = install(node)
         let point = held.node.map { node.convert(point, to: $0) } ?? point
         guard held.selectWord(at: point) else { return nil }
-        if let document = held.document, let part = document.parts.first(where: { $0.node === node }) {
-            let selected = NSIntersectionRange(held.selected, part.range)
+        let active = text(for: node) ?? held
+        if let document = active.document, let part = document.parts.first(where: { $0.node === node }) {
+            let selected = NSIntersectionRange(active.selected, part.range)
             guard selected.length > 0 else { return nil }
             let local = NSRange(location: selected.location - part.start, length: selected.length)
             return SelectableText.sourceSelection(in: node, shaped: local)
         }
-        return held.reportable
+        return active.reportable
     }
     @discardableResult
     func copy(_ node: NodeView) -> Bool {
@@ -425,13 +492,16 @@ final class SelectableText: UIResponder, UITextInput, UITextInteractionDelegate 
         reported = range
         host.report(node, found?.text ?? "", range)
     }
+    func dismissMenu() {
+        textInputView.interactions.compactMap { $0 as? UIEditMenuInteraction }.forEach { $0.dismissMenu() }
+    }
     /// Nothing is selected any more, said to UIKit so its handles go.
     func clear() {
         guard selected.length > 0 else { return }
         inputDelegate?.selectionWillChange(self)
         set(NSRange(location: 0, length: 0))
         inputDelegate?.selectionDidChange(self)
-        textInputView.interactions.compactMap { $0 as? UIEditMenuInteraction }.forEach { $0.dismissMenu() }
+        dismissMenu()
     }
     /// The whole selectable range of this paragraph or shared document.
     var allSelectableRange: NSRange {
@@ -709,7 +779,9 @@ final class SelectionDismissObserver: UIGestureRecognizer, UIGestureRecognizerDe
         guard let touch = tracked, touches.contains(touch), !moved, host.hasActiveSelection, let presenter,
               !presenter.cancelledPressTouches.contains(touch),
               !(touch.view.flatMap(NodeView.innermost)?.isCancelledPressTouch(touch) == true) else { return }
+        let hitSelected = touch.view.map { host.hasSelection(in: $0) } ?? false
         host.clear()
+        if hitSelected { host.recordSuppressedTap(touch) }
     }
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
         super.touchesCancelled(touches, with: event)

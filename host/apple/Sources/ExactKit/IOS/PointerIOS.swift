@@ -516,12 +516,24 @@ extension NodeView {
     package override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         if canvasTouches(touches, phase: "up", event: event) { return }
         #if os(iOS)
-        if let presenter, presenter.textSelection.hasActiveSelection,
-           let t = touches.first, let view = t.view, !presenter.textSelection.owns(view),
-           !presenter.contextRetainsFocus(self),
-           !presenter.cancelledPressTouches.contains(t),
-           !isCancelledPressTouch(t) {
-            presenter.textSelection.clear()
+        if let presenter, let t = touches.first {
+            if presenter.textSelection.dismissedSelection(for: t) {
+                cancelPressContact()
+                return
+            }
+            if presenter.textSelection.hasActiveSelection,
+               let view = t.view, !presenter.textSelection.owns(view),
+               !presenter.contextRetainsFocus(self),
+               !presenter.cancelledPressTouches.contains(t),
+               !isCancelledPressTouch(t) {
+                let selectedTarget = presenter.textSelection.hasSelection(in: self)
+                    || presenter.textSelection.hasSelection(in: view)
+                presenter.textSelection.clear()
+                if selectedTarget {
+                    cancelPressContact()
+                    return
+                }
+            }
         }
         #endif
         guard let contact = currentPressContact(touches) else { return }

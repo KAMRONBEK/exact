@@ -725,6 +725,7 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
     package func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
         #if os(iOS)
         PinchLift.clearIfEnded(for: scrollView)
+        presenter?.textSelection.scrollWillBeginDragging(scrollView)
         #endif
         if let session = presenter?.session { session.frameHealth.beginScroll(scrollView, session: session) }
         presenter?.elementScrolls.userScrolled(scrollView) // its own scroller, or a grouped list's collection

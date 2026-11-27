@@ -27,10 +27,15 @@ package protocol TextSelecting: AnyObject {
     /// A scroll view moved; shared documents whose owner or parts live under it
     /// sync their surface extent and invalidate selection geometry.
     func scrolled(_ scrollView: UIScrollView)
-    /// Whether text of `node` is selected.
-    func hasSelection(in node: NodeView) -> Bool
+    /// A scroll view began dragging; dismiss any floating edit menu while keeping the selection.
+    func scrollWillBeginDragging(_ scrollView: UIScrollView)
+    /// Whether text of `view` is selected.
+    func hasSelection(in view: UIView) -> Bool
     /// Whether any selectable text on the page holds a non-empty selection.
     var hasActiveSelection: Bool { get }
+    /// Whether `touch` just dismissed a selection covering the touched target,
+    /// so `touchesEnded` suppresses its press instead of activating it.
+    func dismissedSelection(for touch: UITouch) -> Bool
     /// Whether `view` belongs to the active selection (its text input view,
     /// handles, or one of its selected paragraphs).
     func owns(_ view: UIView) -> Bool
@@ -67,8 +72,10 @@ package final class NoTextSelection: TextSelecting {
     package func remove(_ node: NodeView) {}
     package func batchEnded() {}
     package func scrolled(_ scrollView: UIScrollView) {}
-    package func hasSelection(in node: NodeView) -> Bool { false }
+    package func scrollWillBeginDragging(_ scrollView: UIScrollView) {}
+    package func hasSelection(in view: UIView) -> Bool { false }
     package var hasActiveSelection: Bool { false }
+    package func dismissedSelection(for touch: UITouch) -> Bool { false }
     package func owns(_ view: UIView) -> Bool { false }
     package func canSelectAll(in node: NodeView) -> Bool { false }
     package func selectAll(_ node: NodeView) -> Bool { false }

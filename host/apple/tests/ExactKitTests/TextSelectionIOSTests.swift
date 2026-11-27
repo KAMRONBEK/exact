@@ -1272,6 +1272,173 @@ final class TextSelectionIOSTests: XCTestCase {
         _ = second
     }
 
+    /// expo/exact#2001: a paragraph inside a nested horizontal scroll stays on its
+    /// own view for hit testing even while an enclosing shared document has an
+    /// active selection, so swiping the code block reaches the nested UIScrollView
+    /// instead of routing out to the enclosing SelectionSurface (both with and
+    /// without a prior touch inside the code block), drags move contentOffset.x
+    /// without popping a pushed route, highlighted code consumes taps without
+    /// firing press, `user-select="all"` keeps nested scroller touches local,
+    /// removing a scroll boundary reconciles idle standalone inputs, and clipped
+    /// overflow outside the scrollport does not steal handle targeting.
+    func testActiveSelectionDoesNotStealTouchesFromNestedHorizontalScroll() throws {
+        let ops: [[String: Any]] = [
+            box(1, style: ["user_select": "text"]),
+            text(2, "First paragraph of a comment."),
+            box(3, handlers: ["press"]),
+            box(4, style: ["overflow_x": "auto", "overflow_y": "hidden"]),
+            text(5, "let numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];", style: ["white_space": "pre", "user_select": "text"], handlers: ["press"]),
+            text(6, "Second paragraph."),
+            ["op": "children", "id": 4, "ids": [5]],
+            ["op": "children", "id": 1, "ids": [2, 3, 4, 6]], ["op": "roots", "ids": [1]],
+            frame(1, 0, h: 300, w: 360),
+            frame(2, 10, h: 24, x: 16, w: 328),
+            frame(3, 44, h: 44, x: 16, w: 328),
+            frame(4, 96, h: 40, x: 16, w: 200),
+            frame(5, 0, h: 30, x: 0, w: 600),
+            frame(6, 150, h: 24, x: 16, w: 328),
+            ["op": "content", "id": 4, "w": 600.0, "h": 40.0],
+        ]
+
+        // Case A: pushed route with no prior touch inside the code block.
+        let p = mounted(ops)
+        let rootVC = UIViewController()
+        let detailVC = UIViewController()
+        let nav = UINavigationController(rootViewController: rootVC)
+        nav.pushViewController(detailVC, animated: false)
+        window?.rootViewController = nav
+        detailVC.view.addSubview(p.viewport)
+        p.viewport.frame = detailVC.view.bounds
+        p.viewport.layoutIfNeeded()
+
+        let owner = try node(p, 1), p1 = try node(p, 2), scroller = try node(p, 4), code = try node(p, 5), p2 = try node(p, 6)
+        let scrollView = try XCTUnwrap(scroller.scrollView)
+        let event = TextTouchEvent()
+
+        _ = try XCTUnwrap(p.selectionHost.selectWord(in: p1, at: try point(in: p1, of: "paragraph")))
+        let surface = try XCTUnwrap(p.selectionHost.surface(for: p1))
+        XCTAssertTrue(p1.hitTest(CGPoint(x: 20, y: 10), with: event) === surface)
+        XCTAssertTrue(p2.hitTest(CGPoint(x: 20, y: 10), with: event) === surface)
+        let codeHitWithoutPrior = try XCTUnwrap(owner.hitTest(CGPoint(x: 40, y: 110), with: event))
+        XCTAssertTrue(codeHitWithoutPrior === code, "code inside nested scroll must not route hits out to enclosing SelectionSurface")
+        XCTAssertTrue(codeHitWithoutPrior.isDescendant(of: scrollView), "nested UIScrollView must remain an ancestor of the hit view")
+        XCTAssertNil(p.selectionHost.surface(for: code))
+        XCTAssertFalse(p.textSelection.routesToSurface(code))
+        XCTAssertFalse(p.textSelection.owns(code))
+        XCTAssertFalse(p.textSelection.hasSelection(in: code), "unhighlighted code reports no selection")
+
+        // Simulate horizontal drag left then right on the nested scroller while p1 is selected:
+        // contentOffset moves both directions, selection remains intact, and the pushed route stays mounted.
+        scroller.scrollViewWillBeginDragging(scrollView)
+        scrollView.contentOffset = CGPoint(x: 120, y: 0)
+        scroller.scrollViewDidScroll(scrollView)
+        XCTAssertEqual(scrollView.contentOffset.x, 120, accuracy: 0.5)
+        XCTAssertTrue(p.textSelection.hasActiveSelection, "horizontal scroll inside code keeps p1 selection active")
+        XCTAssertEqual(nav.viewControllers.count, 2, "swiping inside code must not pop the pushed route")
+
+        // Handle targeting at nonzero scroll offset must ignore clipped-out code past the scrollport edge.
+        let doc = try XCTUnwrap(p.selectionHost.text(for: p1)?.document)
+        let outsideScrollport = CGPoint(x: 280, y: 110) // inside code's unclipped width (600) but right of scroller (x=16..216)
+        XCTAssertNil(doc.paragraph(at: outsideScrollport), "clipped-out portion of scrolled code must not claim points past scrollport")
+        let draggedIndex = doc.index(at: outsideScrollport)
+        XCTAssertNotEqual(doc.part(at: draggedIndex)?.node, code, "clipped-out code must not steal handle targeting from visible paragraphs")
+
+        scroller.scrollViewWillBeginDragging(scrollView)
+        scrollView.contentOffset = CGPoint(x: 0, y: 0)
+        scroller.scrollViewDidScroll(scrollView)
+        XCTAssertEqual(scrollView.contentOffset.x, 0, accuracy: 0.5)
+        XCTAssertEqual(nav.viewControllers.count, 2, "swiping right back to offset 0 keeps the pushed route")
+
+        // Tapping unhighlighted code clears p1's selection AND delivers code's press handler.
+        var pressedIds: [UInt32] = []
+        p.onPress = { id in pressedIds.append(id) }
+        let unhighlightedTap = EndingTouch(code)
+        code.touchesBegan([unhighlightedTap], with: event)
+        unhighlightedTap.lifted = true
+        code.touchesEnded([unhighlightedTap], with: event)
+        XCTAssertFalse(p.textSelection.hasActiveSelection)
+        XCTAssertEqual(pressedIds, [5], "tapping unhighlighted code clears selection and delivers press")
+        XCTAssertFalse(code.pressed)
+
+        // Select All spans p1, code, and p2; tapping highlighted code clears selection WITHOUT firing press or leaking pressed state,
+        // even when SelectionDismissObserver delivers touchesEnded before NodeView.touchesEnded (UIKit's real delivery order).
+        pressedIds.removeAll()
+        XCTAssertTrue(p.textSelection.selectAll(p1))
+        XCTAssertTrue(p.textSelection.hasSelection(in: code))
+        XCTAssertTrue(p.selectionHost.text(for: p1)?.selectedText.contains("let numbers") == true)
+        let observer = try XCTUnwrap(p.documentHost.gestureRecognizers?.first { $0 is SelectionDismissObserver })
+        let highlightedTap = EndingTouch(code)
+        observer.touchesBegan([highlightedTap], with: event)
+        code.touchesBegan([highlightedTap], with: event)
+        highlightedTap.lifted = true
+        observer.touchesEnded([highlightedTap], with: event)
+        XCTAssertFalse(p.textSelection.hasActiveSelection, "dismiss observer clears selection on lift")
+        code.touchesEnded([highlightedTap], with: event)
+        XCTAssertTrue(pressedIds.isEmpty, "tapping highlighted code must clear selection without firing press")
+        XCTAssertFalse(code.pressed, "consuming tap on highlighted code must reset pressed state")
+
+        // Case B: fresh fixture — prior touch on code installs standalone input, then select p1, then touch code.
+        let pPrior = mounted(ops)
+        let ownerB = try node(pPrior, 1), p1B = try node(pPrior, 2), scrollerB = try node(pPrior, 4), codeB = try node(pPrior, 5)
+        let scrollViewB = try XCTUnwrap(scrollerB.scrollView)
+        _ = ownerB.hitTest(CGPoint(x: 40, y: 110), with: event)
+        let priorInput = try XCTUnwrap(pPrior.selectionHost.text(for: codeB), "prior touch must install local input on code")
+        XCTAssertNil(priorInput.document, "prior touch input on nested scroller must be standalone")
+        _ = try XCTUnwrap(pPrior.selectionHost.selectWord(in: p1B, at: try point(in: p1B, of: "paragraph")))
+        let codeHitWithPrior = try XCTUnwrap(ownerB.hitTest(CGPoint(x: 40, y: 110), with: event))
+        XCTAssertTrue(codeHitWithPrior === codeB, "active document selection must not steal touches after prior scroll")
+        XCTAssertTrue(codeHitWithPrior.isDescendant(of: scrollViewB))
+
+        // Removing the scroll boundary reconciles the idle standalone input back to the shared document.
+        pPrior.apply(wireBatch([
+            ["op": "style", "id": 4, "style": ["overflow_x": "visible", "overflow_y": "visible"]],
+        ]))
+        XCTAssertNil(scrollerB.scrollView, "removing overflow removes UIScrollView")
+        XCTAssertTrue(pPrior.textSelection.routesToSurface(codeB), "after removing scroll boundary, code routes to shared surface")
+        XCTAssertTrue(pPrior.textSelection.owns(codeB), "after removing scroll boundary, active document owns code")
+        let surfaceB = try XCTUnwrap(pPrior.selectionHost.surface(for: p1B))
+        XCTAssertTrue(ownerB.hitTest(CGPoint(x: 40, y: 110), with: event) === surfaceB)
+
+        // Adding a scroll boundary over the initiating paragraph stops `owns` from claiming it.
+        pPrior.apply(wireBatch([
+            ["op": "style", "id": 1, "style": ["user_select": "text"]],
+            ["op": "style", "id": 4, "style": ["overflow_x": "auto", "overflow_y": "hidden"]],
+        ]))
+        XCTAssertFalse(pPrior.textSelection.owns(codeB), "re-added scroll boundary drops ownership")
+
+        // Case C: enclosing `user-select="all"` preserves atomic range across nested scroller in BOTH directions while keeping scroller hit-testing local.
+        let pAll = mounted([
+            box(1, style: ["user_select": "all"]),
+            text(2, "Intro sentence."),
+            box(4, style: ["overflow_x": "auto", "overflow_y": "hidden"]),
+            text(5, "const payload = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];", style: ["white_space": "pre"]),
+            ["op": "children", "id": 4, "ids": [5]],
+            ["op": "children", "id": 1, "ids": [2, 4]], ["op": "roots", "ids": [1]],
+            frame(1, 0, h: 200, w: 360),
+            frame(2, 10, h: 24, x: 16, w: 328),
+            frame(4, 50, h: 40, x: 16, w: 200),
+            frame(5, 0, h: 30, x: 0, w: 500),
+            ["op": "content", "id": 4, "w": 500.0, "h": 40.0],
+        ])
+        let ownerAll = try node(pAll, 1), p1All = try node(pAll, 2), scrollerAll = try node(pAll, 4), codeAll = try node(pAll, 5)
+        let scrollViewAll = try XCTUnwrap(scrollerAll.scrollView)
+        _ = try XCTUnwrap(pAll.selectionHost.selectWord(in: p1All, at: try point(in: p1All, of: "Intro")))
+        XCTAssertTrue(pAll.selectionHost.text(for: p1All)?.selectedText.contains("const payload") == true, "user-select=all still selects atomically across nested scroller")
+        XCTAssertTrue(pAll.textSelection.hasSelection(in: codeAll))
+        let hitAll = try XCTUnwrap(ownerAll.hitTest(CGPoint(x: 40, y: 65), with: event))
+        XCTAssertTrue(hitAll === codeAll, "user-select=all must not route nested scroller touches out to outer surface")
+        XCTAssertTrue(hitAll.isDescendant(of: scrollViewAll))
+        XCTAssertFalse(pAll.textSelection.routesToSurface(codeAll))
+        XCTAssertFalse(pAll.textSelection.owns(codeAll))
+        // Reverse direction: starting selection inside the nested scroller still promotes to the full user-select="all" element.
+        pAll.textSelection.clear()
+        _ = try XCTUnwrap(pAll.selectionHost.selectWord(in: codeAll, at: try point(in: codeAll, of: "payload")))
+        XCTAssertTrue(pAll.selectionHost.text(for: codeAll)?.selectedText.contains("Intro sentence.") == true, "selecting inside nested scroller under user-select=all selects enclosing element")
+        XCTAssertTrue(pAll.textSelection.hasSelection(in: p1All))
+        XCTAssertTrue(pAll.textSelection.hasSelection(in: codeAll))
+        XCTAssertTrue(ownerAll.hitTest(CGPoint(x: 40, y: 65), with: event) === codeAll, "nested scroller stays local after reverse-direction user-select=all")
+    }
+
 }
 /// A touch on `hit` whose phase a test ends: UIKit's end of it never reached the observers.
 private final class EndingTouch: UITouch {
