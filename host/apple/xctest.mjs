@@ -213,6 +213,8 @@ export function compileFixtures(root, run, env, dir, prefix, appId) {
   contract([resolve(root, 'host/apple/tests/fixtures/bar-hosted.contract'), '-o', env[`${prefix}_BAR_HOSTED_PLAN`] = resolve(dir, 'bar-hosted.plan')]);
   // NavigationBarIOSTests': a header's title drawn as a face, in an ink per scheme.
   contract([resolve(root, 'host/apple/tests/fixtures/bar-face-scheme.contract'), '-o', env[`${prefix}_BAR_FACE_SCHEME_PLAN`] = resolve(dir, 'bar-face-scheme.plan')]);
+  contract([resolve(root, 'host/apple/tests/fixtures/nav-back-guard.contract'), '-o', env[`${prefix}_NAV_BACK_GUARD_PLAN`] = resolve(dir, 'nav-back-guard.plan')]);
+  contract([resolve(root, 'host/apple/tests/fixtures/split-back-guard.contract'), '-o', env[`${prefix}_SPLIT_BACK_GUARD_PLAN`] = resolve(dir, 'split-back-guard.plan')]);
   contract([resolve(root, 'host/apple/tests/fixtures/dialog-sheet-reads.contract'), '-o', env[`${prefix}_DIALOG_SHEET_READS_PLAN`] = resolve(dir, 'dialog-sheet-reads.plan')]);
   contract([resolve(root, 'host/apple/tests/fixtures/route-backdrop.contract'), '-o', env[`${prefix}_ROUTE_BACKDROP_PLAN`] = resolve(dir, 'route-backdrop.plan')]);
   // RouteAllocationIOSTests': a route's controller allocation and vertical bar (LLP 1123 D4).

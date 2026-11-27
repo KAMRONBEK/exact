@@ -597,7 +597,9 @@ extension NavigationHost {
         // Nested in a split's list column, the detail's column has its bar
         // hidden by UIKit, which shows its top in the list's: the route on top
         // decides that bar, under its own column's opt-outs (LLP 1127 D7)
-        if let split, nav === split.detail, split.nested { return showNavigationBar(split.list, for: c, animated: animated) }
+        if let ownerSplit = (split?.detail === nav ? split : tabSplits.values.first { $0.detail === nav }), ownerSplit.nested {
+            return showNavigationBar(ownerSplit.list, for: c, animated: animated)
+        }
         showNavigationBar(nav, for: c, animated: animated)
     }
 

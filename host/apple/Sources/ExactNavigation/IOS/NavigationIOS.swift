@@ -53,6 +53,8 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
     private var syncYieldReported = false
     /// A pop UIKit committed with no call Exact heard is followed in the next turn (`followPopsNextTurn`).
     var followOwed = false
+    /// A navigation-bar Back tap queued via `UINavigationItem.backAction` awaits its deferred turn.
+    var backActionPending = false
     private var mounting = false
     private(set) weak var container: NodeView?
     private(set) var routeIDs: [UInt32] = []
@@ -1475,6 +1477,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
         controllers.removeAll()
         routeIDs = []
         projectionHeld = false
+        backActionPending = false
         modalWaiting = false
         pendingPress?.pending = false; pendingPress?.settle(); pendingPress = nil
         lastTransition = "idle"; reselected = nil; tabsHeld = false

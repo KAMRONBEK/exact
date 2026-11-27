@@ -339,6 +339,7 @@ extension NavigationHost: NavigationHosting {
         guard !ExactEnv.authoredChrome, let id = node.props["id"], id == container?.props["navigationBack"] else { return nil }
         for route in controllers.values where backButtonID(route.projectedSource) == node.id {
             guard let nav = route.navigationController, nav.topViewController === route, barShows(nav),
+                  nav.presentedViewController == nil, route.presentedViewController == nil,
                   route.viewIfLoaded?.window != nil else { continue }
             return shownBar(of: nav)
         }
