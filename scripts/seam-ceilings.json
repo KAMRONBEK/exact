@@ -19,7 +19,7 @@
   },
   "counts": {
     "nodeViewCasts": {
-      "ceiling": 596,
+      "ceiling": 593,
       "sites": [
         "host/apple/Sources/ExactAnimations/CssAnimationPlay.swift: (layer.delegate as? NodeView",
         "host/apple/Sources/ExactCollections/Collection.swift: current as? NodeView",
@@ -567,10 +567,7 @@
         "host/apple/Sources/ExactNavigation/IOS/ModalIOS.swift: $0 as? NodeView",
         "host/apple/Sources/ExactNavigation/IOS/ModalIOS.swift: context.sourceView as? NodeView",
         "host/apple/Sources/ExactNavigation/IOS/ModalIOS.swift: view as? NodeView",
-        "host/apple/Sources/ExactNavigation/IOS/NavigationBarIOS.swift: $0 as? NodeView",
-        "host/apple/Sources/ExactNavigation/IOS/NavigationBottomEdgeIOS.swift: $0 as? NodeView",
         "host/apple/Sources/ExactNavigation/IOS/NavigationCoversIOS.swift: $0 as? NodeView",
-        "host/apple/Sources/ExactNavigation/IOS/NavigationHostingIOS.swift: $0 as? NodeView",
         "host/apple/Sources/ExactNavigation/IOS/NavigationHostingIOS.swift: $0 as? NodeView",
         "host/apple/Sources/ExactNavigation/IOS/NavigationHostingIOS.swift: view as? NodeView",
         "host/apple/Sources/ExactNavigation/IOS/NavigationIOS.swift: ($0 as? NodeView",

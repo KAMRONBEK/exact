@@ -668,6 +668,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
             // The split's own transition (`show(_:)`, a rotation) ends where no stack's delegate hears it
             if let transition = split?.controller.transitionCoordinator { runHeld(after: transition) }
             owePress()
+            refreshScrollEdgesInTransition()
             reportCovers()
             return
         }
@@ -712,6 +713,7 @@ final class NavigationHost: NSObject, UINavigationControllerDelegate, UIGestureR
             if let transition = nav.transitionCoordinator, !nav.stackRoutes.elementsEqual(stack, by: ===) {
                 held = true
                 runHeld(after: transition)
+                refreshScrollEdgesInTransition(in: nav.stackRoutes.compactMap { $0 as? RouteController })
                 continue
             }
             prepareRoutes(stack, in: nav)

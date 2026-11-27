@@ -744,7 +744,11 @@ extension NavigationHost {
         guard let stack = c.stack else { return }
         let nav = stack as? UINavigationController
         let (shape, bar) = barShape(of: c, in: nav)
-        collapse(c, shape: shape, shows: bar != .hidden, scroller: contentScroller(of: c))
+        // Only skip a header in `collapse` once `project` has actually lifted it out of layout.
+        let liftedShape = shape.flatMap { s in
+            (c.lifted === s.header || c.projectedSource?.header == s.header.id) ? s : nil
+        }
+        collapse(c, shape: liftedShape, shows: bar != .hidden, scroller: contentScroller(of: c))
         reachBottom(c, in: stack, presented: isPresented(nav))
     }
 
@@ -1088,14 +1092,26 @@ extension NavigationHost {
     /// with no bar in containers that take the whole view puts its first
     /// scroller under the status bar the same way (LLP 1130 D3).
     private func collapse(_ c: RouteController, shape: HeaderShape?, shows: Bool, scroller: NodeView?) {
-        let kids = c.node.container.subviews.compactMap { $0 as? NodeView }
+        let kids = Self.orderedChildren(of: c.node)
         // In flow by layout: a popover a context preview lays out is hidden
         // here while it pushes the scroller down (`MenusIOS`), and a title
         // must not collapse with a scroller that is no longer the route's top.
-        let flowing = Self.flowingTopContent
+        let flowing: (FlowChild) -> Bool = { child in
+            switch child {
+            case .view(let view): Self.flowingTopContent(view)
+            case .leaf(let leaf): leaf.isInFlow
+            }
+        }
         let whole = wantsWholeView && presenter.viewportFit != "cover"
-        let node = shape.map { shape in kids.firstIndex { $0 === shape.header }.flatMap { kids[($0 + 1)...].first(where: flowing) } }
-            ?? (shows || whole ? kids.first(where: flowing) : nil)
+        let first: FlowChild?
+        if let shape {
+            first = kids.firstIndex { $0.view === shape.header }.flatMap { kids[($0 + 1)...].first(where: flowing) }
+        } else if shows || whole {
+            first = kids.first(where: flowing)
+        } else {
+            first = nil
+        }
+        let node = first?.view
         var riders: [NodeView] = []
         #if os(iOS)
         if #available(iOS 26.0, *), shape?.level == 1, let scroller, !RouteGeometry.transparentBar(c.node),
@@ -1108,9 +1124,10 @@ extension NavigationHost {
         c.rideBars()
         let covered: Bool
         if case .edges(let edges)? = covers[c.node.id] { covered = edges.top > 0.5 } else { covered = false }
-        let ordinary = shape?.authored.isEmpty != false ? node.flatMap { Self.topScroller($0, target: scroller) } : nil
-        let arranged = scroller.flatMap { node in arrangementScrollers(in: c, top: true).contains(where: { $0 === node }) ? node : nil }
-        let target = !riders.isEmpty ? (covered ? nil : scroller) : (ordinary ?? arranged)
+        let fullyLifted = shape.map { c.lifted === $0.header } ?? true
+        let ordinary = fullyLifted ? node.flatMap { Self.topScroller($0, target: scroller) } : nil
+        let arranged = fullyLifted ? scroller.flatMap { node in arrangementScrollers(in: c, top: true).contains(where: { $0 === node }) ? node : nil } : nil
+        let target = !fullyLifted ? nil : (!riders.isEmpty ? (covered ? nil : scroller) : (ordinary ?? arranged))
         if let target, !riders.isEmpty {
             let frame = target.convert(target.bounds, to: c.node)
             let band = UIEdgeInsets(top: max(0, frame.minY), left: 0, bottom: target.pageBand.bottom, right: 0)

@@ -85,9 +85,14 @@ extension NavigationHost {
         // (`scale`) agree, as the kernel's observations judge them (LLP 1123
         // D9); a route being pushed may not be in a window to say its own
         let half = 0.5 / max(scale, 1)
-        func alone(_ last: NodeView, among children: [NodeView]) -> Bool {
+        func alone(_ last: NodeView, among children: [FlowChild]) -> Bool {
             let top = ControlBars.laid(last).minY
-            return children.allSatisfy { $0 === last || ControlBars.laid($0).maxY <= top + half }
+            return children.allSatisfy { child in
+                switch child {
+                case .view(let view): view === last || ControlBars.laid(view).maxY <= top + half
+                case .leaf(let leaf): leaf.frame.maxY <= top + half
+                }
+            }
         }
         // The scroller and each box around it keep their foot where layout put
         // it, its bottom still at the bottom: a transform of their own that
@@ -105,8 +110,13 @@ extension NavigationHost {
         }
         var parent = route
         while true {
-            let children = parent.container.subviews.compactMap { $0 as? NodeView }.filter { child in flowing(child) && !lifting.contains(where: { $0 === child }) }
-            guard let last = children.last, alone(last, among: children), keepsFoot(last) else { return nil }
+            let children = orderedChildren(of: parent).filter { child in
+                switch child {
+                case .view(let view): flowing(view) && !lifting.contains(where: { $0 === view })
+                case .leaf(let leaf): leaf.isInFlow
+                }
+            }
+            guard case .view(let last)? = children.last, alone(last, among: children), keepsFoot(last) else { return nil }
             // Each reaches the foot of its parent's content box where layout
             // put it (its drawn foot is `keepsFoot`'s): the route's child that
             // box less the cover the kernel may pad it by, a deeper one its
