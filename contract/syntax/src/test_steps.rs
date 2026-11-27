@@ -300,6 +300,15 @@ pub enum Step {
         /// Where.
         span: Span,
     },
+    /// A plain `secret.keep` value seeded in the test's initial scratch store (LLP 1018.000 D1).
+    Secret {
+        /// The granted plain `secret.keep` name.
+        name: String,
+        /// The seeded secret value text.
+        value: String,
+        /// Where.
+        span: Span,
+    },
     /// A persisted state in the test's initial store (LLP 1116 D5).
     Stored {
         /// The state name, including names used by earlier builds.

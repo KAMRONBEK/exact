@@ -565,9 +565,11 @@ if (rustLinked) {
   moduleStorage = rustGrantSet.entries.some(([, , grant]) => ['fs-read', 'fs-write', 'sqlite-open'].includes(grant?.[0]));
 }
 // The granted secrets: a launch whose store holds one passes over a store reader's build-time answer (store-reader.js).
-// A page whose app grants none ships none of it.
+// A page whose app grants none ships none of it. Plain two-word `secret.keep <name>` lines are recorded separately for
+// authored-test seeding (LLP 1018.000 D2), excluding presence-locked grants.
 const secretNames = [...new Set([...tsGrantSet.entries, ...rustGrantSet.entries].filter(([, , grant]) => grant?.[0] === 'secret-keep').map(([, , grant]) => grant[1]))];
-writeFileSync(resolve(gen, 'admission-data.js'), `import {createGrantSet} from './admission.js';export const tsGrantSet=createGrantSet(${JSON.stringify(tsGrantSet)}),rustGrantSet=createGrantSet(${JSON.stringify(rustGrantSet)});\n`);
+const plainSecretNames = [...new Set([...tsGrantSet.entries, ...rustGrantSet.entries].map(([, source]) => grantWords(source)).filter(w => w.length === 2 && w[0] === 'secret.keep').map(w => w[1]))];
+writeFileSync(resolve(gen, 'admission-data.js'), `import {createGrantSet} from './admission.js';export const tsGrantSet=createGrantSet(${JSON.stringify(tsGrantSet)}),rustGrantSet=createGrantSet(${JSON.stringify(rustGrantSet)}),plainSecretGrants=${JSON.stringify(plainSecretNames)};\n`);
 // The app's launch modules that have a web service.
 const launchWeb = launchModules(appDir, manifest, ['web']);
 if (launchWeb.length) {
@@ -627,7 +629,8 @@ writeFileSync(resolve(gen, 'main.js'), [
   // its own lines below use and what production glue reads from `globalThis.exact` (`journal`, `clock`: arrange.js;
   // `views`: media-glue.js; `viewId`: navigation.js; `After`: motion.js); the agent adapter, inspect and the dev
   // loop read the rest, so a development page names them too.
-  `import { data, journal, clock, commit, inflight, Views, viewId, After, Clocked, R, resolvedLocale, Resources${production ? '' : ', agentMode, advance, heldAsks, heldReplies, Mutations, writeRecords, goTo'} } from './rt.js';`,
+  `import { data, journal, clock, commit, inflight, Views, viewId, After, Clocked, R, resolvedLocale, Resources${production ? '' : ', DEVELOPMENT_STORE, Kept, agentMode, advance, heldAsks, heldReplies, Mutations, writeRecords, goTo'} } from './rt.js';`,
+  ...(!production ? [`if (DEVELOPMENT_STORE) globalThis.__exactSeedStored?.(Kept('state'), Kept('secret'), ${JSON.stringify(plainSecretNames)});`] : []),
   `data.appId = ${JSON.stringify(readManifest(appDir, app).app.id)};`,
   `data.keepSurfaceAnswers = ${!tsGrantSet.keepsNoAnswers && !rustGrantSet.keepsNoAnswers};`,
   ...(secretNames.length ? [`import { install as secrets } from './store-reader.js'; secrets(${JSON.stringify(secretNames)});`] : []),

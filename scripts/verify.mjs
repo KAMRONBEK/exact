@@ -572,7 +572,7 @@ export const testEnd = (host, shots, persisted, capture = true, { baseline = nul
   const facts = await seen(s, state);
   // Each web test's store belongs to its own page origin; the relaunch must open that origin.
   const port = host === 'web' ? s.carrier?.port : undefined;
-  const kept = { keep: true, resources: facts.resources, ops: facts.ops, reload: t.reload, launch: t.launch, reached: t.reached, ...(port ? { port } : {}) };
+  const kept = { keep: true, resources: facts.resources, ops: facts.ops, reload: t.reload, seeded: !!t.seeded, launch: t.launch, reached: t.reached, ...(port ? { port } : {}) };
   if (!capture) return kept;
   const own = (t.size ?? [420, 900])[0], near = // the test's own width, else the driver's window (agent.mjs VIEWPORT)
     WEB_SIZES.reduce((a, b) => (Math.abs(b[0] - own) < Math.abs(a[0] - own) ? b : a));
@@ -837,7 +837,7 @@ async function scrolling(app, shots, { key = null, force = false } = {}) {
     rmSync(out, { recursive: true, force: true });
     mkdirSync(out, { recursive: true });
     writeFileSync(tracePath, '');
-    const s = await open({ host: 'ios', app: app.selector, storage: 'verify', env: { EXACT_AGENT_STORAGE_FRESH: '1', ...feel.recorderEnv(tracePath) }, chrome: 'platform', timing: 'platform', touch: 'drag' });
+    const s = await open({ host: 'ios', app: app.selector, storage: 'verify', env: { EXACT_AGENT_STORAGE_FRESH: '1', EXACT_STORE: 'memory', ...feel.recorderEnv(tracePath) }, chrome: 'platform', timing: 'platform', touch: 'drag' });
     let played;
     try {
       await Bun.sleep(2500); // its first loads, on real time; the accessibility runtime the touch runner turns on
@@ -857,7 +857,7 @@ const same = (a, b) => JSON.stringify(a ?? {}) === JSON.stringify(b ?? {});
  * `reload` step), and of those the one whose resources held the most at its end; null when no test passed. */
 export function relaunchStore(results, fresh) {
   const passed = (results ?? []).filter((r) => !r.failures.length && r.store && r.end && !r.end.error);
-  const wrote = (r) => r.end.reload || r.end.ops > (fresh?.ops ?? 0);
+  const wrote = (r) => r.end.seeded || r.end.reload || r.end.ops > (fresh?.ops ?? 0);
   const score = (r) => [wrote(r) ? 1 : 0, JSON.stringify(r.end.resources ?? {}).length, results.indexOf(r)];
   const above = (a, b) => { for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] > b[i]; return false; };
   return passed.reduce((best, r) => (!best || above(score(r), score(best)) ? r : best), null);
@@ -874,7 +874,7 @@ export function judgeRelaunch(test, fresh, after, { busy = [], failed = {}, held
   if (busy.length) problems.push(`  loading  still in flight after ${secs(REAL_MS)} of real time: ${busy.join(', ')}; a store or the network that slow leaves the first screen empty`);
   for (const [name, why] of Object.entries(failed ?? {})) problems.push(`  failed   resource ${name}: ${why}; the screen shows its placeholder or last value`);
   if (!fresh) return { shows: [], problems, ...notes, said: 'it relaunched' };
-  const shows = [...after.texts].filter((t) => !fresh.texts.has(t)), wrote = test.end.reload || test.end.ops > fresh.ops;
+  const shows = [...after.texts].filter((t) => !fresh.texts.has(t)), wrote = test.end.seeded || test.end.reload || test.end.ops > fresh.ops;
   const held = !same(after.resources, fresh.resources), kept = held || !same(after.slots, fresh.slots);
   if (!shows.length && !busy.length && wrote && !same(test.end.resources, fresh.resources) && !held)
     problems.push('  lost     its first screen and resources are a fresh launch\'s, though the test wrote storage and ended holding data: what it stored did not come back');
@@ -910,7 +910,7 @@ export function pinnedLaunch(test, defaults) {
 /** What a fresh launch shows under `launch`'s facts on an empty scratch store, for `seen`'s comparison. */
 async function freshUnder(host, app, launch, store) {
   const [{ open }, { driveStore, removeBrowserProfile }] = await Promise.all([import('./agent.mjs'), import('./agent-launch.mjs')]);
-  const s = await open({ host, app: app.selector, storage: store, env: { EXACT_AGENT_STORAGE_FRESH: '1', EXACT_AGENT_EPHEMERAL_PORT: '1' }, ax: readsAx(host), ...launchOf(launch), substitutes: launch?.substitutes, restoreSubstitutes: true, ...(host === 'web' ? { size: WEB_SIZES[0] } : hostOpen(host, app)) });
+  const s = await open({ host, app: app.selector, storage: store, env: { EXACT_AGENT_STORAGE_FRESH: '1', EXACT_AGENT_EPHEMERAL_PORT: '1', EXACT_STORE: 'memory' }, ax: readsAx(host), ...launchOf(launch), substitutes: launch?.substitutes, restoreSubstitutes: true, ...(host === 'web' ? { size: WEB_SIZES[0] } : hostOpen(host, app)) });
   try {
     for (const [name, value] of Object.entries(preferencesOf(launch))) await s.prefer({ [name]: value });
     await s.clock('data');
@@ -928,7 +928,7 @@ async function freshUnder(host, app, launch, store) {
  * end; then `check both` (the web: at both widths, one capture kept). */
 async function relaunch(host, app, test, fresh, shots, { baseline = null } = {}) {
   const [{ open }, { driveStore, removeBrowserProfile }] = await Promise.all([import('./agent.mjs'), import('./agent-launch.mjs')]);
-  const s = await open({ host, app: app.selector, storage: test.store, ax: readsAx(host), ...launchOf(relaunchFacts(test)), substitutes: test.end.launch?.substitutes, restoreSubstitutes: true, ...(host === 'web' ? { size: WEB_SIZES[0], ...(test.end.port ? { port: test.end.port } : {}) } : hostOpen(host, app)) });
+  const s = await open({ host, app: app.selector, storage: test.store, env: { EXACT_STORE: 'memory' }, ax: readsAx(host), ...launchOf(relaunchFacts(test)), substitutes: test.end.launch?.substitutes, restoreSubstitutes: true, ...(host === 'web' ? { size: WEB_SIZES[0], ...(test.end.port ? { port: test.end.port } : {}) } : hostOpen(host, app)) });
   try {
     for (const [name, value] of Object.entries(preferencesOf(test.end?.launch))) await s.prefer({ [name]: value });
     const started = performance.now(), b = (st) => (st.background?.queued ?? 0) + (st.background?.inFlight ?? 0);
@@ -943,8 +943,10 @@ async function relaunch(host, app, test, fresh, shots, { baseline = null } = {})
     const refusals = await refusalsIn(s), large = await largestText(s, RELAUNCH, { baseline });
     return { test: test.name, ms, shot: path, runs, refusals, large, ...judgeRelaunch(test, fresh, after, { busy, failed: state.failed, heldBy: (state.pending ?? []).filter((p) => p.held).map((p) => p.name) }) };
   } finally {
+    if (host === 'android' && s.carrier?.apk) await s.op({ op: 'clean_store', appId: app.id, store: test.store }).catch(() => {});
     await s.close();
     if (host === 'web') await removeBrowserProfile(driveStore(app, test.store).profile).catch(() => {});
+    else (await import('./agent-secrets.mjs')).cleanRemoteStore({ host, appId: app.id, store: test.store, udid: s.carrier?.udid, serial: s.carrier?.serial, apk: !!s.carrier?.apk });
   }
 }
 

@@ -83,22 +83,27 @@ export function substitutesScript(values, origin, restore) {
   return `if (window === window.top && location.origin === ${JSON.stringify(origin)}) globalThis.__exactLaunchSubstitutes = JSON.parse(${JSON.stringify(JSON.stringify({ values, restore }))});`;
 }
 
-/** Install the first launch's settings in the namespace the app actually opens. */
+/** Install the first launch's settings and plain `secret.keep` fixtures in the namespace the app opens (LLP 1018.000 D2/D3). */
 export function storedScript(env, origin) {
   if (env?.EXACT_AGENT_STORAGE_FRESH !== '1' || !env.EXACT_AGENT_STORED) return '';
   const entries = JSON.parse(env.EXACT_AGENT_STORED);
   const install = (origin, entries) => {
     if (window !== window.top || location.origin !== origin) return;
-    globalThis.__exactSeedStored = (prefix, secret) => {
+    globalThis.__exactSeedStored = (prefix, secret, plainSecrets) => {
+      delete globalThis.__exactSeedStored;
+      const allowed = Array.isArray(plainSecrets) ? new Set(plainSecrets) : null;
       for (const [name, json] of entries) {
-        if (name.startsWith('#oauth.')) {
-          localStorage.setItem(secret + name.slice('#oauth.'.length), json);
+        if (name.startsWith('#oauth.') || name.startsWith('#secret.')) {
+          const key = name.startsWith('#oauth.') ? name.slice('#oauth.'.length) : name.slice('#secret.'.length);
+          if (allowed && !allowed.has(key)) {
+            throw new Error(`stored: secret "${key}" requires a plain secret.keep grant`);
+          }
+          localStorage.setItem(secret + key, json);
           continue;
         }
         const storage = name.startsWith('#window.') ? sessionStorage : localStorage;
         storage.setItem(prefix + name, json);
       }
-      delete globalThis.__exactSeedStored;
     };
   };
   return `(${install})(${JSON.stringify(origin)},${JSON.stringify(entries)})`;

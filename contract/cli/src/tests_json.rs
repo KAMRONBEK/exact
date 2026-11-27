@@ -259,6 +259,12 @@ fn step_json(step: &Step, s: &mut String) {
             s.push_str(",\"account\":");
             s.push_str(account);
         }
+        Step::Secret { name, value, .. } => {
+            s.push_str("{\"op\":\"secret\",\"name\":");
+            q(name, s);
+            s.push_str(",\"value\":");
+            q(value, s);
+        }
         Step::Stored {
             name,
             value,

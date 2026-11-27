@@ -772,6 +772,9 @@ impl<D: DataSource> Bridge<D> {
             Some(io) => (io.endow)(data.grants(), data.app_id(), carried.is_none()),
             None => crate::store::Endowed::none(),
         };
+        if let Some(why) = unbound.as_deref().filter(|w| w.starts_with("stored: ")) {
+            return self.prepare_error(&format!("boot: {why}"));
+        }
         let mut snapshot = snapshot;
         if carried.as_ref().is_none_or(|c| c.fresh_state) {
             self.seed_window_state(&mut snapshot);

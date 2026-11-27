@@ -170,8 +170,12 @@ fn with_shared_secrets(
 /// a process and before anything is written there (`picker::empty_fresh_tree`).
 pub fn endow_bound(grants: &str, app_id: &str, fresh: bool) -> (Option<Bindings>, Option<String>) {
     if fresh {
-        if let Err(e) = crate::picker::empty_fresh_tree(app_id) {
-            return (None, Some(format!("{e:?}")));
+        if let Err(e) = crate::picker::empty_fresh_tree(app_id, grants) {
+            let msg = match &e {
+                exact_runner::DataError::Unavailable(s) if s.starts_with("stored: ") => s.clone(),
+                _ => format!("{e:?}"),
+            };
+            return (None, Some(msg));
         }
     }
     match endow_for(grants, app_id) {

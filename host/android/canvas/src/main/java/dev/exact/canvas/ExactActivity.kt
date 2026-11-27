@@ -180,6 +180,9 @@ open class ExactActivity : Activity() {
                 if (!File(shaders, "com.android.skia.shaders_cache").exists()) Warm.launch()
             }
             environment(arrived)
+            if (Setup.development && intent.getStringExtra("x_agent_seed_wait") == "1") {
+                (drive {} as? AgentDrive)?.awaitSeed()
+            }
             Setup.nativeEnvironment()
             try { FilePicker.start(applicationContext) }
             catch (e: Exception) { android.util.Log.w("exact", "file picker: startup cleanup failed", e) }
@@ -1040,7 +1043,7 @@ open class ExactActivity : Activity() {
         listOf("mi_purge_delay", "mi_eager_commit", "mi_arena_eager_commit").forEach { k ->
             intent.getStringExtra(k)?.let { android.system.Os.setenv("MIMALLOC_" + k.removePrefix("mi_").uppercase(), it, true) }
         }
-        listOf("x_agent", "x_auth_fixture", "x_hatches", "x_agent_storage", "x_agent_storage_fresh", "x_agent_stored", "x_plan", "x_store",
+        listOf("x_agent", "x_auth_fixture", "x_hatches", "x_agent_storage", "x_agent_storage_fresh", "x_agent_stored", "x_agent_stored_file", "x_plan", "x_store",
             "x_agent_epoch", "x_agent_seed", "x_agent_locale", "x_agent_format_locale", "x_agent_time_zone",
             "x_agent_substitutes", "x_agent_fail_fetch", "x_agent_process", "x_agent_home", "x_agent_login_env",
             "x_agent_share", "x_agent_bind", "x_agent_pads", "x_agent_timing", "x_agent_presentation", "x_agent_chrome",

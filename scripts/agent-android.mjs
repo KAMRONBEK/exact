@@ -27,6 +27,7 @@ import { within } from './paths.mjs';
 import { packageDirectories } from './cargo-dep-info.mjs';
 import { parseColour, schemeColours } from './scheme-colours.mjs';
 import { missingDependencies } from './package-libraries.mjs';
+import { withSeedTempFile } from './agent-secrets.mjs';
 import { HOST_DEV, PINNED_RUST, androidPackageId, bakeOutput, bakeWatchEnv, buildBake, claimLive, hermesBundle, cargoEnvironment, copyShaders, linuxBuild, mavenProblems, resolveApp } from './app.mjs';
 import { ANDROID_MIN_API } from './hermes-android.mjs';
 import { ANDROID_TARGET, ANDROID_ABIS, androidAbis, androidSdk, androidToolchainEnv, androidHermesDir, androidBakeLibraryName, stageAndroidBake, stageSoundLibrary } from './android-abi.mjs';
@@ -219,6 +220,13 @@ export function androidDeploy(app, bin, env, appServerUrl, backend) {
     vars.EXACT_PLAN = `${dir}/${basename(plan)}`;
   }
   pushSubstitutes(vars, dir, run);
+  if (vars.EXACT_AGENT_STORED) {
+    const remote = `${dir}/seed-${process.pid}.json`;
+    withSeedTempFile(vars.EXACT_AGENT_STORED, (file) => run(['push', file, remote], 'push stored seed'));
+    run(['shell', `chmod 600 ${quote(remote)}`], 'chmod stored seed');
+    vars.EXACT_AGENT_STORED_FILE = remote;
+    delete vars.EXACT_AGENT_STORED;
+  }
   Object.assign(vars, { HOME: home, EXACT_ASSETS: dir, EXACT_NATIVE_LIBS: dir, EXACT_PAINTER: env.EXACT_PAINTER ?? 'cpu' });
   const assignments = Object.entries(vars).map(([k, v]) => `${k}=${quote(v)}`).join(' ');
   const shot = `${dir}/agent-shot.png`, { lease, release: releasePorts } = reverse(tool, serial, vars);
@@ -358,9 +366,11 @@ function readerDeploy(app, apk, env, reverse) {
     if (fixture) spawnSync(tool, ['-s', serial, 'shell', 'rm', '-f', fixture], { timeout: 5000 });
     releasePorts();
   };
+  const { EXACT_AGENT_STORED: storedSeed, ...publicVars } = vars;
   return {
     serial, dir, shot, cleanup,
-    spawn: () => spawnCarrier(['relay', serial, id, JSON.stringify(vars), JSON.stringify(lease)], env)
+    spawn: () => spawnCarrier(['relay', serial, id, JSON.stringify(publicVars), JSON.stringify(lease)],
+      storedSeed ? { ...env, EXACT_ANDROID_RELAY_STORED: storedSeed } : env)
       .on('close', cleanup).on('error', releasePorts),
     pull(path) {
       const r = spawnSync(tool, ['-s', serial, 'pull', shot, resolve(path)], { encoding: 'utf8' });
@@ -676,8 +686,10 @@ async function relay([serial, id, vars, encodedLease]) {
   try {
     // EXACT_AGENT_INTENT: `am start` words the launch carries besides the drive's, for a drive that starts the app
     // as another app would (a share's `-a android.intent.action.SEND …`, LLP 1133.024 D5).
-    const { EXACT_AGENT_INTENT: intent = '', ...launch } = JSON.parse(vars);
+    const { EXACT_AGENT_INTENT: intent = '', EXACT_AGENT_STORED: argStored = '', ...launch } = JSON.parse(vars || '{}');
+    const storedSeed = process.env.EXACT_ANDROID_RELAY_STORED || argStored;
     const extras = Object.entries(launch).flatMap(([k, v]) => ['--es', `x_${k.slice('EXACT_'.length).toLowerCase()}`, quote(v)]);
+    if (storedSeed) extras.push('--es', 'x_agent_seed_wait', '1');
     console.error(`Android screen before launch: ${await prepareAndroidScreen(tool, serial)}`);
     sh('shell', 'am', 'force-stop', id);
     try {
@@ -709,6 +721,7 @@ async function relay([serial, id, vars, encodedLease]) {
     socket.on('close', () => done(1));
     socket.on('error', () => done(1));
     const answer = () => ready.length ? Promise.resolve(ready.shift()) : new Promise((r) => waiting.push(r));
+    if (storedSeed) socket.write(JSON.stringify({ op: 'seed', stored: storedSeed }) + '\n');
     const say = (line) => process.stdout.write(line + '\n');
     say(await answer()); // the app's `ready`
     connected = true;

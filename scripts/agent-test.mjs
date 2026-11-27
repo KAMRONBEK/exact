@@ -22,6 +22,7 @@ import { onThisMachine, serverUrl } from './app-server.mjs';
 import { backendOrigin, backendOriginSelection, injectBackendOrigin, literalBackendOrigin, staticFacts } from '../js/bake/src/typescript.mjs';
 import { declaredSettings, settingValues } from '../js/bake/src/__exact_env.mjs';
 import { appSettings } from './app-imports.mjs';
+import { cleanRemoteStore, collectAppSecretGrants, validateSecretSteps } from './agent-secrets.mjs';
 import { createRequire } from 'node:module';
 // Snapback's client (snapback4/) is optional: a checkout without it builds every app that does not mount it.
 const snapbackDevice = existsSync(new URL('../snapback4/web/device-build.mjs', import.meta.url)) ? await import('../snapback4/web/device-build.mjs') : null;
@@ -234,6 +235,7 @@ export const pickHint = (host) => host === 'web'
 export function storeBase(appId, host, env = process.env, home = homedir(), sandboxed = false) {
   if (host === 'macos' || host === 'mac') return resolve(home, ...(sandboxed ? ['Library/Containers', appId, 'Data'] : []), 'Library/Caches/exact', appId, 'agent');
   if (host === 'linux') return resolve(env.XDG_CACHE_HOME?.startsWith('/') ? env.XDG_CACHE_HOME : resolve(home, '.cache'), 'exact', appId, 'agent');
+  if (host === 'windows') return env.LOCALAPPDATA ? resolve(env.LOCALAPPDATA, 'exact', appId, 'agent') : null;
   return null;
 }
 /** The origins a web build's sources may fetch: its data module's `net.fetch` grants, as host/web-js/build.mjs
@@ -810,7 +812,7 @@ export async function runTests({ host, browser, file, plan, app, size, env, webD
     const retainSubstitute = ({ key, value, clear }, table = substitutes) => {
       if (clear) delete table[key]; else table[key] = value;
     };
-    const lines = [], preferences = [], stored = [], sessions = [];
+    const lines = [], preferences = [], stored = [], sessions = [], secrets = [];
     const media = {}, permissions = {}; // the latest of each, which a `reload` applies again
     let beforeData = false, leading = 0, reset = null, opensAt = null; // `at`'s location, where the app opens (LLP 1153 D5)
     // `fail fetch` lines that lead the steps are armed before the app's first data load (LLP 1103 D3).
@@ -824,6 +826,7 @@ export async function runTests({ host, browser, file, plan, app, size, env, webD
       if (st.op === 'before-data') beforeData = true;
       else if (st.op === 'fresh') reset = st;
       else if (st.op === 'signed-in') sessions.push(st);
+      else if (st.op === 'secret') secrets.push(st);
       else if (st.op === 'stored') stored.push([st.window ? '#window.' + st.name : st.name, st.json]);
       else if (st.op === 'fail-fetch') { early(st); facts.failFetch = [facts.failFetch, st.times == null ? st.prefix : `${st.prefix}\t${st.times}`].filter(Boolean).join('\n'); if (st.times != null) armed.set(st.prefix, st.line); }
       else if (st.op === 'answer-fetch') facts.failFetch = [facts.failFetch, faultSpecOf([{prefix: st.prefix, method: st.method, hits: 0, armed: true, response: st.response}])].filter(Boolean).join('\n');
@@ -865,22 +868,15 @@ export async function runTests({ host, browser, file, plan, app, size, env, webD
       landed({ name: t.name, index: n, failures: [`${t.name}: line ${reset.line}: ${e.message}`], notes });
       continue;
     }
-    if (sessions.length) {
+    if (sessions.length || secrets.length) {
       try {
-        if (!server) throw new Error('signed-in needs the local OAuth fixture as the app server');
-        const parse = createRequire(import.meta.url)('rolldown/utils').parseSync;
-        const settings = appSettings(selected.dir, launched);
-        const source = settings.modules.get('app.ts');
-        const options = { source, load: settings.load };
-        const code = injectBackendOrigin(settings.code, chosen, parse, launched, options);
-        const grants = staticFacts(code, parse, options).grants ?? '';
-        const plain = new Set(grants.split('\n').map(line => line.trim().split(/\s+/))
-          .map(words => words[0] === 'development' ? words.slice(1) : words)
-          .filter(words => words.length === 2 && words[0] === 'secret.keep').map(words => words[1]));
-        const { signedInSession } = await import('../packages/oauth/test/fixture.ts');
-        for (const st of sessions) {
-          if (!plain.has(st.key)) throw new Error(`line ${st.line}: signed-in requires a plain secret.keep grant for ${st.key}`);
-          stored.push(['#oauth.' + st.key, await signedInSession(server, st.key, st.account)]);
+        if (sessions.length && !server) throw new Error('signed-in needs the local OAuth fixture as the app server');
+        const secretGrants = collectAppSecretGrants(selected, { launched, chosen, webDist, host });
+        validateSecretSteps({ secrets, sessions, grants: secretGrants, host });
+        for (const st of secrets) stored.push(['#secret.' + st.name, st.value]);
+        if (sessions.length) {
+          const { signedInSession } = await import('../packages/oauth/test/fixture.ts');
+          for (const st of sessions) stored.push(['#oauth.' + st.key, await signedInSession(server, st.key, st.account)]);
         }
       } catch (e) {
         landed({ name: t.name, index: n, failures: [`${t.name}: ${e.message}`], notes });
@@ -1049,7 +1045,7 @@ export async function runTests({ host, browser, file, plan, app, size, env, webD
         if (INPUTS.has(st.op)) await settleFired();
         if (st.op === 'type') { typed.add(st.target); touched.add(st.target); } else if (INPUTS.has(st.op) || st.op === 'reload') typed.clear();
         switch (st.op) {
-          case 'size': case 'at': case 'epoch': case 'time-zone': case 'locale': case 'seed': case 'before-data': case 'fresh': case 'stored': case 'signed-in': break; // the session opened with it
+          case 'size': case 'at': case 'epoch': case 'time-zone': case 'locale': case 'seed': case 'before-data': case 'fresh': case 'stored': case 'signed-in': case 'secret': break; // the session opened with it
           case 'prefer-extension':
             if (n >= leading) {
               const next = {...substitutes};
@@ -1372,7 +1368,7 @@ export async function runTests({ host, browser, file, plan, app, size, env, webD
         const pending = (state.pending ?? []).filter((p) => !p.device && !p.held && !p.stream).map((p) => p.name);
         if (pending.length) notes.push(`ended with ${pending.length} request${pending.length === 1 ? '' : 's'} in flight (${pending.join(', ')}): a reply lands at a clock step, so what the test read last may not include it`);
       } catch { /* advice only */ }
-      if (atEnd && closedAt == null) end = await atEnd(s, { name: t.name, index: n, size: facts.size, store, failures, reload: t.steps.some((st) => st.op === 'reload'), launch: { ...launchFacts({ ...facts, epoch: first, env: env ?? {} }), media: { ...media }, permissions: { ...permissions } }, reached: await reached(), typed: [...typed], touched: [...touched], expectedRefusals: [...expectedRefusals], ...(s.host === 'web' ? { restart: async () => { await reload(); await data(); } } : {}) }).catch((e) => ({ error: e.message }));
+      if (atEnd && closedAt == null) end = await atEnd(s, { name: t.name, index: n, size: facts.size, store, failures, reload: t.steps.some((st) => st.op === 'reload'), seeded: stored.length > 0, launch: { ...launchFacts({ ...facts, epoch: first, env: env ?? {} }), media: { ...media }, permissions: { ...permissions } }, reached: await reached(), typed: [...typed], touched: [...touched], expectedRefusals: [...expectedRefusals], ...(s.host === 'web' ? { restart: async () => { await reload(); await data(); } } : {}) }).catch((e) => ({ error: e.message }));
       // A failed test shows what the data module logged, the last lines of it (sb4 farm wave 7, E1: 093 rendered
       // values into the view to see them; `logs` had them all along). Advice only.
       if (failures.length && closedAt == null) try {
@@ -1385,6 +1381,7 @@ export async function runTests({ host, browser, file, plan, app, size, env, webD
         if (said.length) notes.push(`the data module logged${said.length > 8 ? ` (the last 8 of ${said.length})` : ''}: ${said.slice(-8).join(' | ')}`);
       } catch { /* advice only */ }
     } finally {
+      if (apk && !end?.keep && closedAt == null) await s.op({ op: 'clean_store', appId: id, store }).catch(() => {});
       // A window the test closed took its session (on macOS, the app) with it: nothing is left to close but the carrier.
       await s.close().catch((e) => { if (closedAt == null) throw e; });
     }
@@ -1392,6 +1389,7 @@ export async function runTests({ host, browser, file, plan, app, size, env, webD
     if (failures.length && !reset) shared.forEach((o, i) => { if (heads[i] > 0 && atStart[i] != null) notes.push(sharedBackendNote(o, atStart[i], heads[i] - atStart[i])); });
     landed({ name: t.name, index: n, failures, notes, ...(shots.length ? { shots } : {}), ...(end ? { end } : {}), ...(end?.keep ? { store } : {}) });
     if (base && !end?.keep) rmSync(resolve(base, store), { recursive: true, force: true });
+    else if (!base && !end?.keep) cleanRemoteStore({ host, appId: id, store, env: launched, udid: s.carrier?.udid, serial: s.carrier?.serial, apk });
   }
   const failed = results.filter((r) => r.failures.length).length, skipped = results.filter((r) => r.skipped).length;
   if (properties.length) console.error(`properties on ${host}: ${propertyChecks} always line checks at boot, after authored inputs, reloads and clocks; ${propertyFalse} false${propertyChecks ? '' : '; not exercised'}`);

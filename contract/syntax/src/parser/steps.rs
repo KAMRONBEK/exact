@@ -963,6 +963,12 @@ impl Parser {
                 account: self.json_value()?,
                 span,
             },
+            // @ref LLP 1018.000 D1 — `secret "<name>" "<value>"`: a plain secret.keep seed.
+            "secret" => Step::Secret {
+                name: self.launch_str("secret", "a plain secret.keep grant name")?,
+                value: self.launch_str("secret", "the seeded secret text")?,
+                span,
+            },
             "stored" => Step::Stored {
                 name: self.ident()?.0,
                 window: false,
@@ -1256,7 +1262,7 @@ impl Parser {
                 return Err(SyntaxError {
                     id: "syntax-expected-step",
                     message: format!(
-                    "expected `tap`, `scroll`, `type`, `pick`, `authorize`, `presence`, `clock`, `fold`, `rotate`, `resize`, `reload`, `close`, `back`, `screenshot`, `prefer`, `request`, `expect`, or a launch line (`size`, `epoch`, `time-zone`, `locale`, `seed`, `signed-in`, `stored`, `fresh`, `before data`), found `{other}`"
+                    "expected `tap`, `scroll`, `type`, `pick`, `authorize`, `presence`, `clock`, `fold`, `rotate`, `resize`, `reload`, `close`, `back`, `screenshot`, `prefer`, `request`, `expect`, or a launch line (`size`, `epoch`, `time-zone`, `locale`, `seed`, `signed-in`, `secret`, `stored`, `fresh`, `before data`), found `{other}`"
                 ),
                     span,
                 })
@@ -1297,7 +1303,7 @@ pub(super) fn during_read(op: &str) -> bool {
 
 /// The words of a test's launch lines, which a test file may also write at
 /// its top level for every test in it (habits F7, calendar F13).
-pub(super) const LAUNCH: [&str; 13] = [
+pub(super) const LAUNCH: [&str; 14] = [
     "size",
     "at",
     "epoch",
@@ -1305,6 +1311,7 @@ pub(super) const LAUNCH: [&str; 13] = [
     "locale",
     "seed",
     "signed-in",
+    "secret",
     "stored",
     "fresh",
     "before",
@@ -1325,6 +1332,7 @@ pub(super) fn launch_word(step: &Step) -> &'static str {
         Step::Locale { .. } => "locale",
         Step::Seed { .. } => "seed",
         Step::SignedIn { .. } => "signed-in",
+        Step::Secret { .. } => "secret",
         Step::Stored { .. } => "stored",
         Step::Fresh { .. } => "fresh",
         Step::BeforeData { .. } => "before data",
@@ -1350,13 +1358,20 @@ pub fn same_launch(a: &Step, b: &Step) -> bool {
             _ => None,
         }
     }
+    fn secret_slot(step: &Step) -> Option<&str> {
+        match step {
+            Step::SignedIn { key, .. } => Some(key),
+            Step::Secret { name, .. } => Some(name),
+            _ => None,
+        }
+    }
     if let (Some(x), Some(y)) = (fetch_rule(a), fetch_rule(b)) {
         return x == y;
     }
     if let (Step::AnswerSource { source: x, .. }, Step::AnswerSource { source: y, .. }) = (a, b) {
         return x == y;
     }
-    if let (Step::SignedIn { key: x, .. }, Step::SignedIn { key: y, .. }) = (a, b) {
+    if let (Some(x), Some(y)) = (secret_slot(a), secret_slot(b)) {
         return x == y;
     }
     if let (Step::Stored { name: x, .. }, Step::Stored { name: y, .. }) = (a, b) {

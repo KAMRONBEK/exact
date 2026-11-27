@@ -222,7 +222,7 @@ static EMPTIED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 /// post-pixel activation and any later boot here leave it as it is; emptying
 /// it again there removed what a commit in between had written while memory
 /// still held it, so a relaunch read nothing back.
-pub(crate) fn empty_fresh_tree(app_id: &str) -> Result<(), DataError> {
+pub(crate) fn empty_fresh_tree(app_id: &str, grants: &str) -> Result<(), DataError> {
     let Some((_, Some(tree))) = app_dirs(app_id)? else {
         return Ok(());
     };
@@ -245,6 +245,7 @@ pub(crate) fn empty_fresh_tree(app_id: &str) -> Result<(), DataError> {
     let kv = ibex2::kv::FileStore::new(tree.join("kv"));
     exact_data::storage::seed_persisted(
         &tree,
+        grants,
         |name, value| {
             ibex2::kv::KvStore::set(&kv, exact_data::storage::PERSISTED_SCOPE, name, value)
         },

@@ -206,7 +206,7 @@ pub fn timeline<D: DataSource>(
     });
     // The store as the app left it, read only: a refresh writes nothing
     // (LLP 1126 D3, stage 1).
-    let (snapshot, _) = crate::host::system::store_read(&app, false);
+    let (snapshot, _) = crate::host::system::store_read(&app, &grants, false).unwrap_or_default();
     let mut executor: Option<crate::executor::Executor> = None;
     let result = runner.snapshot_timeline(
         now,

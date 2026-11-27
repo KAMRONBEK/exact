@@ -299,16 +299,13 @@ impl<D: DataSource> Host<D> {
         // An `app:/data` image shows from the first frame, before storage
         // is configured and whether or not anything was picked (D7).
         crate::picker::know_roots(data.app_id());
-        // A named drive's secrets, read before the runner takes the source.
-        // A carried reload keeps its memory store and does not touch the files.
-        let (mut store_snapshot, unread_kept) = store_read(data.app_id(), carried.is_some());
-        // Read-only presence occupancy for a cold boot; reconciliation and
-        // pending moves wait for commit (`install_presence`).
+        let (app_id, grants) = (data.app_id(), data.grants());
+        // A named drive's secrets; a carried reload keeps memory and skips disk.
+        let (mut store_snapshot, unread_kept) = store_read(app_id, grants, carried.is_some())
+            .map_err(|e| HostError::Layout(format!("{e:?}")))?;
+        // Cold-boot read-only presence occupancy; reconciliation waits for commit (`install_presence`).
         if carried.is_none() {
-            store_snapshot.extend(crate::presence_secrets::snapshot(
-                data.app_id(),
-                data.grants(),
-            ));
+            store_snapshot.extend(crate::presence_secrets::snapshot(app_id, grants));
         }
         #[cfg(target_os = "macos")]
         let boot_trace = exact_ink::device::apple::Trace::new(c"boot runner through first commit");

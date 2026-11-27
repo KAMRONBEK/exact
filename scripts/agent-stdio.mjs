@@ -17,6 +17,7 @@ import { nativeKey, mouseContact } from './agent-keys.mjs';
 import { activateIOS, backgroundIOS, jsonLines, hangup, waitAtMost, bootRefusal, REPLY_MS } from './agent-wire.mjs';
 import { platformWheel } from './agent-wheel.mjs';
 import { missingInputChanges } from './cargo-dep-info.mjs';
+import { withSeedTempFile } from './agent-secrets.mjs';
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 
 // A descendant can retain the pipes after its carrier exits, even after the parent kills the carrier.
@@ -150,6 +151,12 @@ export async function openStdio({ host, plan, world, size, app, appServerUrl, en
     if (world) extra = { ...extra, EXACT_WORLD: copyFixture(world, 'exact-agent.world') };
     if (extra.EXACT_AGENT_SUBSTITUTES?.startsWith('@')) {
       extra = { ...extra, EXACT_AGENT_SUBSTITUTES: '@' + copyFixture(extra.EXACT_AGENT_SUBSTITUTES.slice(1), 'exact-agent-substitutes.json') };
+    }
+    if (extra.EXACT_AGENT_STORED) {
+      const seedName = `exact-agent-stored-${process.pid}-${Date.now().toString(36)}.json`;
+      const remote = withSeedTempFile(extra.EXACT_AGENT_STORED, (file) => copyFixture(file, seedName));
+      const { EXACT_AGENT_STORED: _omitted, ...rest } = extra;
+      extra = { ...rest, EXACT_AGENT_STORED_FILE: remote };
     }
   };
   // A Mac bundle carries its own assets (bundle.mjs copies the capture into Contents/Resources); a bare binary
