@@ -81,22 +81,22 @@ use tiny_skia::{Pixmap, Transform};
 
 const MATRIX: u32 = 1;
 const MATRIX3: u32 = 48;
-const RRECT: u32 = 2;
-const PATH: u32 = 3;
-const CLIP_RRECT: u32 = 4;
+pub(crate) const RRECT: u32 = 2;
+pub(crate) const PATH: u32 = 3;
+pub(crate) const CLIP_RRECT: u32 = 4;
 const CLIP_PATH: u32 = 5;
 const RESTORE: u32 = 6;
-const LAYER: u32 = 7;
+pub(crate) const LAYER: u32 = 7;
 const IMAGE: u32 = 8;
-const GLYPHS: u32 = 9;
+pub(crate) const GLYPHS: u32 = 9;
 const FONT: u32 = 10;
 /// `FONT` with variation settings: key, index, weight, count and (tag
 /// value) pairs, then the path.
 const FONT_AXES: u32 = 41;
-const IMAGE_DEF: u32 = 11;
+pub(crate) const IMAGE_DEF: u32 = 11;
 const IMAGE_FREE: u32 = 12;
 const STROKE: u32 = 13;
-const IMAGE_RRECT: u32 = 14;
+pub(crate) const IMAGE_RRECT: u32 = 14;
 /// The next STROKE's dash: phase, count, lengths.
 const DASH: u32 = 25;
 /// A picture's animated file: id, length, path.
@@ -267,7 +267,7 @@ mod shared;
 #[path = "canvas/slot.rs"]
 mod slot;
 #[path = "canvas/stream.rs"]
-mod stream;
+pub(crate) mod stream;
 #[path = "canvas/undrawn.rs"]
 mod undrawn;
 use undrawn::{path_bounds, undrawn};
@@ -283,6 +283,8 @@ mod svg;
 pub(crate) use filter::filtered_row_draws;
 pub use picture::Picture;
 use picture::WeakPicture;
+#[cfg(test)]
+pub(crate) use picture::SURFACE_IMAGE_BASE;
 #[cfg(target_os = "android")]
 use reader::{monotonic_ns, Section};
 pub use stream::drawing;
@@ -345,6 +347,9 @@ pub struct Recorder {
     /// (`EXACT_IDLE_FRAMES`, else [`IDLE_FRAMES`]).
     idle: u64,
     next_image: u32,
+    /// Whether this recorder writes an auxiliary surface/bar stream whose
+    /// `IMAGE_DEF` ids come from the disjoint surface id pool.
+    surface: bool,
     /// The clips pushed and not popped, pending until a drawing needs them.
     clips: Vec<clip::Clip>,
     /// The recording row's origin (viewport points): what its ops are
@@ -426,6 +431,7 @@ impl Recorder {
             optical: HashMap::new(),
             images: HashMap::new(),
             next_image: 1,
+            surface: false,
             frames: 0,
             groups: Vec::new(),
             idle: std::env::var("EXACT_IDLE_FRAMES")
@@ -450,6 +456,23 @@ impl Recorder {
             shared: Default::default(),
             blur: 0.0,
         }
+    }
+
+    /// An empty recorder for an auxiliary surface or bar stream whose image
+    /// ids come from the disjoint surface pool so they cannot collide with the
+    /// page's stream.
+    pub(crate) fn for_surface() -> Recorder {
+        let mut r = Recorder::new();
+        r.surface = true;
+        r
+    }
+
+    #[cfg(test)]
+    pub(crate) fn record_surface(scale: f32, paint: impl FnOnce(&mut Recorder)) -> Vec<u32> {
+        let mut r = Recorder::for_surface();
+        r.scale = scale;
+        paint(&mut r);
+        std::mem::take(&mut r.ops)
     }
 
     fn f(&mut self, v: f32) {

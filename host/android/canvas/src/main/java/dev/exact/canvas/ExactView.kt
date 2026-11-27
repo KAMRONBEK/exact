@@ -1476,7 +1476,7 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
 
     private val hwbuf = (context as Activity).intent.getStringExtra("hwbuf") != "0"
 
-    private fun picture(id: Int, w: Int, h: Int): Bitmap = owner?.made?.remove(id) ?: makePicture(id, w, h, hwbuf)
+    internal fun picture(id: Int, w: Int, h: Int): Bitmap = owner?.made?.remove(id) ?: makePicture(id, w, h, hwbuf)
 
     private var rowW = 0
     private var rowH = 0

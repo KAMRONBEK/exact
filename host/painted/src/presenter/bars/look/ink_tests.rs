@@ -138,6 +138,7 @@ fn enabled_bar_ink_reads_on_the_fill_behind_each_glyph() {
                         Item::Text(_, _, ink, _) => check(*ink, top.container, 4.5, "header text"),
                         Item::Symbol(_, _, ink) => check(*ink, top.container, 3., "header symbol"),
                         Item::Fill(..) => panic!("unexpected header fill"),
+                        Item::Badge(..) => panic!("unexpected header badge"),
                     }
                 }
                 let nav = &p.bars.bottom.as_ref().unwrap().layout;

@@ -271,8 +271,9 @@ impl<D: DataSource> Presenter<D> {
         // painted box (not painted yet, or under `display: none`).
         let boot_visible_only = self.images.boot_visible_only;
         let status_sizes = self.images.status_sizes.clone();
+        let bar_sizes = self.images.bar_sizes.clone();
         let placed = |id: ViewId| -> Option<bool> {
-            if status_sizes.contains_key(&id) {
+            if status_sizes.contains_key(&id) || bar_sizes.contains_key(&id) {
                 return Some(true);
             }
             if hidden(id) {

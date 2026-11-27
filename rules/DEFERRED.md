@@ -477,6 +477,10 @@ drawn as written in its bar item; swipe actions whose controls all say
 `appearance="none"` keep their paint. Take: none offered; waived by that
 instruction. Still out: an arbitrary subtree as a bar item (expanded for iOS
 below, 2026-11-21), a prompt with several fields.
+**Clarified (2026-11-26, #1945, 4/4 panel):** Android's painted top app bar
+lowers the same constrained `BadgeFace` header button (a single filled box
+holding a picture, initial text or symbol) already shipped on Apple, keeping
+arbitrary bar subtrees and Android readouts out.
 **Expanded (James, 2026-10-17: "Exact should allow the developer to
 configure this on platforms that support it"):** a sheet route's
 `navigationInitialDetent` names the `navigationDetent` word it opens at

@@ -39,7 +39,7 @@ impl SurfacePainter for Windows {
         // finished as a frame is: a frame's begin and finish keep the
         // page's own groups, layers and last stream for the thread, and a
         // surface has none of those.
-        let mut recorder = Recorder::new();
+        let mut recorder = Recorder::for_surface();
         recorder.scale = scale;
         paint(&mut recorder);
         std::mem::take(&mut recorder.ops)

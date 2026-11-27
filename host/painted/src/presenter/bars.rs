@@ -37,10 +37,11 @@ use super::top::shape;
 use super::top::SurfacePainter;
 use super::*;
 
+mod badge;
 mod look;
 use crate::paint::ripple::Ripple;
+pub use look::{Badge, BadgePicture, Bottom, Button, Tab, Target, Top, What};
 use look::{BarColors, Inputs, Layout, Lit};
-pub use look::{Bottom, Button, Tab, Target, Top, What};
 
 /// The top app bar, as the shell names it.
 pub const TOP: i32 = 1;
@@ -80,6 +81,9 @@ pub(super) struct State {
     /// The kernel epoch the bars were last read at, whether the content
     /// had then scrolled, and what else they were measured for.
     read: Option<(u64, bool)>,
+    /// Decoded picture identities (`Arc::as_ptr`) for active top-bar badge
+    /// pictures, so an avatar finishing decode repaints the top bar in place.
+    pictures: Vec<(ViewId, usize)>,
     seed: Option<([u8; 3], f32)>,
     seen: Option<Seen>,
     authored: [BarColors; 2],
@@ -109,6 +113,7 @@ impl State {
     /// A replacement invalidates node references held by the old bars.
     pub(super) fn replaced(&mut self) {
         self.read = None;
+        self.pictures.clear();
         self.scroller = None;
         self.pressed = None;
         self.focused = None;
@@ -380,6 +385,7 @@ impl<D: DataSource> Presenter<D> {
     fn bar_button(&self, id: ViewId, dark: bool) -> Option<Button> {
         let kernel = self.host.kernel();
         let node = kernel.node(id)?;
+        let badge = Badge::read(kernel, id, |n| self.dark_at(n), &self.images.bitmaps);
         let row = shape::row(kernel, &node, false);
         // The colour its author wrote on it wins (LLP 1115: author >
         // platform); one it only inherits leaves Material's.
@@ -390,7 +396,8 @@ impl<D: DataSource> Presenter<D> {
             node: id,
             title: row.title,
             direction: row.direction,
-            symbol: row.symbol,
+            symbol: if badge.is_some() { None } else { row.symbol },
+            badge,
             // An inert button is no enabled item, as an inert tab is none,
             // and nor is one under a disabled header or box: a press on it
             // in the page reaches nothing (`press_enabled`).
@@ -400,6 +407,51 @@ impl<D: DataSource> Presenter<D> {
             destructive: row.destructive,
             tint,
         })
+    }
+
+    /// Keep lifted top-bar badge pictures loading while their header is outside
+    /// the page, and return their decoded bitmap identities so a load replaces
+    /// the fallback face in place.
+    fn sync_bar_badge_images(&mut self) -> Vec<(ViewId, usize)> {
+        let side = (badge::BADGE_SIZE * self.brush.scale.max(1.0))
+            .round()
+            .max(1.0) as u32;
+        let mut sizes = BTreeMap::new();
+        if let Some(r) = self.bar_header() {
+            let kernel = self.host.kernel();
+            for id in r
+                .shape
+                .leading
+                .iter()
+                .chain(&r.shape.trailing)
+                .filter(|id| r.shape.items.contains(id))
+            {
+                if let Some(pic_id) = kernel.header_badge(*id).and_then(|b| b.picture) {
+                    if let Some(pic_node) = kernel.node(pic_id) {
+                        sizes.insert(pic_id, (side, crate::paint::object_fit_of(&pic_node)));
+                    }
+                }
+            }
+        }
+        if self.images.bar_sizes != sizes {
+            self.images.bar_sizes = sizes;
+            self.images.settled = None;
+            if let Some(error) = self.sync_images() {
+                self.host.log(error);
+            }
+        }
+        self.images
+            .bar_sizes
+            .keys()
+            .map(|id| {
+                let ptr = self
+                    .images
+                    .bitmaps
+                    .get(id)
+                    .map_or(0, |b| std::sync::Arc::as_ptr(b) as usize);
+                (*id, ptr)
+            })
+            .collect()
     }
 
     /// What the bars say now, from the host's projection: the top bar of
@@ -526,6 +578,7 @@ impl<D: DataSource> Presenter<D> {
             edges: safe,
             colors,
         };
+        let pictures = self.sync_bar_badge_images();
         let read = (epoch, self.bar_scrolled());
         // The same look as before: a bar that says the same is not
         // measured again, so a commit elsewhere in the tree shapes no text.
@@ -536,6 +589,7 @@ impl<D: DataSource> Presenter<D> {
             && !seed_changed
             && self.bars.authored == authored
             && self.bars.read == Some(read)
+            && self.bars.pictures == pictures
         {
             return;
         }
@@ -583,6 +637,28 @@ impl<D: DataSource> Presenter<D> {
                 && bottom
                     .as_ref()
                     .is_some_and(|b| b.tabs.iter().any(|t| t.selected)));
+        fn keep_target<P>(
+            old: Option<&Shown<P>>,
+            new: Option<&Shown<P>>,
+            changed: bool,
+            same: bool,
+            idx: usize,
+        ) -> bool {
+            if !changed {
+                return true;
+            }
+            if !same {
+                return false;
+            }
+            let (Some(old), Some(new)) = (old, new) else {
+                return false;
+            };
+            match (old.layout.targets.get(idx), new.layout.targets.get(idx)) {
+                (Some(a), Some(b)) => a.what == b.what && a.rect == b.rect && b.enabled,
+                _ => false,
+            }
+        }
+        let old_top = repaint_top.then(|| self.bars.top.take()).flatten();
         if repaint_top {
             self.bars.top = top.map(|plan| {
                 let layout = Layout::top(&mut text.borrow_mut(), &plan, &inputs(safe[0], 0));
@@ -594,6 +670,7 @@ impl<D: DataSource> Presenter<D> {
                 }
             });
         }
+        let old_bottom = repaint_bottom.then(|| self.bars.bottom.take()).flatten();
         if repaint_bottom {
             self.bars.bottom = bottom.map(|plan| {
                 let layout = Layout::bottom(&mut text.borrow_mut(), &plan, &inputs(safe[2], 1));
@@ -606,10 +683,34 @@ impl<D: DataSource> Presenter<D> {
             });
         }
         (self.bars.read, self.bars.seen) = (Some(read), Some(seen));
+        self.bars.pictures = pictures;
         if top_changed || bottom_changed {
-            self.bars.pressed = None;
-            self.bars.focused = None;
-            self.bars.ripple = None;
+            let valid = |which: i32, idx: usize| match which {
+                TOP => keep_target(
+                    old_top.as_ref().or(self.bars.top.as_ref()),
+                    self.bars.top.as_ref(),
+                    top_changed,
+                    same,
+                    idx,
+                ),
+                BOTTOM => keep_target(
+                    old_bottom.as_ref().or(self.bars.bottom.as_ref()),
+                    self.bars.bottom.as_ref(),
+                    bottom_changed,
+                    same,
+                    idx,
+                ),
+                _ => false,
+            };
+            if self.bars.pressed.is_some_and(|(w, i)| !valid(w, i)) {
+                self.bars.pressed = None;
+            }
+            if self.bars.focused.is_some_and(|(w, i)| !valid(w, i)) {
+                self.bars.focused = None;
+            }
+            if self.bars.ripple.is_some_and(|(w, i, _)| !valid(w, i)) {
+                self.bars.ripple = None;
+            }
         }
         self.bars.authored = authored;
         self.bars.seed = seed;

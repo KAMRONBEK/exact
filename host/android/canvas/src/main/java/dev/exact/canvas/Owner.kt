@@ -609,6 +609,14 @@ internal class Owner(private val hwbuf: Boolean, private val fast: Boolean, prio
         // native code reads moves no paint (one inputs call per binding).
         Formas.turned()
         if (fresh == null && (told != null || fields != null || bars != null || access != null)) {
+            if (bars != null) {
+                val pics = Native.pendingPictures()
+                if (pics.isNotEmpty()) {
+                    android.os.Trace.beginSection("exact pictures")
+                    for (k in pics.indices step 3) if (!made.containsKey(pics[k])) made[pics[k]] = makePicture(pics[k], pics[k + 1], pics[k + 2], hwbuf)
+                    android.os.Trace.endSection()
+                }
+            }
             queue.add(Pub(timerReports.publish(), null, true, seq, 0, told, fields, bars, access))
             Native.timerObservation(readerScrolling, readerSampling, true, false)
             if (!notifying.getAndSet(true)) postMain { notifying.set(false); published() }

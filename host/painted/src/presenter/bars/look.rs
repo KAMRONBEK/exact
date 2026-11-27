@@ -28,6 +28,8 @@
 //! (`NavigationBarItemDefaults.colors`). Its numbers are the schema's
 //! Material column (the `nav-` rows; `host/android/reference/rows.json`
 //! names each one's symbol).
+use super::badge::DrawnBadge;
+pub use super::badge::{Badge, BadgePicture};
 use crate::paint::{Backend, Rect4, Shape};
 use crate::presenter::palette::{material, Material};
 use crate::presenter::top::look::{
@@ -130,6 +132,8 @@ pub struct Button {
     pub direction: Direction,
     /// Its symbol role, which makes it an icon button.
     pub symbol: Option<String>,
+    /// Its constrained badge face (filled box holding a picture, text or symbol).
+    pub badge: Option<Badge>,
     /// Not `disabled`.
     pub enabled: bool,
     /// `destructive`.
@@ -273,10 +277,11 @@ impl Target {
     }
 }
 
-enum Item {
+pub(super) enum Item {
     Text(Rc<Paragraph>, (f32, f32), [u8; 4], ViewId),
     Fill(Shape, [u8; 4]),
     Symbol(String, Rect4, [u8; 4]),
+    Badge(DrawnBadge),
 }
 
 /// Resolve inline positions into physical boxes without reflecting glyphs.
@@ -290,6 +295,7 @@ fn mirror(items: &mut [Item], targets: &mut [Target], width: f32) {
             }
             Item::Fill(shape, _) => rect(&mut shape.rect),
             Item::Symbol(_, r, _) => rect(r),
+            Item::Badge(badge) => badge.mirror(width),
         }
     }
     for target in targets {
@@ -304,7 +310,7 @@ pub struct Layout {
     pub size: (f32, f32),
     container: [u8; 4],
     direction: Direction,
-    items: Vec<Item>,
+    pub(super) items: Vec<Item>,
     /// What can be touched, in order.
     pub targets: Vec<Target>,
 }
@@ -359,10 +365,13 @@ impl Layout {
         let ts = Transform::identity();
         let all = Shape::rect((0.0, 0.0, self.size.0, self.size.1));
         backend.fill(&all, self.container, ts);
-        // The indicator is under the state layer, and both under the symbol.
+        // The indicator and authored badge faces are under the state layer,
+        // and symbols/labels above it.
         for item in &self.items {
-            if let Item::Fill(shape, color) = item {
-                backend.fill(shape, *color, ts);
+            match item {
+                Item::Fill(shape, color) => backend.fill(shape, *color, ts),
+                Item::Badge(badge) => badge.paint(backend, engine, ts),
+                _ => {}
             }
         }
         if let Some((target, ripple)) = lit.and_then(|(i, r)| Some((self.targets.get(i)?, r))) {
@@ -387,7 +396,7 @@ impl Layout {
                     }];
                     backend.text(engine, paragraph, &paint, *at, ts);
                 }
-                Item::Fill(..) => {}
+                Item::Fill(..) | Item::Badge(..) => {}
                 // Material's shapes (D14): the Up arrow is its `back`.
                 Item::Symbol(role, rect, color) => symbol(
                     backend,
@@ -476,7 +485,7 @@ impl Layout {
                 (_, _, true, _) => Role::OnSurfaceVariant.color(dark),
                 _ => *primary,
             };
-            let label = (b.symbol.is_none()).then(|| {
+            let label = (b.badge.is_none() && b.symbol.is_none()).then(|| {
                 let room = (inputs.width / 2.0 - 2.0 * TEXT_BUTTON_PADDING).max(1.0);
                 line(engine, &b.title, LABEL_LARGE, scale, room, b.direction)
             });
@@ -496,25 +505,40 @@ impl Layout {
                     *right
                 }
             };
-            let layer = match (&b.symbol, &label) {
-                (Some(role), _) => {
+            let (layer, layer_ink) = match (&b.badge, &b.symbol, &label) {
+                (Some(badge), _, _) => {
+                    let rect = (
+                        at + (ICON_BUTTON - badge.size) / 2.0,
+                        middle(badge.size),
+                        badge.size,
+                        badge.size,
+                    );
+                    items.push(Item::Badge(DrawnBadge::layout(
+                        engine, badge, rect, b.enabled, scale,
+                    )));
+                    (circle(at), title_ink)
+                }
+                (None, Some(role), _) => {
                     let rect = (at + (ICON_BUTTON - icon) / 2.0, middle(icon), icon, icon);
                     items.push(Item::Symbol(role.clone(), rect, ink));
-                    circle(at)
+                    (circle(at), ink)
                 }
-                (None, Some(p)) => {
+                (None, None, Some(p)) => {
                     let tall = (p.height + 20.0).max(TEXT_BUTTON.1);
                     let text = (label_x(p, at + w / 2.0, 0.5), middle(p.height));
                     items.push(Item::Text(p.clone(), text, ink, b.node));
-                    Shape::new((at, middle(tall), w, tall), [tall / 2.0; 4])
+                    (
+                        Shape::new((at, middle(tall), w, tall), [tall / 2.0; 4]),
+                        ink,
+                    )
                 }
-                (None, None) => circle(at),
+                (None, None, None) => (circle(at), ink),
             };
             targets.push(Target {
                 rect: (at, middle(ICON_BUTTON), w, ICON_BUTTON),
                 what: What::Item(b.node),
                 enabled: b.enabled,
-                layer: (layer, ink),
+                layer: (layer, layer_ink),
             });
         };
         for b in &top.leading {
@@ -850,6 +874,7 @@ mod tests {
                 enabled: true,
                 destructive: false,
                 tint: None,
+                badge: None,
             }],
             scrolled: false,
         };
@@ -1054,6 +1079,7 @@ component App
             enabled: true,
             destructive: false,
             tint: None,
+            badge: None,
         };
         let top = Top {
             route: 1,
@@ -1102,6 +1128,7 @@ component App
                 .iter()
                 .map(|item| match item {
                     Item::Fill(_, c) | Item::Symbol(_, _, c) | Item::Text(_, _, c, _) => *c,
+                    Item::Badge(_) => panic!("unexpected badge item"),
                 })
                 .collect::<Vec<_>>()
         };
@@ -1317,6 +1344,7 @@ component App
                 Item::Text(_, _, color, node) => texts.push((*node, *color)),
                 Item::Symbol(_, rect, color) => symbols.push((*rect, *color)),
                 Item::Fill(shape, _) => fills.push(shape.rect),
+                Item::Badge(_) => panic!("unexpected badge item"),
             }
         }
         // Where no palette was told, Material's baseline: the selected

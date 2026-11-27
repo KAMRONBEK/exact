@@ -855,6 +855,133 @@ impl Kernel {
     pub fn bar_text(&self, view: ViewId) -> Option<String> {
         crate::grouped::text_of(&self.node(view)?)
     }
+
+    /// A header button's constrained badge face (LLP 1075.003 §9.6, #1945):
+    /// a button whose one displayed child is a filled box holding a picture,
+    /// a symbol or a text. Matches Apple's `BadgeFace` rule so the same header
+    /// markup projects across hosts.
+    pub fn header_badge(&self, button: ViewId) -> Option<HeaderBadge> {
+        let btn = self.node(button)?;
+        let mut visible_children = btn.children().into_iter().filter(|&id| {
+            self.node(id)
+                .is_some_and(|n| n.style.display != Display::None)
+        });
+        let box_node = visible_children.next()?;
+        if visible_children.next().is_some() {
+            return None;
+        }
+        let bx = self.node(box_node)?;
+        if bx.node_type != NodeType::View
+            || bx.computed_row(StyleId::Visibility, |s| s.visibility) != crate::Visibility::Visible
+        {
+            return None;
+        }
+        let bg = bx.style.background_color?;
+        if bg.resolve(false).a() == 0 && bg.resolve(true).a() == 0 {
+            return None;
+        }
+        let mut picture = None;
+        let mut symbol = None;
+        let mut text = String::new();
+        let mut ink_node = None;
+        fn walk(
+            kernel: &Kernel,
+            id: ViewId,
+            picture: &mut Option<ViewId>,
+            symbol: &mut Option<String>,
+            text: &mut String,
+            ink_node: &mut Option<ViewId>,
+        ) {
+            let Some(parent) = kernel.node(id) else {
+                return;
+            };
+            for child_id in parent.children() {
+                let Some(child) = kernel.node(child_id) else {
+                    continue;
+                };
+                if child.style.display == Display::None {
+                    continue;
+                }
+                match child.node_type {
+                    NodeType::Image => {
+                        if child.computed_row(StyleId::Visibility, |s| s.visibility)
+                            != crate::Visibility::Visible
+                        {
+                            continue;
+                        }
+                        if let Some(src) = child
+                            .props
+                            .str(PropId::ImageSource)
+                            .filter(|s| !s.is_empty())
+                        {
+                            if let Some(role) = src.strip_prefix("symbol:") {
+                                if symbol.is_none() {
+                                    *symbol = Some(role.to_string());
+                                }
+                                if ink_node.is_none() {
+                                    *ink_node = Some(child_id);
+                                }
+                            } else if picture.is_none() {
+                                *picture = Some(child_id);
+                            }
+                        }
+                    }
+                    NodeType::Text => {
+                        if child.computed_row(StyleId::Visibility, |s| s.visibility)
+                            != crate::Visibility::Visible
+                        {
+                            continue;
+                        }
+                        if text.is_empty() {
+                            if let Some(words) = kernel.bar_text(child_id) {
+                                if !words.is_empty() {
+                                    *text = words;
+                                    if ink_node.is_none() {
+                                        *ink_node = Some(child_id);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    _ => walk(kernel, child_id, picture, symbol, text, ink_node),
+                }
+            }
+        }
+        walk(
+            self,
+            box_node,
+            &mut picture,
+            &mut symbol,
+            &mut text,
+            &mut ink_node,
+        );
+        if picture.is_none() && symbol.is_none() && text.is_empty() {
+            return None;
+        }
+        Some(HeaderBadge {
+            box_node,
+            picture,
+            symbol,
+            text,
+            ink_node,
+        })
+    }
+}
+
+/// A header button's constrained badge face (a filled box holding a picture,
+/// a symbol or a text), returned by [`Kernel::header_badge`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeaderBadge {
+    /// The single displayed filled box inside the button.
+    pub box_node: ViewId,
+    /// First non-symbol `image` descendant with an `imageSource`, if any.
+    pub picture: Option<ViewId>,
+    /// First `symbol:` image descendant's role (without `symbol:`), if any.
+    pub symbol: Option<String>,
+    /// First non-empty text descendant's collapsed text, if any.
+    pub text: String,
+    /// The text or symbol node whose `color` supplies fallback ink, if any.
+    pub ink_node: Option<ViewId>,
 }
 
 impl crate::arena::NodeArena {

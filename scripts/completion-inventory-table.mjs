@@ -59,7 +59,7 @@ export const classifications = [
     ["painted:host/painted/src/presenter.rs", "Presenter::resize Presenter::resize_scaled Presenter::set_frame_period Presenter::set_pointer"],
     ["painted:host/painted/src/presenter/accesskit.rs", "WindowTree::set_title WindowTree::title WindowTree::update"],
     ["painted:host/painted/src/presenter/accesskit/node.rs", "map_node"],
-    ["painted:host/painted/src/presenter/bars.rs", "Presenter::bar_clock Presenter::bar_event Presenter::bar_plans Presenter::bars Presenter::bars_json Presenter::sync_bars"],
+    ["painted:host/painted/src/presenter/bars.rs", "Presenter::bar_clock Presenter::bar_event Presenter::bar_plans Presenter::bars Presenter::bars_json Presenter::sync_bar_badge_images Presenter::sync_bars"],
     ["painted:host/painted/src/presenter/build_channel.rs", "Presenter::apply_pin"],
     ["painted:host/painted/src/presenter/clipboard.rs", "Presenter::set_clipboard"],
     ["painted:host/painted/src/presenter/commands.rs", "Presenter::set_window_closer Presenter::set_window_focuser Presenter::set_window_hider"],
@@ -998,6 +998,7 @@ export const classifications = [
     ["painted:host/painted/src/paint/shadow.rs", "ShadowPaint::blurred ShadowPaint::capture ShadowPaint::fills ShadowPaint::inset ShadowPaint::lifted ShadowPaint::over"],
     ["painted:host/painted/src/paint/shape.rs", "Shape::elliptical Shape::inset Shape::new Shape::rect Shape::rounded Shape::with_corners"],
     ["painted:host/painted/src/paint/svg.rs", "resolve_with"],
+    ["painted:host/painted/src/presenter/bars/badge.rs", "Badge::read"],
     ["painted:host/painted/src/presenter/bars/look.rs", "Layout::bottom Layout::paint Layout::target_at Layout::texts Layout::top nav_height top_height"],
     ["painted:host/painted/src/presenter/clock.rs", "wall_since"],
     ["painted:host/painted/src/presenter/display_frame.rs", "SubmittedFrame::pixels"],
@@ -1015,9 +1016,7 @@ export const classifications = [
   group("module lifecycle", ["subscription"], "package instance and current session context or reader binding", "UI-owned",
     "host/painted/src/package.rs Context exposes a session package instance; canvas/jni_extensions.rs binds the current reader extensions. Session reload replaces the context native slot.", [
     ["painted:host/painted/src/canvas/jni_extensions.rs", "agent bind_later invoked now sensor_input surface_has under_agent"],
-    ["painted:host/painted/src/package.rs",
-      "Context::agent Context::cache Context::changed Context::data Context::desktop Context::development Context::displays Context::emit Context::extension Context::foreground Context::label Context::log " +
-      "Context::notifier Context::now Context::origin Context::pads Context::request Context::session Context::temporary Entry::of"],
+    ["painted:host/painted/src/package.rs", "Context::agent Context::cache Context::changed Context::data Context::desktop Context::development Context::displays Context::emit Context::extension Context::foreground Context::label Context::log Context::notifier Context::now Context::origin Context::pads Context::request Context::session Context::temporary Entry::of"],
   ]),
   group("region and text", ["one-shot"], "text request/source, font recipe, paint context and current paragraph/cache residency", "UI-owned",
     "host/painted/src/text.rs and text/transfer.rs prepare and adopt text for its request, source and paint context; text cache and layout helpers retain those presentation values, not app outcomes.", [

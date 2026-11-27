@@ -249,6 +249,8 @@ pub struct Images {
     pub bitmaps: BTreeMap<ViewId, Arc<Bitmap>>,
     /// Images presented outside the page, at their requested device-pixel side.
     pub(crate) status_sizes: BTreeMap<ViewId, u32>,
+    /// Active top-bar badge picture nodes and their requested square pixel size and `object-fit`.
+    pub(crate) bar_sizes: BTreeMap<ViewId, (u32, exact_kernel::ObjectFit)>,
     /// Current loaded views and NATURAL pixel sizes; never traversal history.
     pub loaded: Vec<(String, (u32, u32))>,
     /// The views whose source's first picture has landed since the presenter
@@ -317,6 +319,7 @@ impl Images {
             views: BTreeMap::new(),
             bitmaps: BTreeMap::new(),
             status_sizes: BTreeMap::new(),
+            bar_sizes: BTreeMap::new(),
             loaded: Vec::new(),
             load_events: Vec::new(),
             boot_visible_only: false,
@@ -501,6 +504,15 @@ impl Images {
                 view.desired = (*side as f32, *side as f32);
                 view.fit = Some(exact_kernel::ObjectFit::Contain);
                 view.object_fit = exact_kernel::ObjectFit::Contain;
+            }
+            if let Some((side, fit)) = self.bar_sizes.get(id) {
+                view.desired = (*side as f32, *side as f32);
+                // Keep whole-image decoding when object-position shifts the crop
+                // off center so painting can sample the requested edge.
+                view.fit = (!shared
+                    && node.style.object_position == exact_kernel::object::Position::default())
+                .then_some(*fit);
+                view.object_fit = *fit;
             }
             // LLP 1011 §3: a symbol is a font-relative box no file fills (the
             // paint walk strokes a portable role's path into it, `symbol`),
@@ -1255,6 +1267,7 @@ impl Images {
         self.package = std::mem::take(&mut self.package).reset();
         self.bitmaps.clear();
         self.status_sizes.clear();
+        self.bar_sizes.clear();
         self.loaded.clear();
         self.load_events.clear();
         self.generation = self.backend.generation();

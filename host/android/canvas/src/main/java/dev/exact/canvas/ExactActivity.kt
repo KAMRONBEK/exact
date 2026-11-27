@@ -592,7 +592,8 @@ open class ExactActivity : Activity() {
         view.ticker = ticker
         // The app's bars (LLP 1115.001 D11), over the page and everything it hosts. The host tells this reader its
         // bars anew, as it paints everything again for it.
-        view.bars = Bars(this, root)
+        requests.surfaces?.picture = view::picture
+        view.bars = Bars(this, root, view::picture)
         loopNotice = android.system.Os.getenv("EXACT_DEV_PLAN")?.let { DevLoop.Notice(this, root, it) }
         accessible(accessibility.isEnabled || asked)
     }
