@@ -864,10 +864,12 @@ impl<D: DataSource> Presenter<D> {
                 .runner()
                 .handlers_of(id)
                 .contains(&EventKind::Press);
-        // Read before the press, whose handler may remove it.
-        let href = node
-            .props
-            .link()
+        // Read before the press, whose handler may remove it. A link with its
+        // own `press` runs that handler instead of following `href`, matching
+        // the web and Apple hosts.
+        let href = (!pressable)
+            .then(|| node.props.link())
+            .flatten()
             .filter(|_| name == "Enter")
             .map(str::to_string);
         if (role == Some("button") || native || pressable && !link) && matches!(name, " " | "Enter")

@@ -922,12 +922,22 @@ impl<D: DataSource> Presenter<D> {
                     self.invoke(node, now_ms, true);
                     return;
                 }
-                // A link follows its `href` after its press, and at once where
-                // nothing hears the press, as a tap on it in the page does
-                // (LLP 1038 §7, LLP 1141.004 D1); an inert one follows nothing.
+                // A link with its own `press` runs that handler instead of following `href`,
+                // matching the web and Apple hosts; a link without its own `press` notifies an
+                // enclosing listener first and then follows `href` (LLP 1141.004 D1).
                 let kernel = self.host.kernel();
-                let href = (kernel.node(node))
-                    .and_then(|n| n.props.link().map(str::to_owned))
+                let own_press = self
+                    .host
+                    .runner()
+                    .handlers_of(node)
+                    .contains(&EventKind::Press);
+                let href = (!own_press)
+                    .then(|| {
+                        kernel
+                            .node(node)
+                            .and_then(|n| n.props.link().map(str::to_owned))
+                    })
+                    .flatten()
                     .filter(|_| !self.host.authored_visibility(node).1);
                 match (href, self.bar_listener(node)) {
                     (Some(href), None) => self.follow(node, &href, now_ms),

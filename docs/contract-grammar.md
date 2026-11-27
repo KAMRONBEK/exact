@@ -1865,7 +1865,11 @@ A link (`link href`, a text run's `href`, a Markdown link) to a path in the
 app (`/note/3`, one of its declared routes) navigates in it, through the
 navigation root's `navigate`, on every host; a path that names no route (a
 file beside a document) is the browser's, or natively the app's document to
-open. An `href` that turns out empty is no link: the run or `link` has no
+open. When a `link` or inline text run has both `href` and `press`, a plain
+tap or `Enter` runs `press` and does not follow `href`, on every host;
+`href` still supplies the URL for modified or non-primary clicks, `target`,
+`download`, context menus, drags, and accessibility. An `href` that turns
+out empty is no link: the run or `link` has no
 link colour, role or pointer and follows nothing, on every host, so a
 component may write `href=r.href` on every run and leave plain prose's empty.
 A relative path (`note/3`) has no base natively; write it from `/`. One to an absolute URL (`https://…`, `//…`) leaves the
