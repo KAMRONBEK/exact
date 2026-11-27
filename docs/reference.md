@@ -3842,9 +3842,29 @@ message's ceiling, wait for the runtime; one more ends the stream with
 receive-only socket's says `4096 messages`) after the mapper has seen those
 waiting, so nothing is dropped unseen. `coalesced` is 0 for every event: only
 an upload's progress folds (below). The end is
-`{type: 'error', kind, message, status}`: `kind` is `Network` (the far side
+`{type: 'error', kind, message, status, headers?}`: `kind` is `Network` (the far side
 closed: `the socket closed (1000)`), `Refused` (outside the grants), `Aborted`,
-or `Response` with the status and body of a reply that was not an event stream.
+or `Response` with the status, immutable `headers` (`Headers`), and body of a
+reply that was not an event stream.
+
+Pass `exactStreamOpen: true` beside `exactStream` on an `http:`/`https:` event
+or byte stream to receive one standalone `open` event before any event or byte
+chunk when the 2xx response opens:
+`{type: 'open', status, headers, data: '', lastEventId: '', coalesced: 0}`,
+where `headers` is an immutable WHATWG `Headers` (on the web wasm target's
+unhardened browser realms, `Headers` carries no guard, as for `Response.headers`;
+LLP 1016.000 D12). Check `event.type === 'open' && event.headers` to
+distinguish the host's open event from a server-sent `event: open`. Receiving
+the head counts as the stream's first message for `pending` and `clock settle`
+once mapped, and does not reset `exactIdleTimeout` (only body bytes count, D11).
+On Apple hosts, `NSURLSession` delays delivering the head until the first body
+bytes arrive (content sniffing); servers that need `open` before the first
+application event should flush an initial SSE comment (`:\n\n`). On the web,
+cross-origin servers must list custom headers in `Access-Control-Expose-Headers`.
+`exactStreamOpen` must be a boolean; `true` without `exactStream` or on a
+WebSocket, non-HTTP scheme, long poll, upload, listener, or child process throws
+a `TypeError` before I/O. A bundle that names `exactStreamOpen` needs
+`typescriptRuntime` 20.
 
 For authentication, use the runnable [single-use ticket recipe](recipes/socket-ticket.md):
 an authorized HTTPS request obtains a ticket, and a second source opens its WSS
