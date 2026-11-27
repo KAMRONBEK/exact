@@ -154,7 +154,7 @@ main
     text "Over" color="-exact-system-red"
 ```
 ### reading and writing data
-app.ts's `loadItems`, `addItem` answer exactly their shape; a refusal is a reply (`ok: false`), not a throw. `then act` after `refreshes` clears the field on ok; `pending(added)` stops a second send, `parallel` runs both.
+app.ts's `loadItems`, `addItem` match their shape; refusals reply (`ok: false`), never throw. `then act` after `refreshes` runs on ok; `pending(added)` guards resends, `parallel` runs both.
 ```contract
 shape Reply
   ok: bool

@@ -311,6 +311,7 @@ mod svg_use_foreign_object;
 mod swipe;
 mod swipe_fold;
 mod symbol_ink;
+mod symbol_roles;
 mod symbol_tint;
 mod symbols;
 mod tab_accessory;
