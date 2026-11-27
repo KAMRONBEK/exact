@@ -218,6 +218,8 @@ struct Closing {
 /// A route crossing.
 struct Shift {
     forward: bool,
+    /// Whether the transition container's inline axis is right-to-left (shared-axis X).
+    rtl: bool,
     /// The route that leaves, drawn live or from its kept drawing once removed.
     outgoing: NodeKey,
     incoming: NodeKey,
@@ -804,8 +806,10 @@ impl<D: DataSource> Presenter<D> {
                 .and_then(|s| s.bar.clone())
                 .map(|tape| (tape, (0.0, 0.0, 0.0, 0.0))),
         };
+        let rtl = authored::shift_rtl(self.host.kernel(), stack, within);
         self.stage.shift = Some(Shift {
             forward,
+            rtl,
             outgoing: *old,
             incoming: *new,
             sheet,
@@ -1402,7 +1406,11 @@ impl<D: DataSource> Presenter<D> {
                 };
                 return (out_pose, in_pose);
             }
-            let way = if shift.forward { 1.0 } else { -1.0 };
+            let way = if shift.forward != shift.rtl {
+                1.0
+            } else {
+                -1.0
+            };
             // The fades go by the clock, the moves by the curve.
             let out_fade = (1.0 - linear / AXIS_FADE).clamp(0.0, 1.0);
             let in_fade = ((linear - AXIS_FADE) / (1.0 - AXIS_FADE)).clamp(0.0, 1.0);
