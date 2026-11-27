@@ -768,8 +768,13 @@ if (siteBase !== '/') {
   writeFileSync(file, "import { siteHref } from './site.js';\n" + code.replace(boundary, 'span.href = siteHref(href.trim());'));
 }
 
-const grantNames = Object.keys(await import('../web/grant-admission.js'))
-  .filter(name => !['isCloudMetadata', 'isLocalNetwork'].includes(name));
+const [grantModule, networkModule] = await Promise.all([
+  import('../web/grant-admission.js'),
+  import('../web/navigation/network.js'),
+]);
+const networkNames = Object.keys(grantModule)
+  .filter(name => name in networkModule && Object.is(grantModule[name], networkModule[name]));
+const grantNames = Object.keys(grantModule).filter(name => !networkNames.includes(name));
 writeFileSync(resolve(gen, 'grant-network.js'), await bundleHostModule(root, 'navigation/network.js', { production }));
 // A production page whose every grant set is empty (no TypeScript grant, no Rust module, no native module, no page
 // module, no declared source) admits nothing, and says so without the parser (LLP 1047.002 D3): each export of admission answers as it
@@ -799,7 +804,7 @@ const emptyGrantAdmission = () => {
   return ['// Generated: the grant admission of a page that admits nothing (LLP 1047.002 D3). Every set is the empty set the compiler normalized.',
     `const EMPTY = Object.freeze({ ...${JSON.stringify(tsGrantSet)}, entries: Object.freeze([]) });`,
     ...grantNames.map(name => `export const ${name} = ${answers[name]};`),
-    "export { isCloudMetadata, isLocalNetwork } from './grant-network.js';"].join('\n');
+    ...(networkNames.length ? [`export { ${networkNames.join(', ')} } from './grant-network.js';`] : [])].join('\n');
 };
 // The agent adapter reads its own copies of the modules it shares with the
 // entry: a module lives in one chunk, so what only the agent reads from
