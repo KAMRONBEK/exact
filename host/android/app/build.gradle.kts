@@ -9,6 +9,7 @@ import java.net.URLClassLoader
 import java.util.concurrent.ConcurrentHashMap
 import java.util.zip.ZipFile
 import org.objectweb.asm.ClassReader
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
 import org.gradle.api.artifacts.component.ModuleComponentSelector
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 import org.gradle.api.artifacts.result.UnresolvedDependencyResult
@@ -574,6 +575,7 @@ abstract class CheckCarManifest : DefaultTask() {
     @get:Optional @get:Classpath abstract val compilerJar: RegularFileProperty
     @get:Input abstract val ownerDir: Property<String>
     @get:InputFiles @get:PathSensitive(PathSensitivity.RELATIVE) abstract val libraryResources: ConfigurableFileCollection
+    @get:InputFiles @get:PathSensitive(PathSensitivity.RELATIVE) abstract val externalThemeResources: ConfigurableFileCollection
     @get:Input abstract val service: Property<String>
     @get:Input abstract val maps: Property<Boolean>
 
@@ -677,27 +679,39 @@ abstract class CheckCarManifest : DefaultTask() {
             "Merged MAP_TEMPLATES must match the carAppService package's permissions, without SDK or flag restrictions"
         }
         val app = doc.getElementsByTagName("application").elements().single()
-        if (expected.isEmpty()) {
-            val reserved = setOf("com.google.android.gms.car.application", "androidx.car.app.minCarApiLevel")
-            val stray = app.getElementsByTagName("meta-data").elements().firstOrNull { it.parentNode == app && it.name() in reserved }
-            require(stray == null) { "Merged application metadata ${stray?.name()} requires a carAppService" }
-        } else {
-            // Compare the installed entries with the shape the package allow-list actually emitted.
+        val appId = doc.documentElement.getAttribute("package")
+        fun canonicalName(raw: String): String = when {
+            raw.isEmpty() -> ""
+            raw.startsWith('.') -> appId + raw
+            '.' !in raw -> "$appId.$raw"
+            else -> raw
+        }
+        fun org.w3c.dom.Element.children() = (0 until childNodes.length).mapNotNull { childNodes.item(it) as? org.w3c.dom.Element }
+        if (approvedFragment.isPresent) {
+            // Compare every tools:node="replace" entry (carAppService, package-private activities)
+            // with the shape the package allow-list emitted so no AAR widens it during manifest merge.
             val tools = "http://schemas.android.com/tools"
             val fragment = "<manifest xmlns:android=\"$ns\" xmlns:tools=\"$tools\">" + approvedFragment.get().asFile.readText() + "</manifest>"
             val approved = factory.newDocumentBuilder().parse(fragment.byteInputStream())
-            fun org.w3c.dom.Element.children() = (0 until childNodes.length).mapNotNull { childNodes.item(it) as? org.w3c.dom.Element }
             fun shape(node: org.w3c.dom.Element): List<Any> {
                 val attributes = (0 until node.attributes.length).map { node.attributes.item(it) }.filter { it.namespaceURI == ns }
-                return listOf(node.tagName, attributes.associate { it.localName to it.nodeValue }, node.children().map(::shape))
+                return listOf(node.tagName, attributes.associate { it.localName to if (it.localName == "name") canonicalName(it.nodeValue) else it.nodeValue }, node.children().map(::shape))
             }
+            val privateActivities = mutableSetOf<String>()
+            val reservedThemes = mutableSetOf<String>()
             for (entry in approved.getElementsByTagName("*").elements()) {
                 when (entry.getAttributeNS(tools, "node")) {
                     "replace" -> {
-                        val installed = app.children().singleOrNull { it.tagName == entry.tagName && it.name() == entry.name() }
-                        require(installed != null && shape(installed) == shape(entry)) { "Merged ${entry.name()} differs from the approved carAppService entry" }
+                        val expectedName = canonicalName(entry.name())
+                        val installed = app.children().singleOrNull { it.tagName == entry.tagName && canonicalName(it.name()) == expectedName }
+                        require(installed != null && shape(installed) == shape(entry)) { "Merged ${entry.name()} differs from the approved manifest entry" }
+                        if (entry.tagName == "activity" && entry.getAttributeNS(ns, "exported") == "false") {
+                            privateActivities.add(expectedName)
+                            val theme = entry.getAttributeNS(ns, "theme")
+                            if (theme.startsWith("@style/")) reservedThemes.add(theme.removePrefix("@style/"))
+                        }
                     }
-                    "remove" -> if (entry.name().startsWith("androidx.car.app.")) {
+                    "remove" -> if (expected.isNotEmpty() && entry.name().startsWith("androidx.car.app.")) {
                         val authority = entry.getAttributeNS(ns, "authorities")
                         require(doc.getElementsByTagName(entry.tagName).elements().none {
                             it.name() == entry.name() || authority.isNotEmpty() && it.getAttributeNS(ns, "authorities") == authority
@@ -705,6 +719,36 @@ abstract class CheckCarManifest : DefaultTask() {
                     }
                 }
             }
+            if (privateActivities.isNotEmpty()) {
+                for (alias in app.children().filter { it.tagName == "activity-alias" }) {
+                    val rawTarget = alias.getAttributeNS(ns, "targetActivity")
+                    require(rawTarget.isNotEmpty() && !rawTarget.startsWith('@') && !rawTarget.startsWith('?')) {
+                        "Merged activity-alias ${alias.name()} must use a literal android:targetActivity when package-private activities are present"
+                    }
+                    val target = canonicalName(rawTarget)
+                    require(target !in privateActivities) {
+                        "Merged activity-alias ${alias.name()} cannot target package-private activity $target"
+                    }
+                }
+            }
+            if (reservedThemes.isNotEmpty()) {
+                for (res in externalThemeResources.files) {
+                    val root = factory.newDocumentBuilder().parse(res).documentElement
+                    for (node in root.children()) {
+                        val styleName = node.getAttribute("name")
+                        val isStyle = node.tagName == "style" || (node.tagName == "item" && node.getAttribute("type") == "style")
+                        require(!(isStyle && styleName in reservedThemes)) {
+                            "Package-private activities reserve @style/$styleName for Exact; also declared by $res"
+                        }
+                    }
+                }
+            }
+        }
+        if (expected.isEmpty()) {
+            val reserved = setOf("com.google.android.gms.car.application", "androidx.car.app.minCarApiLevel")
+            val stray = app.getElementsByTagName("meta-data").elements().firstOrNull { it.parentNode == app && it.name() in reserved }
+            require(stray == null) { "Merged application metadata ${stray?.name()} requires a carAppService" }
+        } else {
             checkClass(expected)
             require(app.getAttributeNS(ns, "permission").isEmpty()) { "carAppService $expected cannot inherit an application permission" }
             // The app supplies the descriptor. A library must not introduce a version for another configuration.
@@ -721,7 +765,6 @@ abstract class CheckCarManifest : DefaultTask() {
             // The shell's Files provider and the reader's ProfileInstaller initializer run framework code.
             val applicationClass = app.name()
             require(applicationClass in setOf("", "android.app.Application")) { "carAppService cannot start $applicationClass before host validation" }
-            val appId = doc.documentElement.getAttribute("package")
             fun process(name: String, default: String) = if (name.startsWith(':')) appId + name else name.ifEmpty { default }
             val serviceProcess = process(app.getAttributeNS(ns, "process"), appId)
             for (provider in app.children().filter { it.tagName == "provider" && process(it.getAttributeNS(ns, "process"), serviceProcess) == serviceProcess }) {
@@ -805,6 +848,14 @@ if (carService != null || mapPermission || maven.isNotEmpty() || providers.gradl
             service.set(carService.orEmpty())
             maps.set(carService != null && providers.gradleProperty("carMapTemplates").orNull == "1")
             merged.set(variant.artifacts.get(com.android.build.api.artifact.SingleArtifact.MERGED_MANIFEST))
+            if (providers.gradleProperty("manifestFragment").isPresent) {
+                approvedFragment.set(layout.file(providers.gradleProperty("manifestFragment").map { File(it) }))
+                val externalRes = variant.runtimeConfiguration.incoming.artifactView {
+                    componentFilter { it is ModuleComponentIdentifier }
+                    attributes.attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, "android-res")
+                }.files
+                externalThemeResources.from(externalRes.asFileTree.matching { include("**/values*/*.xml") })
+            }
         }
         if (carService != null) {
             val descriptor = tasks.register<CarDescriptor>(variant.computeTaskName("generate", "CarDescriptor"))
@@ -816,7 +867,6 @@ if (carService != null || mapPermission || maven.isNotEmpty() || providers.gradl
                 attributes.attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, "android-res")
             }.files
             check.configure {
-                approvedFragment.set(layout.file(providers.gradleProperty("manifestFragment").map { File(it) }))
                 compilerJar.fileValue(gradle.gradleHomeDir!!.resolve("lib").listFiles()!!.single { it.name.startsWith("kotlin-compiler-embeddable-") && it.extension == "jar" })
                 ownerSources.from(providers.gradleProperty("carSourceDirs").map { dirs ->
                     dirs.split(',').map { fileTree(it).matching { include("**/*.kt"); exclude("**/node_modules/**") } }
