@@ -1871,6 +1871,24 @@ development profile, `production` otherwise; CloudKit uses `Development` and
 `Contents/embedded.provisionprofile`, and always assembles the `.app`, where
 the profile holds.
 
+To prepare a native Mac app for a separate Developer ID signer, run
+`bun exact.mjs mac --distribution --unsigned --json`. The ad-hoc `.app` keeps
+production update trust and the baked HTTPS callback requirements in
+`Contents/Resources/receipt.json` (`build.compat`), isolates its bake output,
+capture, standalone products and `.app` under `unsigned/` so signed or local
+builds and publish receipts are untouched, and reports `requiresResigning: true`
+in the `--json` output only (not inside `receipt.json`). The build embeds no
+profile or restricted entitlements and refuses other profile requirements,
+extensions, `--run`, `EXACT_MAC_PROFILE`, `EXACT_PROFILE`, and any
+`EXACT_DEVELOPER_ID` other than `-`. Before distribution, the signer must verify
+the receipt, embed a matching Developer ID profile, sign inside out with
+hardened runtime, a secure timestamp and the derived entitlements (including
+re-signing `Contents/MacOS/libexact_gpu*.dylib` in place, whose `code_digest`
+excludes the signature blob), and notarize. Any whole-file-verified
+`Contents/Resources/rust/*.dylib` companions must arrive already signed for the
+final app's team (for example via `EXACT_RUST_SIGN_IDENTITY`) and remain
+untouched, because re-signing them changes the verified bytes.
+
 With no profile that fits, a development build signs none of them and says,
 for each grant, what the app then reports (`available: false`,
 `NotSupportedError`). A release build is refused (`grant-needs-profile`) for
