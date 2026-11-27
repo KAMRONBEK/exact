@@ -12,7 +12,7 @@ import UIKit
 extension Presenter {
     /// Touches whose `pointerdown` closed an opening they cross, before the
     /// hit view's down: UIKit's touches are never shared between sessions.
-    var cancelledPressTouches: NSHashTable<UITouch> { Self.cancelledPressTouches }
+    package var cancelledPressTouches: NSHashTable<UITouch> { Self.cancelledPressTouches }
     private static let cancelledPressTouches = NSHashTable<UITouch>.weakObjects()
     /// A window point from the viewport's top-left, the page scroll applied:
     /// DOM's `clientX`/`clientY`, `frame()`'s space (LLP 1094 D11). tvOS's
@@ -370,6 +370,11 @@ extension NodeView {
     }
 
     var hasPressContact: Bool { pressContact.map { !$0.cancelled } ?? false }
+    /// Whether `touch` belongs to a logically cancelled press contact on an
+    /// enabled node (not a plain tap on a disabled node).
+    package func isCancelledPressTouch(_ touch: UITouch) -> Bool {
+        pressContact?.touch === touch && pressContact?.cancelled == true && !disabled
+    }
     /// UIView forwards to `next`. Only Exact's inserted overflow wrapper is
     /// skipped: UIScrollView otherwise swallows the authored ancestor's down.
     private var pressResponder: UIResponder? {
@@ -510,6 +515,15 @@ extension NodeView {
     }
     package override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         if canvasTouches(touches, phase: "up", event: event) { return }
+        #if os(iOS)
+        if let presenter, presenter.textSelection.hasActiveSelection,
+           let t = touches.first, let view = t.view, !presenter.textSelection.owns(view),
+           !presenter.contextRetainsFocus(self),
+           !presenter.cancelledPressTouches.contains(t),
+           !isCancelledPressTouch(t) {
+            presenter.textSelection.clear()
+        }
+        #endif
         guard let contact = currentPressContact(touches) else { return }
         // Its press may have removed the overlay that held the look with it,
         // which left the look to this contact: the look is the overlay's alone now.

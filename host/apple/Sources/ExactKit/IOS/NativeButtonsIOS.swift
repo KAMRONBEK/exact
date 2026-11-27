@@ -154,6 +154,12 @@ package final class NativeButtonIOS: UIButton {
     /// activation sends the action with no touch, and has none.
     private(set) var lifted: CGPoint?
     package override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        #if os(iOS)
+        if let presenter = owner?.presenter, presenter.textSelection.hasActiveSelection,
+           let t = touches.first, bounds.contains(t.location(in: self)) {
+            presenter.textSelection.clear()
+        }
+        #endif
         lifted = touches.first?.location(in: nil)
         defer { lifted = nil }
         super.touchesEnded(touches, with: event)

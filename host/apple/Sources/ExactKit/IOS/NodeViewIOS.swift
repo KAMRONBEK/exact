@@ -769,6 +769,7 @@ package final class NodeView: UIView, UITextViewDelegate, UITextFieldDelegate, U
         presenter.stickies.scrolled(id); presenter.collections.changed(id, user: true, sequenceAdvanced: true)
         #if os(iOS)
         if swipeOwner, scrollView.isTracking { presenter.swipeActions.paintedScrolled(self) }
+        presenter.textSelection.scrolled(scrollView)
         #endif
         presenter.transformGeometry.changed()
         presenter.tipsScrolled()

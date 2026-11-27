@@ -1287,6 +1287,8 @@ public final class ExactSession {
                 if name == "removeAllRanges" {
                     #if os(macOS)
                     app.deliver { [weak self] in self?.presenter.selection.clear() }
+                    #elseif os(iOS)
+                    app.deliver { [weak self] in self?.presenter.textSelection.clear() }
                     #else
                     log("removeAllRanges refused: reader selection commands are not supported on this platform")
                     #endif

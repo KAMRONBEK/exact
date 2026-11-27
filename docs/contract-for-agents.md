@@ -8112,7 +8112,7 @@ on the web, macOS, iOS, Android and Linux. `action act(s: Selection)` gets `s.te
 `s.end` in the node's own text ("" at 0, 0 when nothing there is selected).
 On web, macOS and Linux, `s.rects` is a list of `Geometry` snapshots for the selected
 fragments in viewport space. It is empty when cleared. iOS and Android report an empty list.
-`removeAllRanges()` clears the reader selection, and
+`removeAllRanges()` clears the reader selection on web, macOS and iOS, and
 `setSelectionRange(id, start, end[, direction])` selects a `text` on web and
 macOS using source UTF-16 offsets. Both report changed parts through
 `selectionchange`; see [text selection](contract-grammar.md#text-selection).
@@ -8425,10 +8425,26 @@ a label inside a button, link or other control, or in a `header`, `nav`,
 `footer`, toolbar, tablist or menu, is not selectable, while an `article`'s text
 and other content text is (so put prose a reader copies in `article`, not a
 `header`). On iOS `auto` is UIKit's, where a label selects nothing: write
-`user-select="text"` on prose a reader copies (on the text or anything above
+`user-select="text"` on prose a reader copies (on the text or a container above
 it), and a long press or a double tap there selects a word with the system's
-handles and its Copy, Look Up, Translate and Share menu, one paragraph (one
-`text`) at a time. A label inside a control stays unselectable unless the
+handles and its Copy, Select All, Look Up, Translate, Search Web and Share menu.
+Putting `user-select="text"` on a container around multiple selectable `text`
+paragraphs spans all of them with one shared selection (`SelectionDocument`),
+provided there is more than one selectable paragraph, none of them has a
+`contextmenu`, context popover or inline context menu, and no scroll container
+or pressable sits between the touched paragraph and that container. A `user-select="all"` container spans all of its selectable paragraphs as one
+atomic unit when none of them has a `contextmenu`, context popover or inline
+context menu (even across a nested scroll container or pressable, per CSS UI 4
+§6.1). A selectable paragraph inside a scroll container below a
+`user-select="text"` container (such as a horizontally scrolling code box inside
+a comment) joins the outer shared selection while a selection started outside
+the scroll container is active, while a selection started inside the scroll
+container stays within it. On both macOS and iOS, Copy joins separate selected `text` blocks with a
+blank line (`\n\n`), so a code block whose lines should copy with single line
+breaks belongs in one `text` with `white-space="pre"` (using inline runs for
+highlighting). Tapping outside an active iOS selection clears it, and
+`removeAllRanges()` clears it from Contract. A label inside a control stays
+unselectable unless the
 `text` is said on it or inside the control. On the web `auto` leaves the
 choice to the page's stylesheet, but a control's label (a button, link,
 pressable or control role) is not selectable there either; a text's own runs
@@ -8437,8 +8453,8 @@ UI 4 has it (a path, a device code): on the web and macOS one click in it
 selects all of it, and a drag, a Shift-click
 or Shift with an arrow that reaches into it takes it whole. On iOS a long
 press or a double tap in it selects it instead of a word, and a tap selects
-nothing, as on a `UITextView`; an element around a paragraph selects that
-paragraph (one selection is one paragraph there). An inline run that says
+nothing, as on a `UITextView`; an element around one or more paragraphs selects
+all of its paragraphs together. An inline run that says
 `all` is selectable in text that is not (a label, a `header`), alone, on
 all three. Text that presses (`press=`) still presses on each click or
 tap; on macOS it does not select, and on iOS a tap while it holds a

@@ -2846,7 +2846,15 @@ Nothing selected
 there is `text: ""` with `start == end == 0` and `rects: []`; it fires while a drag moves,
 once per change. The web and macOS select text; iOS selects text its author
 made selectable (`user-select="text"`), by a long press, a double tap and the
-selection's handles. On Android a long press selects a word in an opted-in
+selection's handles; a `user-select="text"` container around multiple selectable
+paragraphs shares one selection across them when none has a context menu and no
+scroll container or pressable lies between the touched paragraph and the
+container (a paragraph inside a nested scroll container joins while a selection
+started outside that scroller is active, and stays local when started inside
+it; a `user-select="all"` container spans its paragraphs atomically when none has
+a context menu). Copy joins separate `text` blocks with a blank line
+(`\n\n`) on macOS and iOS; the iOS edit menu offers Select All alongside Copy
+and the system actions, and tapping outside the selection clears it. On Android a long press selects a word in an opted-in
 paragraph. Dragging its handles changes the selected range and Select all
 takes the paragraph's selectable text. On Linux and Windows, dragging the mouse selects
 text in opted-in paragraphs. Double-click selects a word and triple-click selects
@@ -2857,16 +2865,15 @@ paragraphs, when the host supplies a clipboard. In a
 or a double tap on iOS) selects the whole element, and a selection that reaches
 into it takes all of it.
 
-On web and macOS, `removeAllRanges()` clears the reader's selection. Each
+On web, macOS and iOS, `removeAllRanges()` clears the reader's selection. Each
 paragraph that held a part reports its empty selection. The documented
 extension `setSelectionRange(id, start, end[, direction])` also selects a
-`text`: offsets are UTF-16 in its source text, clamped as for a field; an end
+`text` on web and macOS: offsets are UTF-16 in its source text, clamped as for a field; an end
 before the start collapses at the end. Requested source boundaries survive
 CSS whitespace collapsing. `backward` puts the anchor at the end,
 as `Selection.setBaseAndExtent` does. The command replaces the page's previous
 selection and fires `selectionchange` for changed parts without focusing a
-field. An unchanged part does not fire again. These two commands on reader
-text are available on web and macOS. On iOS and Android selection events carry
+field. An unchanged part does not fire again. On iOS and Android selection events carry
 an empty rectangle list.
 
 Rectangles are snapshots at that event, not live layout facts. On the web they

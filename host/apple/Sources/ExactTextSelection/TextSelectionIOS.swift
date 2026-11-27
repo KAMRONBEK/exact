@@ -8,11 +8,13 @@
 // follow its glyph runs on the lines the kernel broke.
 //
 // A selectable prose container shares one input and one touch surface across
-// its paragraphs (TextSelectionDocumentIOS). The surface sits below their ink.
+// its paragraphs (TextSelectionDocumentIOS). The surface paints over child
+// backgrounds so highlights and handles stay visible above opaque blocks.
 // A paragraph with a context menu keeps its own interaction so its row's menu
 // still wins the long press. Nothing is installed until text is touched;
 // at most TextSelectionHost.kept independent selections keep interactions.
-// A single tap with a selection up clears it without pressing.
+// A single tap with a selection up clears it without pressing; tapping outside
+// the selection clears it while still delivering the tap there.
 //
 // CSS `user-select: all` (CSS UI 4 §6.1): a selection that takes part of
 // such an element takes all of it, so a long press, a double tap or a handle
@@ -24,12 +26,16 @@ import CoreText
 import ExactCore
 import ExactKit
 import UIKit
+import UIKit.UIGestureRecognizerSubclass
 
 /// The paragraphs that hold a text interaction, and the one selection.
 final class TextSelectionHost: TextSelecting {
     private weak var presenter: Presenter?
     /// Oldest first.
     private(set) var texts: [SelectableText] = []
+    /// Passive observers mounted on session roots while a selection is active,
+    /// so tapping any view or native control outside the selection clears it.
+    private var dismissObservers: [SelectionDismissObserver] = []
     /// How many paragraphs keep their interaction once a finger has left.
     static let kept = 3
     /// Where Copy writes: the system's pasteboard (a test names its own,
@@ -43,7 +49,18 @@ final class TextSelectionHost: TextSelecting {
         node.isParagraph && presenter?.views[node.id] === node && !node.inert && !node.isHidden
             && (node.textSelectable || node.inlineText.contains(where: \.selectsAll))
     }
-    func text(for node: NodeView) -> SelectableText? { texts.first { $0.node === node || $0.document?.contains(node) == true } }
+    func text(for node: NodeView) -> SelectableText? {
+        // An active selection wins so an idle standalone input inside a nested
+        // scroller cannot shadow an active spanning document.
+        if let active = texts.first(where: { $0.selected.length > 0 && ($0.node === node || $0.document?.contains(node) == true) }) {
+            return active
+        }
+        if let exact = texts.first(where: { $0.document == nil && $0.node === node }) { return exact }
+        return texts.first { held in
+            guard let doc = held.document, doc.contains(node) else { return false }
+            return SelectionDocument.container(of: node) === doc.owner
+        }
+    }
     /// The selection, if there is one: its paragraph, and its range in that
     /// paragraph's own text (its source, as `selectionchange` reports it).
     var selection: (node: NodeView, text: String, range: NSRange)? {
@@ -61,14 +78,32 @@ final class TextSelectionHost: TextSelecting {
         return admits(node) && documentParagraphs(for: node) != nil
     }
     func hasSelection(in node: NodeView) -> Bool { text(for: node)?.selected.length ?? 0 > 0 }
+    var hasActiveSelection: Bool { texts.contains { $0.selected.length > 0 } }
+    func owns(_ view: UIView) -> Bool {
+        texts.contains { held in
+            guard held.selected.length > 0 else { return false }
+            let hostView = held.textInputView
+            return view === hostView || view.isDescendant(of: hostView)
+                || held.node === view || held.document?.containsView(view) == true
+        }
+    }
+    func canSelectAll(in node: NodeView) -> Bool { text(for: node)?.canSelectAll == true }
+    @discardableResult
+    func selectAll(_ node: NodeView) -> Bool { text(for: node)?.selectAllDocument() == true }
     func interactionHolds(_ gesture: UIGestureRecognizer, on paragraph: NodeView) -> Bool {
         text(for: paragraph)?.interaction.gesturesForFailureRequirements.contains { $0 === gesture } == true
     }
     @discardableResult
     func install(_ node: NodeView) -> SelectableText {
         if let held = text(for: node) { return held }
+        for old in texts where !old.busy && old.document?.contains(node) == true { drop(old) }
         while texts.count >= Self.kept, let old = texts.first(where: { !$0.busy }) { drop(old) }
         let document = documentParagraphs(for: node).map { SelectionDocument(owner: $0.owner, paragraphs: $0.paragraphs, host: self) }
+        if let document {
+            for old in texts where !old.busy && old.document == nil {
+                if let n = old.node, document.contains(n) { drop(old) }
+            }
+        }
         let made = SelectableText(node: node, host: self, document: document)
         texts.append(made)
         return made
@@ -85,16 +120,64 @@ final class TextSelectionHost: TextSelecting {
     private func drop(_ held: SelectableText) {
         texts.removeAll { $0 === held }
         held.detach()
+        syncDismissObservers()
     }
     /// After a batch: text that changed drops its selection, text
     /// that is no longer selectable gives its interaction back, and a
     /// selection whose paragraph was laid out again is shown where it is.
     func batchEnded() {
         for held in texts where !held.settle() { drop(held) }
+        syncDismissObservers()
     }
-    func clear() { texts.forEach { $0.clear() } }
+    func scrolled(_ scrollView: UIScrollView) {
+        guard hasActiveSelection else { return }
+        for held in texts where held.selected.length > 0 {
+            guard let doc = held.document else { continue }
+            if doc.owner?.scrollView === scrollView || doc.parts.contains(where: { $0.node.isDescendant(of: scrollView) }) {
+                doc.syncFrame()
+                doc.syncSurfaceMask(for: held.selected)
+                held.invalidateDisplay()
+            }
+        }
+    }
+    func clear() {
+        texts.forEach { $0.clear() }
+        syncDismissObservers()
+    }
     /// One selection on the page: `keep`'s.
-    func selected(in keep: SelectableText) { for held in texts where held !== keep { held.clear() } }
+    func selected(in keep: SelectableText) {
+        for held in texts where held !== keep { held.clear() }
+        if let doc = keep.document {
+            for old in texts where old !== keep && !old.busy && old.document == nil {
+                if let n = old.node, doc.contains(n) { drop(old) }
+            }
+        }
+        syncDismissObservers()
+    }
+    func selectionCleared() { syncDismissObservers() }
+    private func syncDismissObservers() {
+        guard hasActiveSelection, let presenter else {
+            for observer in dismissObservers { observer.view?.removeGestureRecognizer(observer) }
+            dismissObservers.removeAll()
+            return
+        }
+        var roots: [UIView] = [presenter.documentHost]
+        for surface in presenter.presentations() where !roots.contains(where: { $0 === surface }) {
+            roots.append(surface)
+        }
+        dismissObservers.removeAll { observer in
+            guard let view = observer.view, roots.contains(where: { $0 === view }) else {
+                observer.view?.removeGestureRecognizer(observer)
+                return true
+            }
+            return false
+        }
+        for root in roots where !dismissObservers.contains(where: { $0.view === root }) {
+            let observer = SelectionDismissObserver(host: self, presenter: presenter)
+            root.addGestureRecognizer(observer)
+            dismissObservers.append(observer)
+        }
+    }
     func report(_ node: NodeView, _ text: String, _ range: NSRange) {
         presenter?.selectionChange(node.id, text, range.location, NSMaxRange(range))
     }
@@ -221,6 +304,7 @@ final class SelectableText: UIResponder, UITextInput, UITextInteractionDelegate 
         for left in node.interactions where companions.contains(where: { $0 === left }) { node.removeInteraction(left) }
         for left in node.gestureRecognizers ?? [] where recognizers.contains(where: { $0 === left }) { node.removeGestureRecognizer(left) }
         recognizers = []; companions = []
+        document?.surface.setPaintForeground(false)
         document?.surface.removeFromSuperview()
     }
     /// After a batch. False when the node no longer takes a selection.
@@ -231,11 +315,15 @@ final class SelectableText: UIResponder, UITextInput, UITextInteractionDelegate 
         if now != text {
             clear()
             text = now
-        } else if selected.length > 0, node.bounds.size != laid {
+        } else if selected.length > 0, (document?.geometryChanged() == true || node.bounds.size != laid) {
+            document?.syncSurfaceMask(for: selected)
             display?.setNeedsSelectionUpdate()
         }
         laid = node.bounds.size
         return true
+    }
+    func invalidateDisplay() {
+        display?.setNeedsSelectionUpdate()
     }
 
     /// UIKit's single taps swallow the touch they recognize. With nothing
@@ -254,22 +342,49 @@ final class SelectableText: UIResponder, UITextInput, UITextInteractionDelegate 
 
     // MARK: the selection
 
+    /// The selectable shaped slices within `range` as a sorted, disjoint union:
+    /// the whole slice when the paragraph itself is selectable, otherwise only
+    /// its `user-select: all` runs.
+    func selectableSlices(in range: NSRange) -> [NSRange] {
+        guard let node, range.length > 0 else { return [] }
+        if node.textSelectable { return [range] }
+        let clipped = runs(of: node).compactMap { run -> NSRange? in
+            let hit = NSIntersectionRange(run, range)
+            return hit.length > 0 ? hit : nil
+        }.sorted { $0.location != $1.location ? $0.location < $1.location : $0.length > $1.length }
+        var merged: [NSRange] = []
+        for slice in clipped {
+            if let last = merged.last, slice.location <= NSMaxRange(last) {
+                let end = max(NSMaxRange(last), NSMaxRange(slice))
+                merged[merged.count - 1] = NSRange(location: last.location, length: end - last.location)
+            } else {
+                merged.append(slice)
+            }
+        }
+        return merged
+    }
+
     /// The selected text as it is copied.
     var selectedText: String {
         guard selected.length > 0 else { return "" }
-        let chosen = text.substring(with: selected)
-        guard let document else { return node?.copiedText(chosen, from: selected.location) ?? chosen }
-        // Each paragraph's slice as it copies (an image as its label, LLP 1011.002 D4).
-        var out = "", cursor = selected.location
-        let end = NSMaxRange(selected)
-        for part in document.parts {
-            let lo = max(part.start, cursor), hi = min(part.start + part.length, end)
-            guard hi > lo else { continue }
-            out += text.substring(with: NSRange(location: cursor, length: lo - cursor))
-            out += part.node.copiedText(text.substring(with: NSRange(location: lo, length: hi - lo)), from: lo - part.start)
-            cursor = hi
+        guard let document else {
+            guard let node else { return text.substring(with: selected) }
+            let slices = selectableSlices(in: selected)
+            guard !slices.isEmpty else { return "" }
+            return slices.map { node.copiedText(text.substring(with: $0), from: $0.location) }.joined()
         }
-        return out + text.substring(with: NSRange(location: cursor, length: end - cursor))
+        // Each paragraph's selectable slices as they copy (an image as its label, LLP 1011.002 D4).
+        var pieces: [String] = []
+        for part in document.parts {
+            let overlap = NSIntersectionRange(selected, part.range)
+            guard overlap.length > 0 else { continue }
+            let local = NSRange(location: overlap.location - part.start, length: overlap.length)
+            let slices = part.input.selectableSlices(in: local)
+            guard !slices.isEmpty else { continue }
+            let copied = slices.map { part.node.copiedText(part.input.shapedText.substring(with: $0), from: $0.location) }.joined()
+            pieces.append(copied)
+        }
+        return pieces.joined(separator: "\n\n")
     }
     /// Map shaped offsets inside `node` to a clamped slice of `node.paragraphText`.
     static func sourceSelection(in node: NodeView, shaped: NSRange) -> (text: String, range: NSRange)? {
@@ -294,8 +409,9 @@ final class SelectableText: UIResponder, UITextInput, UITextInteractionDelegate 
         if next != asked { display?.setNeedsSelectionUpdate() }
         guard next != selected else { return }
         selected = next
+        document?.syncSurfaceMask(for: next)
         syncTaps()
-        if next.length > 0 { host.selected(in: self) }
+        if next.length > 0 { host.selected(in: self) } else { host.selectionCleared() }
         report()
     }
     /// The web's `selectionchange` on a `text`: its part of the selection
@@ -316,6 +432,27 @@ final class SelectableText: UIResponder, UITextInput, UITextInteractionDelegate 
         set(NSRange(location: 0, length: 0))
         inputDelegate?.selectionDidChange(self)
         textInputView.interactions.compactMap { $0 as? UIEditMenuInteraction }.forEach { $0.dismissMenu() }
+    }
+    /// The whole selectable range of this paragraph or shared document.
+    var allSelectableRange: NSRange {
+        guard text.length > 0 else { return NSRange(location: 0, length: 0) }
+        return atomic(NSRange(location: 0, length: text.length))
+    }
+    var canSelectAll: Bool {
+        let all = allSelectableRange
+        return selected.length > 0 && all.length > 0 && selected != all
+    }
+    @discardableResult
+    func selectAllDocument() -> Bool {
+        let all = allSelectableRange
+        guard all.length > 0 else { return false }
+        if !isFirstResponder { _ = becomeFirstResponder() }
+        inputDelegate?.selectionWillChange(self)
+        set(all)
+        inputDelegate?.selectionDidChange(self)
+        display?.isActivated = true
+        display?.setNeedsSelectionUpdate()
+        return true
     }
     /// The word at `point` (the node's space), by UIKit's own tokenizer, as
     /// its double tap takes it; shown as a gesture's selection is.
@@ -339,7 +476,7 @@ final class SelectableText: UIResponder, UITextInput, UITextInteractionDelegate 
     func atomic(_ range: NSRange) -> NSRange {
         if let document { return document.atomic(range) }
         guard let node, range.length > 0 else { return range }
-        if node.selectAllElement != nil { return NSRange(location: 0, length: text.length) }
+        if node.textSelectable, node.selectAllElement != nil { return NSRange(location: 0, length: text.length) }
         let own = node.textSelectable
         var lo = own ? range.location : Int.max, hi = own ? NSMaxRange(range) : Int.min
         for whole in runs(of: node) where whole.location < NSMaxRange(range) && NSMaxRange(whole) > range.location {
@@ -410,13 +547,19 @@ final class SelectableText: UIResponder, UITextInput, UITextInteractionDelegate 
         if let document { return document.rects(range).compactMap { $0 as? SelectableRect } }
         guard let (paragraph, spec, box) = layout else { return [] }
         let everywhere = CGRect(x: -1e7, y: -1e7, width: 2e7, height: 2e7)
-        let segments = paragraph.selectionSegments(range, align: spec.align, in: box, dirty: everywhere)
         let id = node.map { ObjectIdentifier($0) }
-        var rects = segments.map { found in
-            let baseline = paragraph.baselines[found.line]
-            let shift = TextEngine.paintedBaseline(baseline, scale: node?.traitCollection.displayScale ?? 1) - baseline.rounded()
-            return SelectableRect(shown(found.rect.offsetBy(dx: 0, dy: shift), line: found.line), first: found.span.containsStart,
-                                  last: found.span.containsEnd, rtl: found.span.rtl, paragraph: id, line: found.line)
+        let slices = selectableSlices(in: range)
+        var rects: [SelectableRect] = []
+        for slice in slices {
+            let segments = paragraph.selectionSegments(slice, align: spec.align, in: box, dirty: everywhere)
+            for found in segments {
+                let baseline = paragraph.baselines[found.line]
+                let shift = TextEngine.paintedBaseline(baseline, scale: node?.traitCollection.displayScale ?? 1) - baseline.rounded()
+                let first = found.span.containsStart && slice.location == range.location
+                let last = found.span.containsEnd && NSMaxRange(slice) == NSMaxRange(range)
+                rects.append(SelectableRect(shown(found.rect.offsetBy(dx: 0, dy: shift), line: found.line), first: first,
+                                            last: last, rtl: found.span.rtl, paragraph: id, line: found.line))
+            }
         }
         // An endpoint on no shown line (one `line-clamp` hides) still needs its handle.
         guard range.length > 0 else { return rects }
@@ -517,6 +660,65 @@ final class SelectableText: UIResponder, UITextInput, UITextInteractionDelegate 
     }
     var textInputView: UIView { document?.surface ?? node ?? UIView() }
     func copyDocument() { host.pasteboard.string = selectedText }
+}
+
+/// Passive observer attached to session roots while a selection is active so a
+/// tap on any view or native control outside the selection clears it without
+/// interfering with presses, controls, scrolling, or UIKit's edit menu.
+final class SelectionDismissObserver: UIGestureRecognizer, UIGestureRecognizerDelegate {
+    private unowned let host: TextSelectionHost
+    private weak var presenter: Presenter?
+    private var tracked: UITouch?
+    private var start = CGPoint.zero
+    private var moved = false
+
+    init(host: TextSelectionHost, presenter: Presenter) {
+        self.host = host
+        self.presenter = presenter
+        super.init(target: nil, action: nil)
+        cancelsTouchesInView = false
+        delaysTouchesBegan = false
+        delaysTouchesEnded = false
+        delegate = self
+    }
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesBegan(touches, with: event)
+        guard tracked == nil, touches.count == 1, host.hasActiveSelection, let presenter,
+              let touch = touches.first, let hit = touch.view, !host.owns(hit),
+              hit === view || NodeView.innermost(hit) != nil || hit is ScrollView,
+              !presenter.contextRetainsFocus(hit) else {
+            tracked = nil; moved = false; state = .failed
+            return
+        }
+        tracked = touch
+        start = touch.location(in: nil)
+        moved = false
+    }
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesMoved(touches, with: event)
+        guard let touch = tracked, touches.contains(touch) else { return }
+        let at = touch.location(in: nil)
+        if hypot(at.x - start.x, at.y - start.y) > 10 {
+            moved = true; tracked = nil; state = .failed
+        }
+    }
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesEnded(touches, with: event)
+        defer { tracked = nil; moved = false; state = .failed }
+        guard let touch = tracked, touches.contains(touch), !moved, host.hasActiveSelection, let presenter,
+              !presenter.cancelledPressTouches.contains(touch),
+              !(touch.view.flatMap(NodeView.innermost)?.isCancelledPressTouch(touch) == true) else { return }
+        host.clear()
+    }
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        super.touchesCancelled(touches, with: event)
+        tracked = nil; moved = false; state = .failed
+    }
+    override func reset() {
+        super.reset()
+        tracked = nil; moved = false
+    }
 }
 
 #endif

@@ -563,6 +563,10 @@ final class SegmentHost: NSObject, UIGestureRecognizerDelegate, UITabBarDelegate
         guard let ids = members[sender.ownerID], ids.indices.contains(sender.selectedSegmentIndex),
               let tab = presenter.views[ids[sender.selectedSegmentIndex]], !tab.disabled,
               let owner = presenter.views[sender.ownerID], available(owner) else { sync(); return }
+        #if os(iOS)
+        if presenter.textSelection.hasActiveSelection { presenter.textSelection.clear() }
+        guard presenter.views[tab.id] === tab, !tab.disabled else { sync(); return }
+        #endif
         presenter.press(tab.id)
     }
 

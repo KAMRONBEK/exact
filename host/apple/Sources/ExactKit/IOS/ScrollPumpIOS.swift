@@ -239,6 +239,9 @@ package final class ScrollPump: NSObject, UIScrollViewDelegate {
             p.owners.publish()
         }
         presenter?.stickies.scrolled(nil); scrolled(nil)
+        #if os(iOS)
+        presenter?.textSelection.scrolled(scrollView)
+        #endif
     }
     // The page's element reveals (`IntoView.swift`).
     #if os(iOS)

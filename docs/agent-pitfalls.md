@@ -167,6 +167,21 @@ This list holds what the [agent guide](contract-for-agents.md)'s rules don't mak
   diagnostic:** a literal `\n` in a text whose `white-space` collapses it.
   (Bake-off round 6, unit-converter; LLP 1116.004 D2, 2026-10-11.)
 
+- **A `text` with `line-height` whose child runs all change the font can be taller than its
+  runs.** A code line with `line-height=1.5714` whose child runs set a 14 pt monospace
+  font measured 23 pt high on iOS instead of 22 pt beside a line-number column. Cause:
+  CSS's line-box strut comes from the block `text`'s own font (the inherited 17 pt body
+  font) and keeps every line box at least as tall as that strut (CSS Inline 3 §3). Fix:
+  set the same `font-family` and `font-size` on the parent `text` itself, not only on its
+  child runs. (expo/exact#1937, iOS, 2026-11-26.)
+
+- **Code blocks rendered as one `text` per line copy with blank lines between lines.**
+  Cause: each `text` is a separate paragraph block, so multi-paragraph copy joins separate
+  `text` blocks with `\n\n` on macOS and iOS (matching HTML `<p>` copy semantics). Fix:
+  put a code block's lines in one `text` with `white-space="pre"` (using inline runs for
+  syntax highlighting) so line breaks inside the block copy as single `\n`.
+  (expo/exact#1937, iOS and macOS, 2026-11-26.)
+
 - **A ported `clamp(inset, 15, 60)` never stops at 60.** Cause: React Native
   code's `clamp(value, min, max)` (lodash's order) is not CSS's `clamp(MIN, VAL,
   MAX)`, which is `max(MIN, min(VAL, MAX))`: `clamp(env(safe-area-inset-bottom),

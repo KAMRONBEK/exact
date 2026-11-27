@@ -850,6 +850,14 @@ extension Agent {
             presenter.textSelection.clear()
             return delivered(["tapped": Int(text.id), "at": at, "selection": "cleared"], hit)
         }
+        if plain, let surface = hit as? any SharedSelectionSurface, let owner = surface.owner,
+           presenter.textSelection.owns(surface) {
+            presenter.textSelection.clear()
+            return delivered(["tapped": Int(owner.id), "at": at, "selection": "cleared"], hit)
+        }
+        if plain, presenter.textSelection.hasActiveSelection, !presenter.textSelection.owns(hit) {
+            presenter.textSelection.clear()
+        }
         if plain, req["at"] != nil, let stepped = steppedTap(v, hit: hit, at: p, tapped: at) { return delivered(stepped, hit) }
         #endif
         // What the finger reaches, taken where it lands (`fingerReach`):

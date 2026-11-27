@@ -108,6 +108,12 @@ final class BoxMaskState {
     }
 }
 
+package protocol ClipPathProviding: AnyObject {
+    var presentedClipPath: CGPath? { get }
+}
+
+extension NodeView: ClipPathProviding {}
+
 extension NodeView {
     /// Tell the box animations where the clip is (LLP 1003.003 D7): `mask`
     /// when the layer's own mask is the clip's shape layer, which Core

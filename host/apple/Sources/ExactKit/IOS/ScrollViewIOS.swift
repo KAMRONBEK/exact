@@ -437,11 +437,19 @@ package class ScrollView: UIScrollView, SafeIndicators {
         // never the window's — found through the nearest node above a nested
         // scroller; the viewport itself has none above it and is its own.
         if let t = touches.first, bounds.contains(t.location(in: self)) {
+            var presenter = scrollingNode?.presenter ?? (self as? Viewport)?.documentNode?.presenter
             var above = superview
-            while let current = above {
-                if let node = current as? NodeView, let presenter = node.presenter { presenter.endEditing(); return }
+            while presenter == nil, let current = above {
+                if let node = current as? NodeView { presenter = node.presenter; break }
                 above = current.superview
             }
+            #if os(iOS)
+            if let presenter, presenter.textSelection.hasActiveSelection,
+               t.view.map({ !presenter.textSelection.owns($0) }) ?? true {
+                presenter.textSelection.clear()
+            }
+            #endif
+            if let presenter { presenter.endEditing(); return }
             endEditing(true)
         }
     }
