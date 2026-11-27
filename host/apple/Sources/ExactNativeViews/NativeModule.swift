@@ -481,10 +481,13 @@ final class NativeViews: NativeModuleHosting {
     /// Parked instances by tag, oldest first.
     fileprivate var parked: [String: [NativeEntry]] = [:]
     fileprivate var observers: [NSObjectProtocol] = []
-    deinit {
-        for o in observers { NotificationCenter.default.removeObserver(o) }
-    }
     #endif
+    deinit {
+        if let host = assetResolverHost { unregisterHatchAssetResolver(host: host) }
+        #if os(iOS) || os(tvOS)
+        for o in observers { NotificationCenter.default.removeObserver(o) }
+        #endif
+    }
     private static let kinds = ["press", "change", "hover", "focus", "blur", "key", "submit", "load", "message"]
 
     func log(_ line: String) {
@@ -618,6 +621,9 @@ final class NativeViews: NativeModuleHosting {
     var tabCalls: (HatchTabsFn, HatchTabContainerFn)?
     var elementCall: HatchElementFn?
     var toolbarCall: HatchToolbarFn?
+    private let retainedResolversLock = NSLock()
+    private var retainedResolvers: [ObjectIdentifier: AssetResolver] = [:]
+    private var assetResolverHost: UnsafeMutableRawPointer?
 
     /// The session's one module instance, made at the first view or long
     /// call that needs it. Main thread.
@@ -638,6 +644,16 @@ final class NativeViews: NativeModuleHosting {
             return .failure(failure)
         }
         instance = made
+        assetResolverHost = host
+        let app = session.app
+        registerHatchAssetResolver(host: host) { [weak self, weak app] name in
+            guard let self, let app, let resolver = app.resolver else { return nil }
+            guard let url = resolver.url(name, maximumBytes: 128 * 1024 * 1024, cacheBytes: false) else { return nil }
+            if resolver.isComplete {
+                self.retainedResolversLock.withLock { self.retainedResolvers[ObjectIdentifier(resolver)] = resolver }
+            }
+            return url
+        }
         log("module instance made (agent \(ExactEnv.agentMode)) \(sincePixel)")
         sessionViewChanged()
         if Self.hatchesOff { log("hatches: off (EXACT_HATCHES=off); no hatch is connected or called") }
@@ -654,6 +670,8 @@ final class NativeViews: NativeModuleHosting {
                 self?.connectScopes(app: table.appHatch, window: table.windowHatch)
             }
             if session.firstDrawMs != nil { activateHatches() }
+        } else if let connect = table.connect {
+            openAssetOnly(connect, made)
         }
         return .success(made)
     }
@@ -849,6 +867,11 @@ final class NativeViews: NativeModuleHosting {
         pendingHatches = nil
         // The session's end gives its breadcrumb slot back (LLP 1075.003.000.001 §4.4).
         if let crumbSlot { HatchBreadcrumb.shared?.free(crumbSlot); self.crumbSlot = nil }
+        if let host = assetResolverHost {
+            unregisterHatchAssetResolver(host: host)
+            assetResolverHost = nil
+        }
+        retainedResolversLock.withLock { retainedResolvers.removeAll() }
         guard let instance, case .success(let table)? = NativeProcess.table else { return }
         self.instance = nil
         hatchesConnected = false

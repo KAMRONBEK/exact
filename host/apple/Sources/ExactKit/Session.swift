@@ -122,7 +122,12 @@ public final class ExactApp {
     /// The plan last applied across the app, also used by newly created sessions.
     private(set) var lastPlan: Data?
     private(set) var lastModule: ExactModule?
-    private(set) package var resolver: AssetResolver!
+    private let resolverLock = NSLock()
+    private var _resolver: AssetResolver!
+    private(set) package var resolver: AssetResolver! {
+        get { resolverLock.withLock { _resolver } }
+        set { resolverLock.withLock { _resolver = newValue } }
+    }
     private(set) var transaction = false
     /// The candidate an interaction holds back (LLP 1029.000.002 D9).
     package lazy var replacements = ReplacementQueue(self)

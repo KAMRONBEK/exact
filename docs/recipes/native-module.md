@@ -41,7 +41,7 @@ class Module : ExactModule() {
 ```
 
 `context.after(1000.0) { … }` follows the session clock; `context.changed("thermal")` refreshes `native.watch("thermal")`.
-On Apple, `context.file("app:/data/…")` resolves `app:/` paths in session storage; `context.wrote("app:/data")` notifies watchers and widgets.
+Apple: `context.file("app:/data/…")` (storage), `context.asset("foo.mp3")` (OTA `assets/`, any thread after connect), `context.wrote("app:/data")` (watchers/widgets).
 
 ```contract
 shape Thermal
@@ -76,4 +76,4 @@ export const answer: Answer = (source, args, store, storage, native) =>
 
 `call` runs within 100 ms (main on Apple, caller thread on Android); throw to refuse. `later` starts on main; answer once via `reply.send` or `reply.fail` from any thread. Rebuild with `bun exact.mjs ios` or `android`.
 
-For `API_BASE_URL`, set `launch: true` in manifest `env` and read `import.meta.env.API_BASE_URL` (`SIMCTL_CHILD_API_BASE_URL` on iOS simulator; Android/web read the build value).
+For `API_BASE_URL`, set `launch: true` in manifest `env` and read `import.meta.env.API_BASE_URL` (`SIMCTL_CHILD_API_BASE_URL` on iOS simulator; Android/web use build value).
