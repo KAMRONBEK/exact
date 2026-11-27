@@ -421,6 +421,14 @@ public final class Agent {
             // inputs: they answer at once, within its own deadline.
             if req["aim"] == nil, req["log"] == nil { r = completingInput(r) }
             session.canvases.settle(now: session.now())
+            // Screenshot mode: settle in the tap's own main-queue turn, one request per state. Only a tap that
+            // landed, as agent-session.mjs's `landed`: not a refused one (`delivery: "unsupported"`, no input
+            // delivered) nor one that closed the window (no session left to settle).
+            if ScreenshotMode.tapSettle, r["error"] == nil, r["delivery"] as? String != "unsupported", r["closed"] as? Bool != true,
+               req["aim"] == nil, req["log"] == nil {
+                let c = clock(["op": "clock", "settle": true]); session.tellAgentOffset()
+                r["settle"] = c
+            }
             emit(tagged(r))
         case "type" where req["message"] != nil:
             let r = completingInput(post(req))
