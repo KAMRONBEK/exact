@@ -211,6 +211,30 @@ extension NavigationHost {
         origin > 0 && sv.contentOffset.y < -origin - 0.5
     }
 
+    /// The coordinator of a stack push or pop that moves `c`, if one is running.
+    /// Reads `c.transitionCoordinator`, `c.navigationController`, and `popCoordinator(of:)`
+    /// because UIKit can clear `c.navigationController` before an interactive pop ends.
+    private func stackTransition(for c: RouteController) -> UIViewControllerTransitionCoordinator? {
+        let candidates = [c.transitionCoordinator, c.navigationController?.transitionCoordinator, popCoordinator(of: c)]
+        for case let transition? in candidates where transition.presentationStyle == .none {
+            guard let from = transition.viewController(forKey: .from),
+                  let to = transition.viewController(forKey: .to) else { continue }
+            if owns(c, in: from) || owns(c, in: to) { return transition }
+        }
+        return nil
+    }
+
+    /// Whether `c` is `vc` itself or a route hosted in `vc` (for example a collapsed split's detail stack).
+    private func owns(_ c: RouteController, in vc: UIViewController) -> Bool {
+        if vc === c || vc === c.lastStack { return true }
+        var parent = c.parent
+        while let current = parent {
+            if current === vc { return true }
+            parent = current.parent
+        }
+        return false
+    }
+
     /// What Exact's containers cover of each route — its controller's safe
     /// area past the insets the kernel already has as `env()`: a shown bar's
     /// top, and every edge while the containers take the whole view for a
@@ -238,8 +262,10 @@ extension NavigationHost {
             // A lifted header takes no room, on a stack yet or not (`coverLifted`).
             for node in c.coveredBarNodes { wanted[node.id] = NavigationHost.cover(of: node, in: c) }
             // Include the departing route until UIKit finishes its transition
-            let nav = c.navigationController
-            let stacked = c.stack?.stackRoutes.contains(c) == true || nav?.transitionCoordinator?.viewController(forKey: .from) === c
+            let transition = stackTransition(for: c)
+            let departing = transition?.viewController(forKey: .from).map { owns(c, in: $0) } == true
+            let nav = c.navigationController ?? (departing ? c.lastStack : nil)
+            let stacked = c.stack?.stackRoutes.contains(c) == true || departing
             guard stacked else { continue }
             // A presented route's controller takes its sheet's whole view, and
             // the document's insets (`env()`) are not the sheet's: its route is
@@ -264,7 +290,9 @@ extension NavigationHost {
             let barAbove = nav.map { c.parent is PlainTab ? !$0.isNavigationBarHidden : routeShowsBar(c, in: $0) } ?? false
             // Nested in a split's list column, the detail's routes are under that column's bar (LLP 1127 §1, item 2)
             let barNav = split.flatMap { $0.nested && nav === $0.detail ? $0.list : nil } ?? nav
-            let settled = c.surface.window != nil && (search || (barNav?.isNavigationBarHidden ?? true) != barAbove)
+            // A departing route holds its settled cover through the stack transition: sliding it
+            // away clears its side safe area (e.g. an open iPhone Duo's vertical bar) mid-swipe (#1942).
+            let settled = c.surface.window != nil && !departing && (search || (barNav?.isNavigationBarHidden ?? true) != barAbove)
             // A route showing no bar has no title: its inset is the status bar's, none in landscape (LLP 1130 D3).
             let barless = !barAbove
             let topPeers = arrangementScrollers(in: c, top: true), bottomPeers = arrangementScrollers(in: c, top: false)
@@ -565,7 +593,8 @@ extension NavigationHost {
     func reportLocalInsets() -> Bool {
         var wanted: [UInt32?: [CGFloat]] = [:]
         for c in controllers.values where presenter.views[c.node.id] === c.node {
-            let last = localInsets.wanted[c.node.id], moving = c.navigationController?.transitionCoordinator != nil
+            let last = localInsets.wanted[c.node.id]
+            let moving = stackTransition(for: c) != nil || c.navigationController?.transitionCoordinator != nil
             let view = c.surface
             guard view.window != nil, c.node.window != nil, last == nil || !moving || c.appearing else {
                 wanted[c.node.id] = last

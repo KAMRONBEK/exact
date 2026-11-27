@@ -181,7 +181,10 @@ export async function withDisplay(r, path, udid, appTop = 0, { own = false, prob
   let why = own ? 'asked for the app\'s own drawing' : r.unshown?.length > 0 ? 'header nodes are struck through in it'
     : r.moving ? 'UIKit\'s motion had not settled' : null;
   if (why && !(bar > 0) && !keyboard) return keep(why);
-  const reads = displayReads(udid, gap);
+  const header = Buffer.alloc(24), fd = openSync(path, 'r');
+  try { readSync(fd, header); } finally { closeSync(fd); }
+  const appPixels = pngDimensions(header);
+  const reads = displayReads(udid, gap, { pixels: appPixels });
   try {
     const [display, again, last] = await Promise.all(reads.reads), app = decodePng(readFileSync(path));
     if (app.width !== display.width || app.height !== display.height) return keep(`the display is ${display.width}x${display.height}, the capture ${app.width}x${app.height}`);
@@ -225,32 +228,99 @@ export async function withDisplay(r, path, udid, appTop = 0, { own = false, prob
  *  is drawn in, with room for its edge. */
 const INDICATOR = 80;
 
+/** Multi-display simulators (such as iPhone Duo) refuse `simctl io screenshot` without `--display`, naming each
+ *  available display and its pixel dimensions on stderr. Parse those choices and pick the one matching `want`. */
+const simulatorDisplays = new Map();
+export function parseSimulatorDisplays(stderr) {
+  const out = [];
+  for (const m of String(stderr || '').matchAll(/--display=(\S+)\s+[^\n]*?\b(\d+)x(\d+)\b/g)) {
+    out.push({ display: m[1], width: Number(m[2]), height: Number(m[3]) });
+  }
+  return out;
+}
+function pickSimulatorDisplay(displays, want) {
+  if (!displays?.length) return null;
+  if (want?.pixels?.width > 0 && want?.pixels?.height > 0) {
+    const { width, height } = want.pixels;
+    const hit = displays.find((d) => (d.width === width && d.height === height) || (d.width === height && d.height === width));
+    if (hit) return hit.display;
+  }
+  if (want?.screen?.w > 0 && want?.screen?.h > 0) {
+    const { w, h } = want.screen;
+    const fit = (sw, sh, d) => displayScale({ w: sw, h: sh }, d) !== undefined ? Math.abs(d.width / sw - d.height / sh) : Infinity;
+    let best = null, bestErr = Infinity;
+    for (const d of displays) {
+      const err = Math.min(fit(w, h, d), fit(h, w, d));
+      if (err < bestErr) { bestErr = err; best = d; }
+    }
+    if (best) return best.display;
+  }
+  return displays[0].display;
+}
+function screenshotArgs(udid, path, { type, display } = {}) {
+  return ['simctl', 'io', udid, 'screenshot', ...(display ? [`--display=${display}`] : []), ...(type ? [`--type=${type}`] : []), path];
+}
+/** Capture the simulator's display into `path`, automatically resolving `--display=<id>` on multi-display simulators
+ *  such as iPhone Duo by matching `pixels` or `screen` dimensions. Returns the `spawnSync` result. */
+export function simulatorScreenshot(udid, path, { type, pixels, screen, timeout = 20000, run = read } = {}) {
+  const want = { pixels, screen };
+  const cached = simulatorDisplays.get(udid);
+  const firstDisplay = cached ? pickSimulatorDisplay(cached, want) : null;
+  let r = run('xcrun', screenshotArgs(udid, path, { type, display: firstDisplay }), { timeout });
+  if (r.status === 0) return r;
+  if (firstDisplay) {
+    simulatorDisplays.delete(udid);
+    r = run('xcrun', screenshotArgs(udid, path, { type }), { timeout });
+    if (r.status === 0) return r;
+  }
+  const displays = parseSimulatorDisplays(r.stderr);
+  if (!displays.length) return r;
+  simulatorDisplays.set(udid, displays);
+  const chosen = pickSimulatorDisplay(displays, want);
+  return run('xcrun', screenshotArgs(udid, path, { type, display: chosen }), { timeout });
+}
+
 /** The simulator's display read three times for `withDisplay`, started now: the second 150 ms after the first, not
  *  after it ends (each `simctl io` read is ~0.4 s, most of it the tool's own start), and the third `gap` ms after both
  *  have ended, so it is that far from either whenever their pictures were taken. `reads` are their pictures, decoded;
  *  `cancel()` stops what is still reading and removes the files. */
-function displayReads(udid, gap = 400) {
+function displayReads(udid, gap = 400, want = {}) {
   useXcode();
   const dir = mkdtempSync(resolve(tmpdir(), 'exact-display-')), children = new Set(), timers = new Set();
   let cancelled = false;
   const later = (ms, fn) => { const timer = setTimeout(() => { timers.delete(timer); fn(); }, ms); timers.add(timer); };
-  const read = (name) => new Promise((done, fail) => {
+  const runOne = (shot, display) => new Promise((done, fail) => {
     if (cancelled) return fail(new Error('the display reads were cancelled'));
-    const shot = resolve(dir, name);
     let said = '';
-    const child = spawn('xcrun', ['simctl', 'io', udid, 'screenshot', '--type=png', shot], { stdio: ['ignore', 'ignore', 'pipe'] });
+    const child = spawn('xcrun', screenshotArgs(udid, shot, { type: 'png', display }), { stdio: ['ignore', 'ignore', 'pipe'] });
     children.add(child);
     const bound = setTimeout(() => child.kill('SIGKILL'), 20000);
     child.stderr.on('data', (d) => { said += d; });
     child.on('error', (e) => { clearTimeout(bound); children.delete(child); fail(e); });
     child.on('close', (status) => {
       clearTimeout(bound); children.delete(child);
-      try {
-        if (status !== 0 || !existsSync(shot)) throw new Error(`simctl io screenshot: ${said.trim().split('\n').pop() || 'failed'}`);
-        done(decodePng(readFileSync(shot)));
-      } catch (e) { fail(e); }
+      done({ status, stderr: said });
     });
   });
+  const read = async (name) => {
+    const shot = resolve(dir, name);
+    const cached = simulatorDisplays.get(udid);
+    const firstDisplay = cached ? pickSimulatorDisplay(cached, want) : null;
+    let res = await runOne(shot, firstDisplay);
+    if (res.status !== 0 && firstDisplay) {
+      simulatorDisplays.delete(udid);
+      res = await runOne(shot, null);
+    }
+    if (res.status !== 0) {
+      const displays = parseSimulatorDisplays(res.stderr);
+      if (displays.length) {
+        simulatorDisplays.set(udid, displays);
+        res = await runOne(shot, pickSimulatorDisplay(displays, want));
+      }
+    }
+    if (res.status !== 0 || !existsSync(shot)) throw new Error(`simctl io screenshot: ${res.stderr.trim().split('\n').pop() || 'failed'}`);
+    return decodePng(readFileSync(shot));
+  };
   const first = read('display.png'), second = new Promise((done) => later(150, done)).then(() => read('again.png'));
   const third = Promise.allSettled([first, second]).then(() => new Promise((done) => later(gap, done))).then(() => read('last.png'));
   const reads = [first, second, third];
@@ -367,7 +437,7 @@ export async function displayPictureReply(ask, r, path, { keepPixels = false } =
 export async function displayAsIs(ask, path, udid, { skipMotion } = {}) {
   const r = await ask({ op: 'screenshot', window: 'display', ...(skipMotion ? { skipMotion } : {}) });
   if (r.error) throw new Error(r.error);
-  const taken = read('xcrun', ['simctl', 'io', udid, 'screenshot', '--type=png', path], { timeout: 20000 });
+  const taken = simulatorScreenshot(udid, path, { type: 'png', screen: r.screen, timeout: 20000 });
   if (taken.status !== 0) throw new Error(`simctl io screenshot: ${(taken.stderr || '').trim().split('\n').pop() || 'failed'}`);
   const reply = await displayPictureReply(ask, r, path);
   return { ...reply, pixelsWhy: 'the display as it is, asked for' };
@@ -433,6 +503,7 @@ const evictedBoots = new Set();
 /** A failed launch may mean the device shut down. The next launch must ask simctl again. */
 export function forgetSimulator(udid, { retryBoot = false } = {}) {
   for (const [key, dev] of driveSimulators) if (dev.udid === udid) driveSimulators.delete(key);
+  simulatorDisplays.delete(udid);
   if (retryBoot) evictedBoots.add(udid);
   chosenFrom = null;
   for (const record of keyboardNotes.keys()) if (basename(record) === `${udid}.json`) keyboardNotes.delete(record);
