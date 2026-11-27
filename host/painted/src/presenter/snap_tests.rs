@@ -798,7 +798,7 @@ fn the_first_resized_picture_and_reader_statement_keep_the_same_page() {
         );
         let words = p.reader_scrollers(&[], 1.).unwrap();
         let row = words
-            .chunks_exact(9)
+            .chunks_exact(10)
             .find(|s| s[0] == pager as i32)
             .unwrap();
         assert_eq!(f32::from_bits(row[3] as u32), expected);
@@ -1232,7 +1232,7 @@ fn enabling_mandatory_snap_settles_the_first_picture() {
     assert_eq!(p.box_of(pager).unwrap().scroll, Some((400., 0.)));
     let words = p.reader_scrollers(&[], 1.).unwrap();
     let row = words
-        .chunks_exact(9)
+        .chunks_exact(10)
         .find(|s| s[0] == pager as i32)
         .unwrap();
     assert_eq!(f32::from_bits(row[3] as u32), 400.);

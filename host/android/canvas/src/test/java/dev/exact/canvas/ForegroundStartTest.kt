@@ -239,4 +239,36 @@ class ForegroundStartTest {
             third.release()
         } finally { next.onDestroy() }
     }
+
+    @Test fun locationServiceRequiresRuntimePermissionAndRoutesAllSites() {
+        val info = ServiceInfo().apply {
+            packageName = application.packageName
+            name = ForegroundService.Location::class.java.name
+        }
+        ServiceInfo::class.java.getDeclaredField("mForegroundServiceType").apply { isAccessible = true }
+            .setInt(info, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+        shadowOf(application.packageManager).addOrUpdateService(info)
+        val geo = ForegroundServices(application, "geolocation") { false }
+        assertTrue(geo.declared("location"))
+        assertTrue(geo.declared("location", "location"))
+        assertNull("refused without runtime location permission", geo.claim("location", setOf("location"), "app"))
+
+        shadowOf(application).grantPermissions(android.Manifest.permission.ACCESS_FINE_LOCATION)
+        var promoted = false
+        val claim = geo.claim("location", setOf("location"), "app", promoted = { promoted = true })!!
+        val startIntent = shadowOf(application).nextStartedService!!
+        assertEquals(ComponentName(application, ForegroundService.Location::class.java), startIntent.component)
+        assertEquals(ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION, startIntent.getIntExtra(Claims.EXTRA_TYPES, 0))
+
+        val service = Robolectric.buildService(ForegroundService.Location::class.java).create().get()
+        try {
+            assertEquals("location", service.kind)
+            service.onStartCommand(startIntent, 0, 1)
+            shadowOf(Looper.getMainLooper()).idle()
+            assertTrue(promoted)
+            assertEquals(listOf(ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION), recorded(service).startedTypes)
+            claim.release()
+            assertTrue(shadowOf(service).isForegroundStopped)
+        } finally { service.onDestroy() }
+    }
 }

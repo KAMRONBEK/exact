@@ -32,7 +32,14 @@ open class ForegroundService : Service() {
     /** A call: types `phoneCall` and `microphone` (D11). */
     class Call : ForegroundService()
 
-    internal val kind: String get() = if (this is Call) "call" else "capture"
+    /** A person-started foreground location session: type `location` (LLP 1156.008.001 B2). */
+    class Location : ForegroundService()
+
+    internal val kind: String get() = when (this) {
+        is Call -> "call"
+        is Location -> "location"
+        else -> "capture"
+    }
     /** The latest start delivered to [onStartCommand]; stopping with it avoids killing a newer start. */
     internal var lastStartId = 0
 
@@ -181,6 +188,12 @@ class ForegroundServices internal constructor(private val application: Context, 
         if ("microphone" in types && application.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             return refuse("SecurityException: RECORD_AUDIO is not granted")
         }
+        if ("location" in types &&
+            application.checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
+            application.checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return refuse("SecurityException: ACCESS_FINE_LOCATION or ACCESS_COARSE_LOCATION is not granted")
+        }
         val running = Claims.held.any { it.kind == kind && !it.agent }
         // Android lets an app with a visible activity start one: paused under a dialog is visible (a permission's answer
         // arrives before the resume), stopped is not.
@@ -215,13 +228,17 @@ internal object Claims {
     private val lastMasks = HashMap<String, Int>()
     var playback = false
     internal val keepsExecution: Boolean get() = playback || held.any { !it.agent && it.kind in activeServices }
-    private val ids = mapOf("capture" to 0x45584301, "call" to 0x45584302)
+    private val ids = mapOf("capture" to 0x45584301, "call" to 0x45584302, "location" to 0x45584303)
 
     fun mask(types: Set<String>): Int = types.fold(0) { mask, type -> mask or bit(type) }
 
     fun remember(kind: String, mask: Int) { if (mask != 0) lastMasks[kind] = mask }
 
-    fun service(kind: String): Class<out ForegroundService> = if (kind == "call") ForegroundService.Call::class.java else ForegroundService.Capture::class.java
+    fun service(kind: String): Class<out ForegroundService> = when (kind) {
+        "call" -> ForegroundService.Call::class.java
+        "location" -> ForegroundService.Location::class.java
+        else -> ForegroundService.Capture::class.java
+    }
 
     fun declared(application: Context, kind: String): Boolean = try {
         application.packageManager.getServiceInfo(ComponentName(application, service(kind)), 0); true
@@ -237,6 +254,7 @@ internal object Claims {
     private fun bit(type: String): Int = when (type) {
         "phoneCall" -> ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL
         "mediaProjection" -> ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+        "location" -> ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
         "microphone" -> if (Build.VERSION.SDK_INT >= 30) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0
         else -> 0
     }

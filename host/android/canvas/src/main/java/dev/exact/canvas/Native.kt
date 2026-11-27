@@ -170,6 +170,10 @@ object Native {
     /** A module event, checked against the session and allocation carried by its painted view. */
     @JvmStatic external fun moduleEvent(id: Int, slot: Int, generation: Int, session: Long, kind: String, payload: String)
     @JvmStatic external fun frameLoaded(id: Int, slot: Int, generation: Int, session: Long)
+    /** An unpartitioned iframe's `window.postMessage` string; checked as [frameLoaded] is (LLP 1156.008.001 B1). */
+    @JvmStatic external fun frameMessage(id: Int, slot: Int, generation: Int, session: Long, text: String)
+    /** Immutable boot-time media grants: bit 0 `device.camera`, bit 1 `device.microphone` (LLP 1156.008.001 B1b). */
+    @JvmStatic external fun frameMediaGrants(): Int
     /** An iframe's view took the window's focus (a field in its page did) or lost it; checked as [frameLoaded] is. */
     @JvmStatic external fun frameFocused(id: Int, slot: Int, generation: Int, session: Long, focused: Boolean)
     /** An iframe's `FrameNavigation` record (LLP 1020.002 D2): [event] by its name, [record] its JSON; checked as

@@ -161,8 +161,7 @@ impl<D: DataSource> Presenter<D> {
                     let arg = |i: usize| c.args.get(i).and_then(exact_plan::Value::as_str);
                     let (text, name) = (arg(0).unwrap_or_default(), arg(1).unwrap_or_default());
                     if arg(2) == Some("iframe") {
-                        let host = if cfg!(target_os = "android") { "Android" } else { "this host" };
-                        self.host.log(format!("postMessage: iframe replies are unavailable on {host}"));
+                        self.post_frame_message(name, text);
                         continue;
                     }
                     if let Err(refused) = self.post_message(name, text) {

@@ -206,6 +206,7 @@ impl State {
                 .and_then(|a| a.nodes.get(&id).and_then(|s| s.scroll))
                 .unwrap_or(ScrollBounds {
                     axes: (Overflow::Hidden, Overflow::Hidden),
+                    min: (0., 0.),
                     max: (0., 0.),
                 }),
         )

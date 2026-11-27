@@ -69,7 +69,7 @@ const PAGE_OF_SCROLLERS: &str = r#"component App
 /// it is, where its rows were painted, and its farthest offset.
 fn told(words: &[i32], id: ViewId) -> (i32, i32, [f32; 6]) {
     let s = words
-        .chunks_exact(9)
+        .chunks_exact(10)
         .find(|s| s[0] == id as i32)
         .unwrap_or_else(|| panic!("scroller {id} is not in {words:?}"));
     (
@@ -92,6 +92,7 @@ fn the_scrollers_under_a_point_are_told_innermost_first() {
         vec![Scroller {
             id: page,
             axes: (false, true),
+            min: (0., 0.),
             max: (0., 1020.),
             offset: (0., 0.),
             from_right: false,
@@ -1141,4 +1142,48 @@ fn disabled_hosted_view_does_not_block_enabled_ancestor_pan_and_never_activates(
     );
     assert_eq!(inert_tree.scrollers_at(200., 80.).claims, (false, false));
     assert!(!inert_tree.pointer_down(200., 80., 10.).unwrap());
+}
+
+#[test]
+fn rtl_overflow_x_scrolls_into_negative_offsets_while_ltr_stays_clamped_at_zero() {
+    const RTL_AND_LTR: &str = r#"component App
+  view
+    column width=400 height=400
+      row testId="rtl" direction="rtl" overflow-x="auto" width=200 height=60
+        box width=150 height=60 flex-shrink=0
+        box width=150 height=60 flex-shrink=0
+        box width=150 height=60 flex-shrink=0
+      box testId="ltr" direction="ltr" overflow-x="auto" width=200 height=60
+        box position="absolute" left=-180 width=150 height=60
+"#;
+    let mut p = boot(RTL_AND_LTR);
+    let (rtl, ltr) = (id(&p, "rtl"), id(&p, "ltr"));
+    let under_rtl = p.scrollers_at(100., 30.);
+    let s_rtl = under_rtl
+        .chain
+        .iter()
+        .find(|s| s.id == rtl)
+        .expect("rtl is scrollable");
+    assert!(s_rtl.axes.0, "rtl horizontal overflow is scrollable");
+    assert!(
+        s_rtl.min.0 < -200.0,
+        "rtl min_x is negative: {:?}",
+        s_rtl.min
+    );
+    assert_eq!(s_rtl.max.0, 0.0);
+
+    // Reader statement carries min_x at slot 9 of the 10-word record and accepts negative scroll deltas.
+    p.reader_under(100., 30., 1.);
+    let words = p.reader_scrollers(&[], 1.).unwrap();
+    let rec = words.chunks_exact(10).find(|c| c[0] == rtl as i32).unwrap();
+    let wire_min_x = f32::from_bits(rec[9] as u32);
+    assert!(wire_min_x < -200.0, "wire min_x: {wire_min_x}");
+    assert_eq!(p.reader_scrolled(rtl, (-100., 0.), 0), Some((-100., 0.)));
+    assert_eq!(p.scroll_of(rtl), (-100., 0.));
+
+    // LTR off-canvas negative child must NOT become horizontally scrollable (CSS Overflow 3).
+    let limits = p.collection_scroll_limits();
+    let s_ltr = p.scroller(ltr, &limits).expect("ltr scroller");
+    assert_eq!(s_ltr.min.0, 0.0);
+    assert!(!s_ltr.axes.0);
 }

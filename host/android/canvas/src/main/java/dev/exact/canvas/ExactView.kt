@@ -1251,11 +1251,7 @@ class ExactView(context: Context, private val live: Boolean, private val onFirst
                     i += n31
                 }
                 32 -> { laterLayers[b.get(i + 1)]?.let { makeOne(it) }; layers.free(b.get(i + 1)); i += 2 }
-                33 -> {
-                    val wait = if (skipDefs) null else laterLayers[b.get(i + 1)]?.takeIf { !it.made }
-                    if (wait != null) wait.after.add(intArrayOf(33, b.get(i + 1), b.get(i + 2))) else layers.clock(b.get(i + 1), b.get(i + 2))
-                    i += 3
-                }
+                33 -> { layers.clock(b.get(i + 1), b.get(i + 2)); i += 3 }
                 24 -> {
                     val id = b.get(i + 1); val len = b.get(i + 2)
                     if (!skipDefs) { laterSlots[id]?.let { makeOne(it) }; ingest(b, i + 3, i + 3 + len) }

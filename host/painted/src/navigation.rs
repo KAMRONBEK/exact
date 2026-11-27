@@ -211,6 +211,8 @@ pub struct RouteBar {
     pub shape: exact_kernel::HeaderShape<ViewId>,
     /// The header's plain-text supporting subtitle node, if any (LLP 1115.001 D11).
     pub subtitle: Option<ViewId>,
+    /// True when projected inside a modal sheet route (LLP 1156.008.001 B5).
+    pub sheet: bool,
 }
 
 /// The structure a shell's bars are made from (LLP 1115.001 D11), read
@@ -226,6 +228,9 @@ pub struct Projection {
     /// Top bar room for a route whose header carries a supporting subtitle
     /// (equals `room.0` at normal font scales, grows at large text scales).
     pub(crate) subtitled_above: f32,
+    /// Top bar content heights `(plain, subtitled)` without status bar padding,
+    /// used for projected modal sheet headers (LLP 1156.008.001 B5).
+    pub(crate) sheet_above: (f32, f32),
     /// The navigation root.
     pub root: Option<ViewId>,
     /// Its routes whose header is a bar, in every stack.

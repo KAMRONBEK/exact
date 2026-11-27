@@ -102,24 +102,39 @@ impl<D: DataSource> Host<D> {
     /// is projected again and, where what the bars cover changed, laid out:
     /// whether it was.
     pub fn set_bar_room(&mut self, room: Option<(f32, f32, f32)>) -> Result<bool, String> {
-        self.set_bar_rooms(room, room.map_or(0.0, |r| r.0))
+        let above = room.map_or(0.0, |r| r.0);
+        let sheet_above = if self.navigation.bars.sheet_above != (0.0, 0.0) {
+            self.navigation.bars.sheet_above
+        } else {
+            (above, above)
+        };
+        self.set_bar_rooms(room, above, sheet_above)
     }
 
     /// Like [`Host::set_bar_room`], with a separate top room for routes whose
-    /// header projects a supporting subtitle (LLP 1115.001 D11).
+    /// header projects a supporting subtitle (LLP 1115.001 D11) and status-free
+    /// heights for modal sheet route headers (LLP 1156.008.001 B5).
     pub fn set_bar_rooms(
         &mut self,
         room: Option<(f32, f32, f32)>,
         subtitled_above: f32,
+        sheet_above: (f32, f32),
     ) -> Result<bool, String> {
         let subtitled_above = if room.is_some() { subtitled_above } else { 0.0 };
+        let sheet_above = if room.is_some() {
+            sheet_above
+        } else {
+            (0.0, 0.0)
+        };
         if self.navigation.bars.room == room
             && self.navigation.bars.subtitled_above == subtitled_above
+            && self.navigation.bars.sheet_above == sheet_above
         {
             return Ok(false);
         }
         self.navigation.bars.room = room;
         self.navigation.bars.subtitled_above = subtitled_above;
+        self.navigation.bars.sheet_above = sheet_above;
         match self.project_bars() {
             true => self.layout().map(|_| true),
             false => Ok(false),
@@ -248,8 +263,32 @@ impl<D: DataSource> Host<D> {
                     };
                     if let Some(sheet) = sheet_of(&kinds, index) {
                         let modal = kernel.node(stack[sheet]).expect("a live sheet route");
+                        let pushed = index > sheet;
+                        let shape = kernel.header_shape(*route, back, pushed, &pressed);
+                        let asked_none = node.props.str(PropId::NavigationBar) == Some("none");
+                        let shows =
+                            Bar::of(asked_none, shape.is_some(), pushed, false) == Bar::Header;
+                        let mut bar_top = 0.0;
+                        if let Some(shape) = shape.filter(|_| shows) {
+                            let subtitle = kernel.header_subtitle(&shape);
+                            bar_top = if subtitle.is_some() {
+                                self.navigation.bars.sheet_above.1
+                            } else {
+                                self.navigation.bars.sheet_above.0
+                            };
+                            for id in lifted(kernel, &shape) {
+                                wanted.insert(id, HostCover::Whole);
+                            }
+                            routes.push(RouteBar {
+                                route: *route,
+                                pushed,
+                                shape,
+                                subtitle,
+                                sheet: true,
+                            });
+                        }
                         let cover = [
-                            crate::presenter::sheet_handle(&modal),
+                            crate::presenter::sheet_handle(&modal) + bar_top,
                             (env.right - sheet_margin).max(0.0),
                             foot,
                             (env.left - sheet_margin).max(0.0),
@@ -285,6 +324,7 @@ impl<D: DataSource> Host<D> {
                             pushed,
                             shape,
                             subtitle,
+                            sheet: false,
                         });
                     }
                     let frame = node.frame;

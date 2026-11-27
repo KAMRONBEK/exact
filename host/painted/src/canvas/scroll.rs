@@ -440,14 +440,15 @@ mod tests {
         let painted = Painted::capture(&p).unwrap();
         let words = p.reader_scrollers(&painted.groups, 1.).unwrap();
         let f = |i: usize| f32::from_bits(words[i] as u32);
-        assert_eq!(words.len(), 15);
+        assert_eq!(words.len(), 16);
         assert_eq!(words[0] as ViewId, port);
         assert_ne!(words[1] & 1024, 0, "claimed");
         assert_eq!((f(3), f(4)), (0., 0.), "its offset");
         assert_eq!(f(6), -30., "recorded where it is painted");
-        assert_eq!((f(9), f(10)), (0., -30.), "the displacement");
+        assert_eq!(f(9), 0., "min x");
+        assert_eq!((f(10), f(11)), (0., -30.), "the displacement");
         assert_eq!(
-            [f(11), f(12), f(13), f(14)],
+            [f(12), f(13), f(14), f(15)],
             [0., 30., 200., 150.],
             "the reached port"
         );
@@ -456,7 +457,7 @@ mod tests {
         paint(&mut p);
         let painted = Painted::capture(&p).unwrap();
         let words = p.reader_scrollers(&painted.groups, 1.).unwrap();
-        assert_eq!(words.len(), 9);
+        assert_eq!(words.len(), 10);
         assert_eq!(words[1] & 1024, 0);
         assert_eq!(f32::from_bits(words[6] as u32), 0.);
     }

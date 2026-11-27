@@ -145,6 +145,7 @@ const COMMANDS: usize = exact_kernel::region::REGION_NODES * 12;
 #[derive(Clone, Copy)]
 pub(crate) struct ScrollBounds {
     pub axes: (Overflow, Overflow),
+    pub min: (f32, f32),
     pub max: (f32, f32),
 }
 impl ScrollBounds {
@@ -180,15 +181,17 @@ impl ScrollBounds {
         if axes == (Overflow::Visible, Overflow::Visible) && collection_max.is_none() {
             return Self {
                 axes,
+                min: (0., 0.),
                 max: (0., 0.),
             };
         }
-        let (width, height) =
-            super::space::content_size_with(node, kernel, presented, scaled_presented);
+        let (min_x, width, height) =
+            super::space::content_extent_with(node, kernel, presented, scaled_presented);
         // A claimed scroller's range is its content and its insets past its reached scrollport (LLP 1123 D14)
         let ([t, r, b, l], [it, ir, ib, il]) = presented(node.id)
             .scroll
             .map_or(([0.; 4], [0.; 4]), |c| (c.reach, c.insets));
+        let min = ((min_x - il + l).min(0.), 0.);
         let mut max = (
             (width - node.frame.width + il + ir - l - r).max(0.),
             (height - node.frame.height + it + ib - t - b).max(0.),
@@ -198,12 +201,12 @@ impl ScrollBounds {
             Some(main) => max.1 = main,
             None => {}
         }
-        Self { axes, max }
+        Self { axes, min, max }
     }
     pub(crate) fn clamp(self, offset: (f32, f32)) -> (f32, f32) {
         (
-            offset.0.clamp(0., self.max.0),
-            offset.1.clamp(0., self.max.1),
+            offset.0.clamp(self.min.0, self.max.0),
+            offset.1.clamp(self.min.1, self.max.1),
         )
     }
 }
@@ -645,6 +648,7 @@ impl Painter {
                 // geometry, including a recycled slot or a new scroll owner.
                 return ScrollBounds {
                     axes: (Overflow::Hidden, Overflow::Hidden),
+                    min: (0., 0.),
                     max: (0., 0.),
                 };
             }
@@ -661,6 +665,7 @@ impl Painter {
             if let Some(field) = self.field_text.get(&node.id) {
                 return ScrollBounds {
                     axes: effective_overflow(node),
+                    min: (0., 0.),
                     max: field.scroll_max,
                 };
             }

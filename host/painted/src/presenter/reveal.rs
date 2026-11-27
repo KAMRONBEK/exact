@@ -358,7 +358,17 @@ impl<D: DataSource> Presenter<D> {
             if !scrolls(x) && !scrolls(y) {
                 return None;
             }
-            let (rx, ry) = self.scroll_range(id, &limits);
+            let bounds = self.display.bounds(kernel, id).unwrap_or_else(|| {
+                self.brush.scroll_bounds(
+                    kernel,
+                    self.host.content_region(),
+                    &node,
+                    limits.get(&id).copied(),
+                    &|id| self.host.presented(id),
+                    self.host.scaled_presented(),
+                )
+            });
+            let (min_x, rx, ry) = (bounds.min.0, bounds.max.0, bounds.max.1);
             let authored = |p| {
                 (node.props.get(p))
                     .and_then(exact_kernel::PropValue::as_float)
@@ -369,7 +379,7 @@ impl<D: DataSource> Presenter<D> {
                 (self.scroll_of(id).0, ry)
             } else {
                 (
-                    authored(PropId::ScrollLeft).clamp(0., rx),
+                    authored(PropId::ScrollLeft).clamp(min_x, rx),
                     authored(PropId::ScrollTop).clamp(0., ry),
                 )
             };
@@ -461,12 +471,12 @@ impl<D: DataSource> Presenter<D> {
         let off = self.scroll.get(&id).copied().unwrap_or((0.0, 0.0));
         let next = (
             if scrolls(ox) {
-                (off.0 + dx).clamp(0.0, bounds.max.0)
+                (off.0 + dx).clamp(bounds.min.0, bounds.max.0)
             } else {
                 off.0
             },
             if scrolls(oy) {
-                (off.1 + by(2)).clamp(0.0, bounds.max.1)
+                (off.1 + by(2)).clamp(bounds.min.1, bounds.max.1)
             } else {
                 off.1
             },
@@ -580,6 +590,7 @@ impl<D: DataSource> Presenter<D> {
                     a,
                     scrolls(ox),
                     scrolls(oy),
+                    bounds.min,
                     bounds.max,
                     padding,
                     node.style.border_widths(),
@@ -590,7 +601,7 @@ impl<D: DataSource> Presenter<D> {
             }
             at = self.reveal_parent(a, geometry);
         }
-        for (a, sx, sy, max, padding, borders) in scrollers {
+        for (a, sx, sy, min, max, padding, borders) in scrollers {
             let (Some((target_map, target)), Some((port_map, port))) = (
                 self.reveal_geometry(id, geometry),
                 self.reveal_geometry(a, geometry),
@@ -629,12 +640,12 @@ impl<D: DataSource> Presenter<D> {
             let (dx, dy) = by(area, port);
             let next = (
                 if sx {
-                    (off.0 + dx).clamp(0.0, max.0)
+                    (off.0 + dx).clamp(min.0, max.0)
                 } else {
                     off.0
                 },
                 if sy {
-                    (off.1 + dy).clamp(0.0, max.1)
+                    (off.1 + dy).clamp(min.1, max.1)
                 } else {
                     off.1
                 },

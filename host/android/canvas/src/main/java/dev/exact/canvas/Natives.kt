@@ -33,6 +33,7 @@ class Natives internal constructor(
     private val root: () -> File,
     private val hosted: HostedModules,
     private val videos: ((Context) -> VideoPlayer)? = null,
+    private val frameMediaGrants: () -> Int = { try { Native.frameMediaGrants() } catch (_: UnsatisfiedLinkError) { 0 } },
 ) : FrameLayout(context) {
     constructor(context: Context, root: () -> File, modules: Map<String, NativeModule>, videos: ((Context) -> VideoPlayer)? = null)
         : this(context, root, HostedModules(modules), videos)
@@ -889,7 +890,7 @@ class Natives internal constructor(
         if (e.w > 0 && e.h > 0 || e.kind == 2) place(e)
         // Its page is loaded afresh from `src`: what was asked of it meanwhile moved nothing.
         if (e.kind == 1) JSONObject(e.wanted).let { json ->
-            for (op in FrameBrowser.unrun("${e.session}:${e.slot}:${e.generation}", json)) refuseCommand(e, op.optString(1), json, parked = true)
+            for (op in FrameBrowser.unrun("${e.session}:${e.slot}:${e.generation}", json)) if (op.optString(1) != "postMessage") refuseCommand(e, op.optString(1), json, parked = true)
         }
         apply(e, e.wanted)
         if (e.dirty) record(e)
@@ -962,6 +963,23 @@ class Natives internal constructor(
         override fun pooled(view: WebView) = view in webPool
         override fun rendererGone(view: WebView, crashed: Boolean) = this@Natives.rendererGone(view, crashed)
         override fun browser(view: WebView) = byView[view]?.browser
+        override fun messageTarget(view: WebView): FrameMessageTarget? {
+            val e = byView[view]?.takeIf { !it.parked && elements[it.id] === it && it.view === view } ?: return null
+            val binding = e.eventBinding
+            val src = JSONObject(e.wanted.ifEmpty { "{}" }).text("src")
+            return FrameMessageTarget(e.id, e.slot, e.generation, e.session, binding, src, e.partition != null, e.refusedFor != null) { text ->
+                android.os.Handler(context.mainLooper).post {
+                    if (elements[e.id] === e && e.eventBinding == binding && e.partition == null) {
+                        Exact.frameMessage(e.id, e.slot, e.generation, e.session, text)
+                    }
+                }
+            }
+        }
+        override fun mediaGrantTarget(view: WebView): FrameMediaGrantTarget? {
+            val e = byView[view]?.takeIf { !it.parked && elements[it.id] === it && it.view === view } ?: return null
+            val src = JSONObject(e.wanted.ifEmpty { "{}" }).text("src")
+            return FrameMediaGrantTarget(context, src, e.partition != null, e.refusedFor != null, frameMediaGrants())
+        }
         override fun loadOf(view: WebView): FrameLoadReport? {
             val e = byView[view] ?: return null
             val binding = e.eventBinding
@@ -988,9 +1006,7 @@ class Natives internal constructor(
         val hasNavigationListener = WebViewFeature.isFeatureSupported(WebViewFeature.NAVIGATION_LISTENER)
         val client = FrameClient(this, hasNavigationListener, frames, partitioned)
         webViewClient = client
-        if (profile != null) webChromeClient = object : android.webkit.WebChromeClient() {
-            override fun onReceivedTitle(view: WebView, title: String?) { frames.browser(view)?.stateChanged() }
-        }
+        webChromeClient = FrameBridge.chromeClient(this, frames, partitioned)
         if (hasNavigationListener) {
             // Take the navigation identity before a new src can supersede a recovery request.
             WebViewCompat.addNavigationListener(this, { it.run() }, client)
@@ -1272,7 +1288,9 @@ class Natives internal constructor(
             1 -> {
                 if (old?.text("src") != json.text("src")) { e.browser?.cancelRecovery(); showFrame(e, json) }
                 for (op in FrameBrowser.unrun("${e.session}:${e.slot}:${e.generation}", json)) {
-                    e.browser?.command(op) ?: refuseCommand(e, op.optString(1), json)
+                    if (op.optString(1) == "postMessage") {
+                        if (e.partition == null) ((e.view as? WebView)?.webViewClient as? FrameClient)?.postMessage(op.optString(2))
+                    } else e.browser?.command(op) ?: refuseCommand(e, op.optString(1), json)
                 }
             }
             5 -> if (old != null && old.optInt("gen") != json.optInt("gen")) {

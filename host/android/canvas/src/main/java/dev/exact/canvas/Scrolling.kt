@@ -56,9 +56,9 @@ internal class Scrolling(private val view: ExactView) {
         /** Whether a statement has said where it is. */
         var told = false
         /** Logical offsets for drag travel, in pixels. */
-        var nowX = 0f; var nowY = 0f; var maxX = 0f; var maxY = 0f
-        /** Current and farthest logical offsets, in points. */
-        var pointsX = 0f; var pointsY = 0f; var maxPointsX = 0f; var maxPointsY = 0f
+        var nowX = 0f; var nowY = 0f; var minX = 0f; var maxX = 0f; var maxY = 0f
+        /** Current, least and farthest logical offsets, in points. */
+        var pointsX = 0f; var pointsY = 0f; var minPointsX = 0f; var maxPointsX = 0f; var maxPointsY = 0f
         /** The offset of the recording, in device pixels. */
         var drawnX = 0f; var drawnY = 0f
         /** How far past its offset its content is painted under a claim (LLP 1123 D14), in points; 0 unclaimed. */
@@ -107,6 +107,7 @@ internal class Scrolling(private val view: ExactView) {
         /** Its `keyboardDismissMode`: 0 nothing, [Dismissal.ON_DRAG] or [Dismissal.INTERACTIVE]. */
         val dismiss get() = (flags shr 6) and 3
         fun at(sideways: Boolean) = if (sideways) nowX + pendX else nowY + pendY
+        fun start(sideways: Boolean) = if (sideways) minX else 0f
         fun end(sideways: Boolean) = if (sideways) maxX else maxY
     }
 
@@ -470,7 +471,7 @@ internal class Scrolling(private val view: ExactView) {
         val d = down
         if (d != null && !replaying) {
             val z = links.firstOrNull { it.zoom }
-            val pans = z != null && links.first() === z && claims == 0 && (z.s.maxX > 0f || z.s.maxY > 0f)
+            val pans = z != null && links.first() === z && claims == 0 && (z.s.minX < 0f || z.s.maxX > 0f || z.s.maxY > 0f)
             zooming.down(d, z?.s, z?.taps == true, pans)
         }
     }
@@ -608,7 +609,7 @@ internal class Scrolling(private val view: ExactView) {
         var waits = false
         for ((k, s) in active.withIndex()) {
             val at = s.at(sideways)
-            val took = (at + rest).coerceIn(0f, s.end(sideways)) - at
+            val took = (at + rest).coerceIn(s.start(sideways), s.end(sideways)) - at
             if (abs(took) < 0.01f) continue
             s.own = true
             if (mover == null) mover = s
@@ -633,7 +634,7 @@ internal class Scrolling(private val view: ExactView) {
 
     /** A zoomable scroller's pan ([Zooming]) moved [s] by ([dx], [dy]) px, both axes at once, within its travel. */
     private fun panBoth(s: Scroller, dx: Float, dy: Float) {
-        val tx = (s.at(true) + dx).coerceIn(0f, max(0f, s.maxX)) - s.at(true)
+        val tx = (s.at(true) + dx).coerceIn(minOf(0f, s.minX), max(0f, s.maxX)) - s.at(true)
         val ty = (s.at(false) + dy).coerceIn(0f, max(0f, s.maxY)) - s.at(false)
         if (abs(tx) < 0.01f && abs(ty) < 0.01f) return
         s.own = true
@@ -660,12 +661,13 @@ internal class Scrolling(private val view: ExactView) {
 
     private fun predictedPixel(s: Scroller, sideways: Boolean): Float {
         var points = if (sideways) s.pointsX else s.pointsY
+        val min = if (sideways) s.minPointsX else 0f
         val max = if (sideways) s.maxPointsX else s.maxPointsY
         // Apply each pending sample in the same order as CanvasHost.scrolled and reader_sample_at.
         for (move in sent) {
             if (move.s === s) {
                 val delta = if (sideways) move.dx else move.dy
-                points = (points + delta / scale).coerceIn(0f, max)
+                points = (points + delta / scale).coerceIn(min, max)
             }
         }
         return paintedOffset((points + if (sideways) s.claimX else s.claimY) * scale)
@@ -701,13 +703,13 @@ internal class Scrolling(private val view: ExactView) {
             s.flags = w[i + 1]
             s.pointsX = f(w[i + 3]); s.pointsY = f(w[i + 4])
             s.drawnX = f(w[i + 5]); s.drawnY = f(w[i + 6])
-            s.maxPointsX = f(w[i + 7]); s.maxPointsY = f(w[i + 8])
+            s.maxPointsX = f(w[i + 7]); s.maxPointsY = f(w[i + 8]); s.minPointsX = f(w[i + 9])
             // A claimed scroller's record: its content painted past its offset, and its reached port, as the claim
             // moves them, which a touch's answer told only as it began
-            s.claimX = if (claimed) f(w[i + 9]) else 0f; s.claimY = if (claimed) f(w[i + 10]) else 0f
-            if (claimed) s.port.set(f(w[i + 11]), f(w[i + 12]), f(w[i + 11]) + f(w[i + 13]), f(w[i + 12]) + f(w[i + 14]))
+            s.claimX = if (claimed) f(w[i + 10]) else 0f; s.claimY = if (claimed) f(w[i + 11]) else 0f
+            if (claimed) s.port.set(f(w[i + 12]), f(w[i + 13]), f(w[i + 12]) + f(w[i + 14]), f(w[i + 13]) + f(w[i + 15]))
             s.nowX = s.pointsX * scale; s.nowY = s.pointsY * scale
-            s.maxX = s.maxPointsX * scale; s.maxY = s.maxPointsY * scale
+            s.minX = s.minPointsX * scale; s.maxX = s.maxPointsX * scale; s.maxY = s.maxPointsY * scale
             if (s.told && w[i + 2] != s.rev) {
                 // The app moved it: what the reader sent under the old revision is dropped there and here, and a
                 // fling that was moving it ends. A finger that is dragging it goes on from where the app put it.
@@ -813,8 +815,9 @@ internal class Scrolling(private val view: ExactView) {
         val axis = if (sideways) 0 else 1
         if (s.snapPort[axis] <= 0f || s.snaps[axis].isEmpty()) return null
         val at = s.at(sideways)
+        val start = s.start(sideways)
         val end = s.end(sideways)
-        if ((v < 0f && at <= 0f) || (v > 0f && at >= end)) return null
+        if ((v < 0f && at <= start) || (v > 0f && at >= end)) return null
         val flung = abs(v) >= minFling
         var projected = at
         if (flung) {
@@ -827,7 +830,7 @@ internal class Scrolling(private val view: ExactView) {
         val target = snapRest(s.snaps[axis], s.stops[axis], projected, at, dragFrom, way, s.snapMandatory, s.snapPort[axis])
         if (target == null && !s.snapList) return null
         if (target != null) {
-            val d = (target.coerceIn(0f, end) - at).roundToInt()
+            val d = (target.coerceIn(start, end) - at).roundToInt()
             val landing = at + d
             tell { Native.snapTarget(s.id, axis == 1, target, landing) }
             // ViewPager's settle: four times as long as the finger's speed would take to cover it, within its bound;
@@ -880,7 +883,7 @@ internal class Scrolling(private val view: ExactView) {
         val target = snapRest(s.snaps[aim.axis], s.stops[aim.axis], aim.projected, aim.release, aim.start, aim.way, s.snapMandatory,
             s.snapPort[aim.axis]) ?: return
         val at = s.at(sideways)
-        val d = (target.coerceIn(0f, s.end(sideways)) - at).roundToInt()
+        val d = (target.coerceIn(s.start(sideways), s.end(sideways)) - at).roundToInt()
         val landing = at + d
         tell { Native.snapTarget(s.id, aim.axis == 1, target, landing) }
         if (d == 0 && mode == IDLE) return
@@ -1095,9 +1098,9 @@ internal class Scrolling(private val view: ExactView) {
         val b = s.bar ?: Indicator(view.context).also { s.bar = it; attach(s, parent, it) }
         size(b, w, h)
         place(b, s)
-        b.rangeX = if (s.flags and 1 != 0) (s.maxX + w).roundToInt() else 0
+        b.rangeX = if (s.flags and 1 != 0) (s.maxX - s.minX + w).roundToInt() else 0
         b.rangeY = if (s.flags and 2 != 0) (s.maxY + h).roundToInt() else 0
-        b.atX = s.at(true).roundToInt(); b.atY = s.at(false).roundToInt()
+        b.atX = (s.at(true) - s.minX).roundToInt(); b.atY = s.at(false).roundToInt()
         b.wake()
     }
 
@@ -1109,7 +1112,7 @@ internal class Scrolling(private val view: ExactView) {
     private fun f(bits: Int) = java.lang.Float.intBitsToFloat(bits)
 
     internal companion object {
-        private const val STATEMENT_WORDS = 9
+        private const val STATEMENT_WORDS = 10
         /** A statement's claimed scroller, whose claim's record of [CLAIM_WORDS] follows (`presenter/scrollers.rs`). */
         const val CLAIMED_FLAG = 1024
         private const val CLAIM_WORDS = 6

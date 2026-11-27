@@ -628,34 +628,14 @@ impl<D: DataSource> Presenter<D> {
         }
     }
 
-    /// The top app bar's nodes: the Up arrow, the leading buttons, the
-    /// title as a heading, the trailing buttons. And the pane: the route
-    /// and its title.
-    fn access_top(&mut self, b: &mut Build) -> (i32, String) {
-        // Under a sheet the bars are the page's, inert: the sheet is the
-        // pane, titled by its first heading (LLP 1115.001 D13).
-        if let Some((route, _)) = self.top_sheet() {
-            let kernel = self.host.kernel();
-            let role = |props: &exact_kernel::PropList| {
-                props.str(PropId::AccessibilityRole) == Some("heading")
-            };
-            let title = (kernel
-                .preorder_where(&[route], |_, props| role(props))
-                .first())
-            .and_then(|heading| kernel.bar_text(*heading))
-            .or_else(|| kernel.node(route).and_then(|n| self.access_label(&n)))
-            .unwrap_or_default();
-            return (identity(kernel, route), title);
-        }
-        let (top, _) = self.bar_plans();
-        let Some(plan) = top.cloned() else {
-            return (0, String::new());
-        };
-        let (bar, _) = self.bars();
-        let Some(bar) = bar else {
-            return (0, String::new());
-        };
-        let (frame, targets, texts) = (bar.frame, bar.targets.to_vec(), bar.texts);
+    fn access_top_bar(
+        &self,
+        b: &mut Build,
+        plan: &bars::Top,
+        frame: [f32; 4],
+        targets: &[bars::Target],
+        texts: &[(ViewId, Rect4)],
+    ) {
         let target = |what: bars::What| targets.iter().find(|t| t.what == what).copied();
         let enabled = |on: bool| if on { flag::CLICK } else { flag::DISABLED };
         if let Some(up) = target(bars::What::Up).filter(|_| plan.up) {
@@ -702,6 +682,42 @@ impl<D: DataSource> Presenter<D> {
         for item in &plan.trailing {
             button(self, b, item);
         }
+    }
+
+    /// The top app bar's nodes: the Up arrow, the leading buttons, the
+    /// title as a heading, the trailing buttons. And the pane: the route
+    /// and its title.
+    fn access_top(&mut self, b: &mut Build) -> (i32, String) {
+        // Under a sheet the page's bars are inert behind the scrim; if the sheet
+        // route has its own projected header bar (LLP 1156.008.001 B5), expose
+        // its nodes here, else title the sheet pane by its first heading.
+        if let Some((route, _)) = self.top_sheet() {
+            if let Some((plan, frame, targets, texts)) = self.sheet_bar_access() {
+                self.access_top_bar(b, &plan, frame, &targets, &texts);
+                return (identity(self.host.kernel(), route), plan.title);
+            }
+            let kernel = self.host.kernel();
+            let role = |props: &exact_kernel::PropList| {
+                props.str(PropId::AccessibilityRole) == Some("heading")
+            };
+            let title = (kernel
+                .preorder_where(&[route], |_, props| role(props))
+                .first())
+            .and_then(|heading| kernel.bar_text(*heading))
+            .or_else(|| kernel.node(route).and_then(|n| self.access_label(&n)))
+            .unwrap_or_default();
+            return (identity(kernel, route), title);
+        }
+        let (top, _) = self.bar_plans();
+        let Some(plan) = top.cloned() else {
+            return (0, String::new());
+        };
+        let (bar, _) = self.bars();
+        let Some(bar) = bar else {
+            return (0, String::new());
+        };
+        let (frame, targets, texts) = (bar.frame, bar.targets.to_vec(), bar.texts);
+        self.access_top_bar(b, &plan, frame, &targets, &texts);
         (identity(self.host.kernel(), plan.route), plan.title)
     }
 

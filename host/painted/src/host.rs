@@ -438,6 +438,7 @@ impl<D: DataSource> Host<D> {
             );
         }
         let mut error = crate::traced(c"boot first layout", || host.layout()).err();
+        host.reclaim_timeline_bound();
         host.observe_layout();
         #[cfg(any(windows, target_os = "macos"))]
         crate::app::boot_phase(c"layout-ready");
@@ -1418,6 +1419,7 @@ impl<D: DataSource> Host<D> {
             }
         });
         self.observe_layout();
+        paint |= self.reclaim_timeline_bound();
         paint |= layout.as_ref().copied().unwrap_or(true);
         // Consume the final sample even when the seek has made motion quiescent.
         paint |= self.present();

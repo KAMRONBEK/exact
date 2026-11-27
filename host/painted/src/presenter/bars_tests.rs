@@ -296,8 +296,8 @@ fn shelfs_library_is_a_top_app_bar_and_a_navigation_bar() {
 #[test]
 fn shelfs_add_form_and_its_other_tabs() {
     let (mut p, _) = barred(SHELF);
-    // The add form, presented, is a sheet (`stage.rs`): its header stays in
-    // it as written, and the library's bar is drawn under the scrim.
+    // The add form, presented, is a sheet (`stage.rs`): its header projects
+    // inside the sheet (LLP 1156.008.001 B5), and the library's bar stays under the scrim.
     assert!(tap(&mut p, "add-book").unwrap().contains("\"bar\":\"top\""));
     let open = p.host().now() + 1000.;
     p.tick(open);
@@ -1348,8 +1348,8 @@ fn a_route_opts_out_of_or_credits_its_bars_room() {
     assert_eq!(list_top(&plain).0, top + 10.0, "a plain padding adds");
 }
 
-/// @ref LLP 1123 D9 — a route in a sheet reads the sheet's own clearance,
-/// its handle, whatever the page's top inset is: the sheet starts below it.
+/// @ref LLP 1123 D9, LLP 1156.008.001 B5 — a route in a sheet reads the sheet's own
+/// clearance (its handle plus any projected sheet bar), unaffected by the page's top inset.
 #[test]
 fn a_sheets_route_reads_the_sheets_own_inset() {
     let (mut p, _) = barred(SHELF);
@@ -1369,7 +1369,7 @@ fn a_sheets_route_reads_the_sheets_own_inset() {
     let form = kernel.find_by_id("add-form")[0];
     let form = kernel.node_by_key(form).unwrap().id;
     let local = kernel.local_insets(form).unwrap();
-    assert_eq!(local[0], SHEET_HANDLE, "{local:?}");
+    assert_eq!(local[0], SHEET_HANDLE + top_height(), "{local:?}");
 }
 
 #[test]
@@ -1442,4 +1442,48 @@ fn bars_remeasure_when_direction_changes_without_replacing_the_route() {
     assert!(up(&mut p) < 10.);
     touch(&mut p, TOP, None);
     assert_eq!(top(&mut p).title, "Home");
+}
+
+#[test]
+fn modal_sheet_header_projects_inside_sheet_and_leaves_page_bar_untouched() {
+    let (mut p, _) = barred(SHELF);
+    assert!(tap(&mut p, "add-book").unwrap().contains("\"bar\":\"top\""));
+    let open = p.host().now() + 1000.;
+    p.tick(open);
+    let _ = p.frame();
+    assert!(p.top_sheet().is_some());
+    // Underlying page's bar stays untouched behind the scrim.
+    assert_eq!(top(&mut p).title, "Library");
+    // Sheet's own header was projected into RouteBar with `sheet == true` and lifted from page boxes.
+    let sheet_bar = p
+        .host()
+        .bars()
+        .routes
+        .iter()
+        .find(|r| r.sheet)
+        .expect("sheet bar");
+    assert!(!sheet_bar.pushed);
+    assert!(p.bar_node(id(&p, "add-cancel")));
+    let cancel_box = p
+        .bar_box(id(&p, "add-cancel"))
+        .expect("sheet bar button box");
+    let (_, sheet_frame) = p.top_sheet().unwrap();
+    let page = p.chrome().frame;
+    assert!(cancel_box.1 >= page[1] + sheet_frame.1 + SHEET_HANDLE - 0.5);
+    // Accessibility exposes the sheet's projected header heading & Cancel button.
+    let ax = p.reader_access(1.0, true).unwrap();
+    assert!(!ax.is_empty());
+    // Pointer touch inside the sheet bar's Cancel button closes the sheet without hitting the page bar.
+    let (px, py) = (
+        cancel_box.0 + cancel_box.2 / 2.0 - page[0],
+        cancel_box.1 + cancel_box.3 / 2.0 - page[1],
+    );
+    let t = p.host().now();
+    assert!(p.pointer_down(px, py, t).unwrap());
+    assert!(p.pointer_up(px, py, t + 20.).unwrap());
+    p.run_commands(|| Nothing);
+    assert!(
+        p.top_sheet().is_none(),
+        "sheet header Cancel closed the sheet"
+    );
 }

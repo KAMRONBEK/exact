@@ -117,6 +117,20 @@ impl<D: DataSource + Default> CanvasHost<D> {
         self.p.reader_frame_focused(id, key, session, focused);
     }
 
+    /// An unpartitioned iframe's `window.postMessage` string (LLP 1156.008.001 B1).
+    pub fn frame_message(&mut self, id: u32, key: exact_kernel::NodeKey, session: u64, text: &str) {
+        self.force |= self.p.reader_frame_message(id, key, session, text);
+    }
+
+    /// Immutable boot-time media grants (`device.camera` bit 0, `device.microphone` bit 1)
+    /// for Android-only grant-gated `WebChromeClient.onPermissionRequest` (LLP 1156.008.001 B1b).
+    pub fn frame_media_grants(&self) -> i32 {
+        let grants = self.p.host.runner().data().grants();
+        let cam = i32::from(exact_runner::device::granted(grants, "camera"));
+        let mic = i32::from(exact_runner::device::granted(grants, "microphone"));
+        cam | (mic << 1)
+    }
+
     /// The reader's iframe's `FrameNavigation` record (LLP 1020.002 D2).
     pub fn frame_event(
         &mut self,

@@ -180,6 +180,38 @@ impl<D: DataSource> Presenter<D> {
         true
     }
 
+    /// An unpartitioned iframe's `window.postMessage` string, for this
+    /// session and allocation (LLP 1020 §11; LLP 1156.008.001 B1).
+    #[cfg(any(target_os = "android", test))]
+    pub(crate) fn reader_frame_message(
+        &mut self,
+        id: ViewId,
+        key: exact_kernel::NodeKey,
+        session: u64,
+        text: &str,
+    ) -> bool {
+        if session != self.brush.native_session
+            || !self.host.kernel().node(id).is_some_and(|node| {
+                node.node_type == NodeType::WebView
+                    && node.key == key
+                    && node.props.str(PropId::Partition).is_none()
+            })
+            || !self
+                .host
+                .runner()
+                .handlers_of(id)
+                .contains(&EventKind::Message)
+        {
+            return false;
+        }
+        let dispatched = self.host.dispatch_now(id, Event::Message(text.to_owned()));
+        let committed = self.after_commit();
+        if let Some(error) = dispatched.or(committed) {
+            self.host.log(error);
+        }
+        true
+    }
+
     /// A record of the iframe for this session and allocation (LLP 1020.002 D2).
     #[cfg(any(target_os = "android", test))]
     pub(crate) fn reader_frame_event(

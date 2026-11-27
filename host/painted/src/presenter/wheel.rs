@@ -227,29 +227,29 @@ impl<D: DataSource> Presenter<D> {
             dx
         };
         let (ox, oy) = bounds.axes;
-        let max = bounds.max;
+        let (min, max) = (bounds.min, bounds.max);
         let off = self.scroll.get(&id).copied().unwrap_or((0.0, 0.0));
-        let takes = |axis: Overflow, d: f32, off: f32, max: f32| {
+        let takes = |axis: Overflow, d: f32, off: f32, min: f32, max: f32| {
             matches!(axis, Overflow::Scroll | Overflow::Auto)
                 && d != 0.0
-                && max > 0.0
-                && ((d > 0.0 && off < max) || (d < 0.0 && off > 0.0))
+                && max > min
+                && ((d > 0.0 && off < max) || (d < 0.0 && off > min))
         };
-        let take_x = takes(ox, dx, off.0, max.0);
+        let take_x = takes(ox, dx, off.0, min.0, max.0);
         let (input_y, input_max) = self
             .anchor_input_position(id, off.1)
             .unwrap_or((off.1, max.1));
-        let take_y = takes(oy, dy, input_y, input_max);
+        let take_y = takes(oy, dy, input_y, min.1, input_max);
         if !take_x && !take_y {
             return false;
         }
         let nx = if take_x {
-            (off.0 + dx).clamp(0.0, max.0)
+            (off.0 + dx).clamp(min.0, max.0)
         } else {
             off.0
         };
         let ny = if take_y {
-            (off.1 + dy).clamp(0.0, max.1)
+            (off.1 + dy).clamp(min.1, max.1)
         } else {
             off.1
         };

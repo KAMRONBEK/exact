@@ -44,6 +44,8 @@ pub struct Scroller {
     /// Whether it scrolls sideways, and up and down: the axis overflows and
     /// has somewhere to go.
     pub axes: (bool, bool),
+    /// The least offset on each axis (negative x only for RTL overflow; 0 otherwise).
+    pub min: (f32, f32),
     /// The farthest offset on each axis.
     pub max: (f32, f32),
     /// Where it is, measured from the right on x when `from_right` is true.
@@ -146,7 +148,7 @@ const DOUBLE_TAP: i32 = 512;
 #[cfg(any(target_os = "android", test))]
 const CLAIMED: i32 = 1024;
 #[cfg(any(target_os = "android", test))]
-const STATEMENT_WORDS: usize = 9;
+const STATEMENT_WORDS: usize = 10;
 /// A claimed scroller's record: the displacement its content is painted at
 /// past its offset, in points, x then y, and its reached port in pixels, x,
 /// y, width and height.
@@ -179,6 +181,7 @@ impl<D: DataSource> Presenter<D> {
         Scroller {
             id: PAGE,
             axes: (max.0 > 0.0, max.1 > 0.0),
+            min: (0.0, 0.0),
             max,
             offset: self.page,
             from_right: false,
@@ -198,10 +201,15 @@ impl<D: DataSource> Presenter<D> {
         if !scrolls(ox) && !scrolls(oy) {
             return None;
         }
+        let min = (bounds.min.0.min(0.0), bounds.min.1.min(0.0));
         let max = (bounds.max.0.max(0.0), bounds.max.1.max(0.0));
         Some(Scroller {
             id,
-            axes: (scrolls(ox) && max.0 > 0.0, scrolls(oy) && max.1 > 0.0),
+            axes: (
+                scrolls(ox) && (min.0 < 0.0 || max.0 > 0.0),
+                scrolls(oy) && (min.1 < 0.0 || max.1 > 0.0),
+            ),
+            min,
             max,
             offset: self.scroll.get(&id).copied().unwrap_or((0.0, 0.0)),
             from_right: self
@@ -471,12 +479,12 @@ impl<D: DataSource> Presenter<D> {
         let s = self.scroller(id, &limits)?;
         let next = (
             if s.axes.0 {
-                to.0.clamp(0.0, s.max.0)
+                to.0.clamp(s.min.0, s.max.0)
             } else {
                 s.offset.0
             },
             if s.axes.1 {
-                to.1.clamp(0.0, s.max.1)
+                to.1.clamp(s.min.1, s.max.1)
             } else {
                 s.offset.1
             },
@@ -804,7 +812,12 @@ impl<D: DataSource> Presenter<D> {
             let claim = self.host.presented(id).scroll;
             let flags = self.reader_flags(&s) | if claim.is_some() { CLAIMED } else { 0 };
             out.extend([id as i32, flags, rev as i32]);
-            out.extend([s.offset.0, s.offset.1, at.0, at.1, s.max.0, s.max.1].map(bits));
+            out.extend(
+                [
+                    s.offset.0, s.offset.1, at.0, at.1, s.max.0, s.max.1, s.min.0,
+                ]
+                .map(bits),
+            );
             if let Some(c) = claim {
                 let displaced = c.displacement((0., 0.));
                 let port = self

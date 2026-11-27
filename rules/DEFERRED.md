@@ -1292,6 +1292,14 @@ reading. Nothing that isn't HTML is added by it.
   `host-context-changed` updates. Take: QUEUE "Shared elements, stage 2" (LLP 1013.000
   §3) moves to Later. Structured clone, broadcast, a permission broker and Linux
   delivery stay no.
+- **Expanded (Charlie, 2026-11-27, waived; LLP 1156.008.001 B1b):** Android-only
+  grant-gated `WebChromeClient.onPermissionRequest` on unpartitioned app `iframe`s:
+  grants `RESOURCE_VIDEO_CAPTURE` / `RESOURCE_AUDIO_CAPTURE` only when the app's
+  immutable boot grants include `device.camera` / `device.microphone`, the Android
+  process holds the corresponding runtime permission, and `request.origin` matches
+  the frame's authored `src` origin; partitioned frames and all other requests call
+  `request.deny()`. Apple keeps denying frame media capture (`FrameWindows.swift`);
+  `allow` attributes and a general permission broker stay no.
 - **Expanded (Daehyeon Mun, 2026-10-23; trade; LLP 1020.002):** a browser shell on
   the `iframe`: `partition` makes a guest a top-level page with its own storage (LLP
   1020's `top` topology, for a partitioned frame only); its new windows, external
@@ -1752,6 +1760,14 @@ reading. Nothing that isn't HTML is added by it.
   Still refused (LLP 1133.033 §11): foreground services for an app's own
   work, ringing an app that is not running (PushKit, FCM), a call's media
   transport, and the rest of §11's list.
+- **Expanded (Charlie, 2026-11-27, waived; LLP 1156.008.001 B2):** host-owned
+  `device.geolocation-service` foreground location service on Android
+  (`ForegroundService.Location` with `FOREGROUND_SERVICE_LOCATION`, deriving iOS's
+  `location` background mode; requires `device.geolocation`, conflicts with
+  `device.geolocation-approximate`). Package-declared location foreground services
+  in `scripts/android-manifest.mjs` and continuous background location outside a
+  person-started foreground session stay refused; `device.geolocation-background`
+  stays geofencing-only.
 - **Expanded (Charlie, 2026-10-23, "Admit all three, no take", on LLP
   1133.018 §15 question 9):** contacts and calendars (`@exact/contacts`,
   `@exact/calendar`) on the web, iOS, macOS and Android. Choosing contacts

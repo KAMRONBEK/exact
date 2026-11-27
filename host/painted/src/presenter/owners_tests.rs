@@ -82,16 +82,17 @@ fn a_shell_without_bars_reports_bands_of_zero() {
     }
 }
 
-/// A route in a sheet reports the sheet's band, its handle at the top, and lies where the stage shows the sheet; once
-/// the sheet has gone its route has no update.
+/// A route in a sheet reports the sheet's band, its handle and projected bar at the top, and lies
+/// where the stage shows the sheet; once the sheet has gone its route has no update.
 #[test]
 fn a_sheets_route_reports_its_sheet_and_goes_with_it() {
     let (mut p, _) = barred(include_str!("../../../../apps/shelf/app.contract"));
+    let expected_top = SHEET_HANDLE + crate::presenter::bars::look::top_height();
     let sheeted = |p: &Presenter<Nothing>| {
         let updates = p.owner_updates();
         updates
             .into_iter()
-            .filter(|(_, u)| u.band.unwrap()[0] == SHEET_HANDLE)
+            .filter(|(_, u)| u.band.unwrap()[0] == expected_top)
             .collect::<Vec<_>>()
     };
     assert!(sheeted(&p).is_empty());
