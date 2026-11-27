@@ -107,6 +107,8 @@ abstract class ExactExtension(val context: ExtensionContext) {
     open fun destroyView(view: android.view.View) {}
     /** The hosted view's activity lifecycle, separate from the session's foreground fact (LLP 1133.021). */
     open fun viewLifecycle(view: android.view.View, event: ViewLifecycle, state: android.os.Bundle?) {}
+    /** Drag axes this package view claims over an ancestor `pan`, same-axis scroller or sheet (LLP 1133.008 D8 item 6). */
+    open fun dragAxes(view: android.view.View): Int = 0
 
     /**
      * View [id] of [session] was displayed or hidden, by [cause], the commit that did it (LLP 1133.008 D8 item 2).
@@ -959,6 +961,7 @@ internal object Extensions {
         override fun lifecycle(view: android.view.View, event: ViewLifecycle, state: android.os.Bundle?) {
             extension(name)?.viewLifecycle(view, event, state)
         }
+        override fun dragAxes(view: android.view.View): Int = extension(name)?.dragAxes(view) ?: 0
         override fun destroy(view: android.view.View) { emits.remove(view); extension(name)?.destroyView(view) }
     }
 

@@ -1176,6 +1176,12 @@ class Natives internal constructor(
         return e.view.takeIf { !e.disabled && it.isEnabled }
     }
 
+    /** Drag axes declared by the module that owns [view], while it is mounted and enabled (LLP 1133.008 D8 item 6). */
+    internal fun dragAxes(view: View): Int {
+        val e = byView[view]?.takeIf { !it.parked && !it.disabled && view.isEnabled } ?: return 0
+        return e.module?.let(modules::get)?.dragAxes(view) ?: 0
+    }
+
     internal var retiring: ((View) -> Unit)? = null
 
     /** [e]'s page, or the `about:blank` of a frame [Partitions] refuses, loaded silently as Apple's is. */

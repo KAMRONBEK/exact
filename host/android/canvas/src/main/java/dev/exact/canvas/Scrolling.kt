@@ -251,7 +251,7 @@ internal class Scrolling(private val view: ExactView) {
 
     /** [e], a touch event after the down, once exact2 has answered for the touch: whether the scroll took it. */
     private fun take(e: MotionEvent, disallowIntercept: Boolean = false): Boolean {
-        if (zooming.touch(e)) {
+        if (zooming.touch(e, disallowIntercept)) {
             if (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) {
                 if (mode != FLINGING) mode = IDLE
                 tracker?.recycle(); tracker = null
@@ -316,6 +316,7 @@ internal class Scrolling(private val view: ExactView) {
     /** This sequence no longer belongs to scrolling; unrelated refreshes and edge effects stay visible. */
     fun yieldToHosted() {
         settleSheet(0f)
+        caughtSharedFling = false
         zooming.stopped()
         if (mode == WATCHING || mode == DRAGGING) mode = IDLE
         forget()

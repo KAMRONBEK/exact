@@ -108,8 +108,10 @@ object Native {
     @JvmStatic external fun scroll(dy: Float)
     /** What is under a point of the view (pixels), for the reader to decide what a drag from there is (LLP 1115.001
      * D7.3) and whose a touch there is (D8): the axes exact2's own gestures there claim (bit 0 sideways, bit 1 up
-     * and down; bit 2: the latter is a sheet's drag alone, which a hosted view that disallows interception keeps,
-     * [Contacts]; bits 3 and 4: a nested sheet takes an upward or downward finger drag; bit 6: a long press lifted a reorder row), a count, the hosted text field the touch is for (0: none; [Fields]), and eleven numbers a scroller,
+     * and down; bit 2: the latter is a sheet's drag alone, which a hosted view that disallows interception or declares
+     * [NativeModule.DRAG_VERTICAL] keeps, [Contacts]; bits 3 and 4: a nested sheet takes an upward or downward finger
+     * drag; bit 5: five nested-sheet words follow the scrollers; bit 6: a long press lifted a reorder row; bits 7 and 8:
+     * sideways or non-sheet vertical claims yield to a hosted view's [NativeModule.dragAxes]), a count, the hosted text field the touch is for (0: none; [Fields]), and eleven numbers a scroller,
      * innermost first: its id, flags (bit 0 it takes a sideways drag from here, bit 1 one up or down, bit 2 its
      * rows are a node the reader can move, bit 3 no scrollbar, bit 4 it hears `refresh`, bit 5 its `refreshing`
      * is true, bits 6 and 7 its `keyboardDismissMode`), its revision, then as float bits its offset (x, y), its farthest offset

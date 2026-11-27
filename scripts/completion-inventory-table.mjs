@@ -1237,7 +1237,7 @@ export const classifications = [
     ["painted:host/painted/src/presenter/back.rs", "Presenter::back_key_down"],
     ["painted:host/painted/src/presenter/bars.rs", "Presenter::bar_button Presenter::bar_colors Presenter::content_scroller Presenter::read_bars"],
     ["painted:host/painted/src/presenter/contact.rs",
-      "Presenter::canvas_input_live Presenter::contact_down Presenter::feedback_contains Presenter::focus_on_down Presenter::input_live " +
+      "Presenter::canvas_input_live Presenter::contact_down Presenter::feedback_contains Presenter::focus_on_down Presenter::input_allowed Presenter::input_live " +
       "Presenter::pointer_lift Presenter::pointer_moved Presenter::retire_acknowledged_pointer Presenter::retire_pointer"],
     ["painted:host/painted/src/presenter/contact/candidate.rs", "Presenter::depth"],
     ["painted:host/painted/src/presenter/contact/mouse.rs", "Presenter::mouse_click_target"],

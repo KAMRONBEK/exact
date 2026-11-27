@@ -4028,6 +4028,15 @@ axis and a second pointer before interception stay with the hosted view.
 A `modal` route's sheet takes an up-and-down drag the same way: the view keeps
 it only if it made the request before the crossing move, so a map in a sheet
 pans every way and a button there lets the sheet be dragged by it.
+A control that needs one drag axis while leaving the other to enclosing
+scrollers (such as a horizontal scrubber inside a vertical `scroll` under an
+authored drawer `pan`) instead overrides `NativeModule.dragAxes(view)`
+(`ExactExtension.dragAxes(view)` for package views) to return
+`NativeModule.DRAG_HORIZONTAL` or `NativeModule.DRAG_VERTICAL` without calling
+`requestDisallowInterceptTouchEvent` on down. The declared axis beats an
+ancestor `pan`, same-axis scrollers and sheets once movement passes touch slop,
+while exclusive Exact gestures (`swipe`, `transform`, `height`, `group`/`lift`
+or a `pan` on the hosted element itself) still win.
 See the [Android module seam](../host/android/README.md).
 
 ### Native views: accessibility

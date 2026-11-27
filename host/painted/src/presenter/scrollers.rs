@@ -68,6 +68,10 @@ pub struct Under {
     /// The axes (sideways; up and down) a gesture of the presenter's own
     /// there would take.
     pub claims: (bool, bool),
+    /// The axes claimed by an exclusive Exact gesture (`Swipe`, `Height`,
+    /// `Transform`, `Group`/`Lift`, a `pan` on the hit node itself, or a modal
+    /// scrim) that a hosted view's `dragAxes` cannot override (LLP 1133.008 D8 item 6).
+    pub hard_claims: (bool, bool),
     /// Whether the claim on up and down is the top sheet's drag and no
     /// gesture's. The sheet takes a drag as a parent intercepts one: a
     /// shell leaves it with a hosted view that asked its parents not to
@@ -293,7 +297,7 @@ impl<D: DataSource> Presenter<D> {
         if page.axes.0 || page.axes.1 {
             chain.push(page);
         }
-        let mut claims = self.claims_at(hit);
+        let (mut claims, hard_claims) = self.claims_at(hit);
         let mut sheet = false;
         let mut sheet_directions = (false, false);
         let mut nested_sheet = None;
@@ -304,6 +308,7 @@ impl<D: DataSource> Presenter<D> {
                 return Under {
                     chain: Vec::new(),
                     claims: (true, true),
+                    hard_claims: (true, true),
                     sheet: false,
                     sheet_directions,
                     nested_sheet,
@@ -327,6 +332,7 @@ impl<D: DataSource> Presenter<D> {
         Under {
             chain,
             claims,
+            hard_claims,
             sheet,
             sheet_directions,
             nested_sheet,
@@ -335,24 +341,37 @@ impl<D: DataSource> Presenter<D> {
     }
 
     /// The axes a contact on `hit` would be the presenter's own gesture
-    /// along: what its candidates accept (`contact.rs`).
-    fn claims_at(&self, hit: ViewId) -> (bool, bool) {
+    /// along: what its candidates accept (`contact.rs`), alongside the subset
+    /// (`hard_claims`) that comes from an exclusive Exact gesture rather than
+    /// a strict ancestor `pan` or CSS `touch-action` (LLP 1133.008 D8 item 6).
+    fn claims_at(&self, hit: ViewId) -> ((bool, bool), (bool, bool)) {
         let kernel = self.host.kernel();
         let Some(key) = kernel.node(hit).map(|n| n.key) else {
-            return (false, false);
+            return ((false, false), (false, false));
         };
+        if !self.input_allowed(key) {
+            return ((false, false), (false, false));
+        }
         if !self.input_live(key) {
-            return (false, false);
+            let Some(Candidate::Pan(pan_key)) = self.pan_candidate(key) else {
+                return ((false, false), (false, false));
+            };
+            let claims = kernel.node_by_key(pan_key).map_or((false, false), |n| {
+                let gives = gives(n.style.touch_action);
+                (!gives.0, !gives.1)
+            });
+            return (claims, (false, false));
         }
         let mut claims = self.touch_kept(key);
+        let mut hard = (false, false);
         for candidate in self.candidates(key) {
-            let (x, y) = match candidate {
+            let ((x, y), exclusive) = match candidate {
                 // An ordinary grip takes a finger on the platform's long press.
                 // Before then only touch-action keeps the list from scrolling.
-                Candidate::Arrange(_) => (false, false),
-                Candidate::Height { .. } => (false, true),
-                Candidate::Swipe(_) => (true, false),
-                Candidate::Transform(b) => {
+                Candidate::Arrange(_) => ((false, false), false),
+                Candidate::Height { .. } => ((false, true), true),
+                Candidate::Swipe(_) => ((true, false), true),
+                Candidate::Transform(b) => (
                     kernel.node_by_key(b.handle).map_or((false, false), |n| {
                         let action = n.style.touch_action;
                         if matches!(
@@ -365,20 +384,29 @@ impl<D: DataSource> Presenter<D> {
                             let (x, y) = gives(action);
                             (!x, !y)
                         }
-                    })
-                }
+                    }),
+                    true,
+                ),
                 // A mouse's lift takes a drag in any direction (LLP 1094.000 D13).
-                Candidate::Group(_) | Candidate::Lift { .. } => (true, true),
+                Candidate::Group(_) | Candidate::Lift { .. } => ((true, true), true),
                 // A `pan` hears what its `touch-action` does not give to
                 // scrolling, as a browser cancels a pointer it pans with.
-                Candidate::Pan(key) => kernel.node_by_key(key).map_or((false, false), |n| {
-                    let gives = gives(n.style.touch_action);
-                    (!gives.0, !gives.1)
-                }),
+                // Only a `pan` on the hit node itself is exclusive over a hosted
+                // view's `dragAxes`; a strict ancestor `pan` yields (LLP 1133.008 D8 item 6).
+                Candidate::Pan(pan_key) => (
+                    kernel.node_by_key(pan_key).map_or((false, false), |n| {
+                        let gives = gives(n.style.touch_action);
+                        (!gives.0, !gives.1)
+                    }),
+                    pan_key == key,
+                ),
             };
             claims = (claims.0 || x, claims.1 || y);
+            if exclusive {
+                hard = (hard.0 || x, hard.1 || y);
+            }
         }
-        claims
+        (claims, hard)
     }
 
     /// The axes a finger on `hit` keeps from the platform's panning: those
@@ -679,7 +707,10 @@ impl<D: DataSource> Presenter<D> {
     /// [`Presenter::scrollers_at`] for a reader, in its pixels (`scale` to a
     /// point): the claims (bit 0 sideways, bit 1 up and down, bit 2 the
     /// latter is a sheet's drag alone: [`Under::sheet`], bits 3 and 4 its
-    /// upward and downward claims over a list), a count, the
+    /// upward and downward claims over a list, bit 5 nested sheet follows,
+    /// bit 6 a lifted reorder row, bit 7 sideways claim yields to a hosted
+    /// view's `dragAxes`, bit 8 non-sheet vertical claim yields to a hosted
+    /// view's `dragAxes`), a count, the
     /// hosted text field the touch is for (0: none; LLP 1115.001 D8), and
     /// eleven words a scroller: id, flags (bit 0 it takes a sideways drag
     /// from here, bit 1 one up or down, bit 2 it has rows the reader can
@@ -697,7 +728,9 @@ impl<D: DataSource> Presenter<D> {
                 | i32::from(under.claims.1) << 1
                 | i32::from(under.sheet) << 2
                 | i32::from(under.sheet_directions.0 && !under.sheet) << 3
-                | i32::from(under.sheet_directions.1 && !under.sheet) << 4,
+                | i32::from(under.sheet_directions.1 && !under.sheet) << 4
+                | i32::from(under.claims.0 && !under.hard_claims.0) << 7
+                | i32::from(under.claims.1 && !under.hard_claims.1 && !under.sheet) << 8,
             under.chain.len() as i32,
             under.field.unwrap_or(0) as i32,
         ];
