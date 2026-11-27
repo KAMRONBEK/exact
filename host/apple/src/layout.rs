@@ -313,6 +313,7 @@ impl<D: DataSource> Host<D> {
             }
             self.emit_paragraphs(batch);
         }
+        self.sync_inline_image_paragraphs(batch);
         self.height_projection.clear();
         self.height_projection
             .extend_from_slice(&self.height_sampling);

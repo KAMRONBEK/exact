@@ -63,7 +63,7 @@ package final class Presenter {
     }
     /// Custom buttons with a label and no `title`, whose help tag waits for
     /// the batch to mount their content.
-    var pendingTips: Set<UInt32> = []
+    var pendingTips: Set<UInt32> = [], dirtyCursorRects: Set<UInt32> = []
     func settleTips() {
         for id in pendingTips {
             guard let view = views[id] else { continue }
@@ -714,7 +714,7 @@ package final class Presenter {
         stopPump()
         listTravel.removeAll()
         listFillCosts.removeAll()
-        textPending = false
+        textPending = false; dirtyCursorRects.removeAll()
         listViews.removeAll()
     }
 
@@ -1096,7 +1096,8 @@ package final class Presenter {
         CATransaction.begin()
         defer { CATransaction.commit() }
         session?.fieldChrome.presented(batch.layoutProvisional)
-        defer { applyLanguage(batch); toolbar.languageApplied(batch); applyWakeLock(batch); applyOrientationLock(batch) }
+        let languageChanged = takeLanguage(batch)
+        defer { applyLanguage(batch, documentChanged: languageChanged); toolbar.languageApplied(batch); applyWakeLock(batch); applyOrientationLock(batch) }
         if let inspectors = batch.routeInspectors {
             routeInspectors = Dictionary(inspectors.map { ($0.route, $0) }, uniquingKeysWith: { first, _ in first })
         }
@@ -1143,6 +1144,7 @@ package final class Presenter {
             PaintOrder.end()
             if outermost {
                 applying = false
+                flushInlineCursorRects()
                 videoVisibility?.changed()
                 let q = waiting
                 waiting = []
@@ -1266,6 +1268,7 @@ package final class Presenter {
             }
         }
         if let stage { retirePlainDescendants(stage, retiring: &retired) }
+        if languageChanged { invalidateHyphenatedParagraphsForLanguage() }
         // Ids a later op made again keep their index entries.
         if !retired.isEmpty { let gone = retired.filter { views[$0] == nil }; chrome.forget(all: gone); inputGates.forget(all: gone) }
         regridMoved(); if !renewing.isEmpty { renewsApplied() }
