@@ -59,7 +59,7 @@ import { selectBackendOrigin } from '../js/bake/src/typescript.mjs';
 import { contractVerify, semanticsSummary } from './verify-semantics.mjs';
 import { axGroup, byRule, FIRST, firstGrounds, groups, launchNotes, placesOf, RELAUNCH, ruleOf, largeRemedy, iosNavigationContent, iosTabBar } from './verify-findings.mjs';
 import { cargoDiagnosticFilter } from './cargo-check.mjs';
-import { duoLeg, startParallelDuo } from './verify-duo.mjs';
+import { duoLeg, resolveDuoChoice, startParallelDuo } from './verify-duo.mjs';
 export { byRule, groups, ruleOf, largeRemedy };
 
 import { serverModules } from './app-imports.mjs';
@@ -696,7 +696,7 @@ export function tourNews(visited, toured) {
 
 /** `verify ios` on an iPhone Duo (verify-duo.mjs): the first screen and the tests' ends, in each pose. `passed` names the
  * tests that passed on the other simulator, by file and place; one that fails here is the leg's `failed`. */
-async function onDuo(app, { pick, shots, running, freshServer, passed, selectedFiles = null }) {
+async function onDuo(app, { pick, remember = false, chosen = null, phoneUdid = null, shots, running, freshServer, passed, selectedFiles = null }) {
   const [{ open }, { runTests }, { checkOp }, { authoredTests }] = await Promise.all([import('./agent.mjs'), import('./agent-test.mjs'), import('./agent-check.mjs'), import('./app.mjs')]);
   const check = async (s, screen, pose) => {
     if (systemAlert(await s.state())) throw new Error('a system alert is up');
@@ -718,7 +718,7 @@ async function onDuo(app, { pick, shots, running, freshServer, passed, selectedF
         atResult: (t) => atResult(t.failures.length && passed.has(`${label} ${t.index}`) ? { name: t.name, file: label, failures: t.failures } : null) });
     }
   };
-  return duoLeg({ pick, check, drive, remembered: resolve(app.dir, '.exact', 'simulator') });
+  return duoLeg({ pick, app: app.id, dir: app.dir, phoneUdid, remember, chosen, check, drive });
 }
 
 /** One launch at `size` (null: the device's own) on a fresh scratch store: the app's data landed and its
@@ -1201,7 +1201,7 @@ export function report({ host, built, compiler = [], server, tested, checks, ax 
 async function deviceMain(argv, emitJSON, declined, ended) {
   const args = guardFlags('verify', argv);
   const value = (flag) => args.indexOf(flag) >= 0 ? args[args.indexOf(flag) + 1] : undefined;
-  const json = args.includes('--json'), sim = value('--sim'), copyTo = value('--shots'), duoPick = value('--duo');
+  const json = args.includes('--json'), sim = value('--sim'), copyTo = value('--shots'), duoFlag = value('--duo'), duoPick = duoFlag ?? process.env.EXACT_DUO;
   // The app's variant (LLP 1030.008 D3), for every process verify starts; the app it resolves claims it.
   if (value('--variant')) { process.env.EXACT_VARIANT = value('--variant'); delete process.env.EXACT_VARIANT_APP; }
   const flagged = new Set([args.indexOf('--app') + 1, args.indexOf('--sim') + 1, args.indexOf('--shots') + 1, args.indexOf('--duo') + 1, args.indexOf('--variant') + 1].filter((i) => i > 0));
@@ -1295,21 +1295,25 @@ async function deviceMain(argv, emitJSON, declined, ended) {
   };
   try {
     const wantsDuo = host === 'ios' && !scopedDuo && (app.manifest.host?.ios?.deviceFamily ?? ['iphone']).includes('iphone');
+    let phoneUdid = null, resolvedDuo = null;
     if (host === 'ios') {
       const [{ chooseSimulator, simulator, withSoftwareKeyboard }, { holdAccessibilityRuntime }] = await Promise.all([import('../host/apple/devices.mjs'), import('../host/apple/touches.mjs')]);
       let phoneDev = null;
       try { phoneDev = chooseSimulator(sim, { app: app.id, dir: app.dir, rememberChoice: false }); } catch {}
+      phoneUdid = phoneDev?.udid ?? null;
       if (phoneDev?.udid) {
         // Pin Phone's UDID before spawning parallel Duo so later lookups never drift onto the Duo.
         process.env.EXACT_SIM = phoneDev.udid;
-        if (wantsDuo && !running) {
-          parallelDuo = startParallelDuo({ app, pick: duoPick, shots, selectedFiles, accept: ACCEPT, phoneUdid: phoneDev.udid });
-          if (parallelDuo?.device) console.error(`verify ios: running iPhone Duo leg in parallel on ${parallelDuo.device}`);
+        if (wantsDuo) {
+          resolvedDuo = resolveDuoChoice({ pick: duoPick, app: app.id, dir: app.dir, phoneUdid, remember: Boolean(duoFlag) });
+          if (!running) {
+            parallelDuo = startParallelDuo({ app, chosen: resolvedDuo, shots, selectedFiles, accept: ACCEPT, phoneUdid });
+          }
         }
         let booted = phoneDev.state === 'Booted';
         if (!booted) {
           try {
-            const bootedDev = simulator(phoneDev.udid, { rememberChoice: false });
+            const bootedDev = simulator(phoneDev.udid, { rememberChoice: false, exactUdid: true });
             booted = true;
             if (bootedDev.bootedHere) phoneKeyboard = await withSoftwareKeyboard(bootedDev, async () => ({ close() {} }));
           } catch {}
@@ -1395,7 +1399,7 @@ async function deviceMain(argv, emitJSON, declined, ended) {
       }
     }
     if (wantsDuo && !parallelDuo) {
-      duo = await onDuo(app, { pick: duoPick, shots, running, freshServer, passed, selectedFiles });
+      duo = await onDuo(app, { pick: duoPick, remember: Boolean(duoFlag), chosen: resolvedDuo, phoneUdid: phoneUdid ?? firsts.find((runs) => runs.udid)?.udid ?? null, shots, running, freshServer, passed, selectedFiles });
       serverHealth();
     }
     if (host === 'windows') {

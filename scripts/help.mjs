@@ -221,7 +221,7 @@ Ports    web: --port/EXACT_PORT, else a named store’s port (20000-47999), else
     common: ['verify [ios] [--shots <dir>] [--sim <name>]    done when it says "verify: clean"'],
     flags: [
       DRIVE.find(([flag]) => flag === '--backend <url>'),
-      ['--sim <udid|name> · --duo <udid|name>|none · --variant <name>', 'iOS: which simulator (else EXACT_SIM, a booted iPhone, or the newest Pro) · which iPhone Duo (else the one booted, or the first) · which app.json variant (or EXACT_VARIANT)'],
+      ['--sim <udid|name> · --duo <udid|name>|none · --variant <name>', 'iOS: which simulator (else EXACT_SIM, a booted iPhone, or the newest Pro) · which iPhone Duo (else EXACT_DUO, .exact/duo, the Phone leg\'s Duo, the sole booted Duo or sole booted with the app installed, or the sole available Duo on iOS 27.1+; never guesses among several; none skips) · which app.json variant (or EXACT_VARIANT)'],
       ['--shots <dir>', 'also copy every screenshot it captured there, named as in .exact/verify/ (a test\'s own `screenshot` steps too)'],
       ['--rescroll · --strict · --json', 'ios: measure scrolling again though nothing it depends on changed · exit 1 on any counted problem (for CI) · the report as one JSON object (ios: `scrolling`, each finding\'s metric, value, UIKit\'s and remedy)'],
     ],
@@ -244,7 +244,7 @@ Large    each of those screens again at the largest text size (ios: the simulato
          projects into its navigation bar and its tab bar. A smaller or fixed font is the tell, as is a line-clamp
          in a list's row or hyphens="auto" on several words (a UILabel hyphenates only a word longer
          than its line; grouped list rows hyphenate as cells do). Counted ("3 at the largest text size"), never failing.
-Duo      ios: the tests again on an iPhone Duo, where there is one; the first screen and each test's end in its poses, and with the keyboard up.
+Duo      ios: by default runs the tests again on an unambiguous existing iPhone Duo simulator (iOS 27.1+): boots it headless by default if shut down, installs the development build on it and runs with scratch app data, folds and turns it through its poses and keyboard check, restores its keyboard setting and flat pose, shuts it down if this run booted it, and leaves .exact/simulator unchanged. Skips with a note when none or several match; --duo <udid|name> remembers in .exact/duo; --duo none (or EXACT_DUO=none) skips.
 Native   windows: headless at app.json's window size, then the desktop's window (windows-window.png); android: the APK, light and dark. Neither checks, reads the accessibility tree or the largest text, or scrolls yet.
 Scroll   ios: ~15 s of real touches on a long first-screen list, once per build (host/apple/feel): "like UIKit", or
          a counted finding per metric the app can fix; Exact's own one uncounted line; load > cores: physics only.

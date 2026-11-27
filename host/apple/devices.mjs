@@ -35,10 +35,13 @@ export function isTargetPlatformRuntime(runtime, tv = false) {
 
 /** Resolve an explicit `--sim` / `EXACT_SIM` query: exact UDID, exact name, else
  * unambiguous case-insensitive substring strictly within the target platform's runtimes. */
-export function matchSimulatorQuery(all, pick, { tv = false } = {}) {
+export function matchSimulatorQuery(all, pick, { tv = false, exactUdid = false } = {}) {
   if (!pick) return null;
-  const exact = all.find((d) => d.udid === pick || d.name === pick);
-  if (exact) return { dev: exact, matchedBySubstring: false };
+  const byUdid = all.find((d) => d.udid === pick);
+  if (byUdid) return { dev: byUdid, matchedBySubstring: false };
+  if (exactUdid) throw new Error(`no ${tv ? 'tvOS' : 'iOS'} simulator with udid "${pick}" (xcrun simctl list devices available)`);
+  const byName = all.find((d) => d.name === pick);
+  if (byName) return { dev: byName, matchedBySubstring: false };
   const query = String(pick).trim().toLowerCase();
   const scoped = all.filter((d) => isTargetPlatformRuntime(d.runtime, tv));
   const matches = scoped.filter((d) => d.name.toLowerCase().includes(query) || d.udid.toLowerCase().startsWith(query));
@@ -498,6 +501,21 @@ export function simulator(pick = process.env.EXACT_SIM, options = {}) {
     throw error;
   }
 }
+
+/** Async counterpart to [simulator]: runs `simctl boot` and `bootstatus` asynchronously so SIGINT/SIGTERM
+ *  cancels a stalled boot immediately, and invokes `onBooted` / `onShutdown` as ownership changes. */
+export async function simulatorAsync(pick = process.env.EXACT_SIM, options = {}) {
+  const dev = chooseSimulator(pick, options);
+  const retryBoot = options.cached && evictedBoots.delete(dev.udid);
+  try {
+    const booted = await bootSimulatorAsync(dev, retryBoot, options);
+    if (options.cached) dev.state = 'Booted';
+    return { ...booted };
+  } catch (error) {
+    if (options.cached) forgetSimulator(dev.udid);
+    throw error;
+  }
+}
 const driveSimulators = new Map();
 const evictedBoots = new Set();
 /** A failed launch may mean the device shut down. The next launch must ask simctl again. */
@@ -521,8 +539,8 @@ let chosenFrom = null;
 const recentSimulators = () => (chosenFrom && Date.now() - chosenFrom.at < 5000 ? chosenFrom : chosenFrom = { at: Date.now(), all: simulators() }).all;
 /** `simulator`'s choice, booting nothing: what a drive locks before it launches (agent.mjs `resolveDevice`).
  * `cached` keeps that choice for the runner's later launches, including a test's reloads. */
-export function chooseSimulator(pick = process.env.EXACT_SIM, { tv = false, hint = 'EXACT_SIM=<udid|name>', app, dir, cached = false, rememberChoice = true } = {}) {
-  const key = pick => JSON.stringify([pick, tv, app, dir]);
+export function chooseSimulator(pick = process.env.EXACT_SIM, { tv = false, hint = 'EXACT_SIM=<udid|name>', app, dir, cached = false, rememberChoice = true, exactUdid = false } = {}) {
+  const key = pick => JSON.stringify([pick, tv, app, dir, exactUdid]);
   const used = dir ? resolve(dir, '.exact', tv ? 'simulator-tv' : 'simulator') : null;
   const lastUsed = () => { try { return used && readFileSync(used, 'utf8').trim(); } catch { return null; } };
   const remember = (dev, last) => {
@@ -536,7 +554,7 @@ export function chooseSimulator(pick = process.env.EXACT_SIM, { tv = false, hint
   const all = recentSimulators();
   const kind = (d) => d.type || d.name.replaceAll(' ', '-');
   const iphones = all.filter((d) => (tv ? /SimRuntime\.tvOS/.test(d.runtime) && /^Apple-TV/.test(kind(d)) : /SimRuntime\.iOS/.test(d.runtime) && /^iPhone/.test(kind(d)))).sort((a, b) => compareRuntimeVersionDesc(a.runtime, b.runtime) || a.name.localeCompare(b.name));
-  const matched = pick ? matchSimulatorQuery(all, pick, { tv }) : null;
+  const matched = pick ? matchSimulatorQuery(all, pick, { tv, exactUdid }) : null;
   let dev = matched?.dev ?? null;
   if (matched?.matchedBySubstring) console.error(`simulator: "${pick}" matched ${dev.name} (${formatRuntime(dev.runtime)}, ${dev.udid})`);
   // Several booted: whose is which is not this process's to guess (an install onto another drive's simulator,
@@ -567,16 +585,69 @@ function bootSimulator(dev, retryBoot) {
   // Booted is a boot finished (Booting is its own state): only another waits, which costs a booted one 0.2–0.5 s.
   if (dev.state === 'Booted') return dev;
   chosenFrom = null;
-  const b = read('xcrun', ['simctl', 'boot', dev.udid]);
+  const b = read('xcrun', ['simctl', 'boot', dev.udid], { timeout: 120_000 });
   if (b.status !== 0 && !/current state: Booted/.test(b.stderr)) {
-    const error = new Error('simctl boot: ' + b.stderr);
+    const error = new Error('simctl boot: ' + (b.stderr || b.error?.message || 'failed'));
     if (retryBoot) error.retrySimulator = true;
     throw error;
   }
-  const s = read('xcrun', ['simctl', 'bootstatus', dev.udid, '-b']);
+  const s = read('xcrun', ['simctl', 'bootstatus', dev.udid, '-b'], { timeout: 120_000 });
   // A simulator this call booted is not left running when its boot does not finish.
-  if (s.status !== 0) { if (b.status === 0) read('xcrun', ['simctl', 'shutdown', dev.udid]); throw new Error('simctl bootstatus: ' + s.stderr); }
+  if (s.status !== 0) { if (b.status === 0) read('xcrun', ['simctl', 'shutdown', dev.udid], { timeout: 15_000 }); throw new Error('simctl bootstatus: ' + (s.stderr || s.error?.message || 'failed')); }
   return b.status === 0 ? { ...dev, bootedHere: true } : dev;
+}
+
+function runCommandAsync(cmd, args, { timeoutMs = 120_000, signal } = {}) {
+  useXcode();
+  return new Promise((done) => {
+    if (signal?.aborted) return done({ status: null, stdout: '', stderr: 'aborted' });
+    const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '', stderr = '', finished = false;
+    const settle = (result) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      done(result);
+    };
+    const kill = (why, immediate = false) => {
+      stderr = stderr || why;
+      try { child.kill(immediate ? 'SIGKILL' : 'SIGTERM'); } catch {}
+      if (!immediate) setTimeout(() => { try { child.kill('SIGKILL'); } catch {} }, 500).unref();
+    };
+    const onAbort = () => kill('aborted', signal?.reason === 'exit');
+    signal?.addEventListener('abort', onAbort, { once: true });
+    const timer = setTimeout(() => kill(`timed out after ${timeoutMs} ms`), timeoutMs);
+    timer.unref?.();
+    child.stdout.on('data', (d) => { stdout += d; });
+    child.stderr.on('data', (d) => { stderr += d; });
+    child.on('error', (e) => settle({ status: null, stdout, stderr: e.message }));
+    child.on('close', (status) => settle({ status, stdout, stderr }));
+  });
+}
+
+async function bootSimulatorAsync(dev, retryBoot, { timeoutMs = 120_000, onBootStart, onBootCleared, onBooted, onShutdown, signal } = {}) {
+  if (dev.state === 'Booted') return dev;
+  chosenFrom = null;
+  onBootStart?.();
+  const b = await runCommandAsync('xcrun', ['simctl', 'boot', dev.udid], { timeoutMs, signal });
+  if (b.status !== 0 && !/current state: Booted/.test(b.stderr)) {
+    if (!signal?.aborted) onBootCleared?.();
+    const error = new Error('simctl boot: ' + (b.stderr || 'failed'));
+    if (retryBoot) error.retrySimulator = true;
+    throw error;
+  }
+  const bootedHere = b.status === 0;
+  if (bootedHere) onBooted?.(); else onBootCleared?.();
+  const s = await runCommandAsync('xcrun', ['simctl', 'bootstatus', dev.udid, '-b'], { timeoutMs, signal });
+  if (s.status !== 0) {
+    if (bootedHere) {
+      const down = read('xcrun', ['simctl', 'shutdown', dev.udid], { timeout: 15_000 });
+      if (down.status === 0) onShutdown?.();
+    }
+    throw new Error('simctl bootstatus: ' + (s.stderr || 'failed'));
+  }
+  return bootedHere ? { ...dev, bootedHere: true } : dev;
 }
 
 /** Bring Simulator.app up showing `dev`, so a person watching sees what is
@@ -695,13 +766,13 @@ export function softwareKeyboard(udid, { owned = false, records = resolve(homedi
   writeFileSync(record, JSON.stringify({ pid: process.pid, value: 1 }));
   if (defaults('delete').status !== 0) { rmSync(record, { force: true }); return { cleared: false, note: 'the simulator\'s software keyboard is minimized and could not be shown (simctl spawn defaults delete failed)', restore() {} }; }
   let restored = false;
-  return { cleared: true, note: null, restore() { if (!restored) restored = putBack(); } };
+  return { cleared: true, note: null, restore() { if (!restored) restored = putBack(); return restored; } };
 }
 const saidKeyboard = new Set(); // the hidden keyboard's note, once a process: a smoke or verify opens many sessions
 /** `open()`'s carrier with the software keyboard shown for a focused field on a simulator this drive booted
  *  (`softwareKeyboard`), its setting put back when the drive closes, fails to open, or the driver exits (a killed
  *  drive's, by the next drive on that simulator); on any other simulator, the note that the keyboard may be hidden. */
-export async function withSoftwareKeyboard(dev, open, { records = resolve(homedir(), '.cache/exact/simulator-keyboard') } = {}) {
+export async function withSoftwareKeyboard(dev, open, { records = resolve(homedir(), '.cache/exact/simulator-keyboard'), strictRestore = false } = {}) {
   // On a simulator another booted the setting is only read, for the note: beside the launch, not before it (~0.2 s).
   if (!dev.bootedHere) {
     const record = resolve(records, `${dev.udid}.json`);
@@ -731,13 +802,18 @@ export async function withSoftwareKeyboard(dev, open, { records = resolve(homedi
   if (keyboard.note && !saidKeyboard.has(dev.udid)) { saidKeyboard.add(dev.udid); console.error(`note: ${keyboard.note}`); }
   const restore = () => keyboard.restore();
   process.once('exit', restore);
-  const done = () => { restore(); process.off('exit', restore); };
+  const done = () => { const ok = restore(); process.off('exit', restore); return ok; };
   let carrier;
   try { carrier = await open(); } catch (e) { done(); throw e; }
   if (!keyboard.cleared) { done(); return carrier; }
   const close = carrier.close.bind(carrier);
   carrier.restoreSync = done;
-  carrier.close = async (...args) => { try { return await close(...args); } finally { done(); } };
+  carrier.close = async (...args) => {
+    let failed = false;
+    try { return await close(...args); }
+    catch (e) { failed = true; throw e; }
+    finally { const ok = done(); if (strictRestore && !ok && !failed) throw new Error('simctl spawn defaults write failed'); }
+  };
   return carrier;
 }
 const pidAlive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };

@@ -1,12 +1,12 @@
 // `verify ios` on an iPhone Duo (LLP 1188 D4): the app's tests run once more on a Duo simulator, closed and upright, where the
 // app is as wide as a phone's, and its first screen and each test's end are checked closed, open and half open, then closed
 // with the keyboard up on the lowest field, where one rises.
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { simulator, simulators, withSoftwareKeyboard } from '../host/apple/devices.mjs';
+import { formatRuntime, simulatorAsync, simulators, withSoftwareKeyboard } from '../host/apple/devices.mjs';
 import { simulatorDisplay } from './agent-launch.mjs';
 import { whenEnded } from './app-server.mjs';
 import { hasSimulatorHinge, hingeHelper } from './duo/hinge.mjs';
@@ -16,16 +16,67 @@ import { FIRST } from './verify-findings.mjs';
 const POSES = [['closed', 0], ['open', 180], ['half open', 130]];
 const firstLine = (e) => e.message.split('\n')[0];
 
-/** The Duo to read: `pick` (`--duo`, a udid or a name), else the one that is booted, else the first there is. Which of
- *  several is this run's to use is not its to guess. `{ dev }`, or `{ why }` there is none. */
-export function chooseDuo(pick, all = simulators()) {
-  const duos = all.filter(hasSimulatorHinge), booted = duos.filter((d) => d.state === 'Booted');
-  const named = duos.filter((d) => d.udid === pick || d.name === pick);
-  const several = (some, why) => ({ why: `${some.length} iPhone Duo simulators are ${why} (${some.map((d) => `${d.name} ${d.udid}`).join(', ')}): name one with --duo <udid>` });
-  if (pick && named.length > 1) return several(named, `named ${pick}`);
-  if (!pick && booted.length > 1) return several(booted, 'booted');
-  const dev = pick ? named[0] : booted[0] ?? duos[0];
-  return dev ? { dev } : { why: `no iPhone Duo simulator ${pick ?? 'here (with the iOS 27.1 runtime: xcrun simctl create "iPhone Duo" "iPhone Duo")'}` };
+const duoFile = (dir) => resolve(dir, '.exact', 'duo');
+const readRememberedDuo = (dir) => {
+  try { return readFileSync(duoFile(dir), 'utf8').trim() || null; } catch { return null; }
+};
+export function rememberDuo(dir, udid) {
+  try {
+    const file = duoFile(dir);
+    mkdirSync(resolve(dir, '.exact'), { recursive: true });
+    writeFileSync(file, `${udid}\n`);
+  } catch { /* remembered next time, if it can be */ }
+}
+
+/** Whether `dev` is an iPhone Duo simulator on an iOS 27.1 or newer runtime. */
+export function isDuoCandidate(dev) {
+  if (!hasSimulatorHinge(dev) || typeof dev.runtime !== 'string') return false;
+  const m = /SimRuntime\.iOS-(\d+)-(\d+)(?:-\d+)?(?:-|$)/.exec(dev.runtime);
+  if (!m) return false;
+  const major = Number(m[1]), minor = Number(m[2]);
+  return major > 27 || (major === 27 && minor >= 1);
+}
+
+const describeDuo = (d) => (d.runtime ? `${d.name} (${formatRuntime(d.runtime)}, ${d.udid})` : `${d.name} ${d.udid}`);
+const defaultHasApp = (udid, app) => spawnSync('xcrun', ['simctl', 'get_app_container', udid, app], { stdio: 'ignore' }).status === 0;
+const defaultShutdown = (udid) => execFileSync('xcrun', ['simctl', 'shutdown', udid], { stdio: 'pipe', timeout: 15_000 });
+
+/** The Duo to read (LLP 1188 D4): `pick` (`--duo` or `EXACT_DUO`, exact udid before name), else `.exact/duo`, else the
+ *  phone leg's own simulator if it is a Duo, else the sole booted Duo (or sole booted with `app` installed), else the
+ *  sole available Duo on iOS 27.1+. Never guesses among several shut-down Duos. Returns `{ dev, ... }` or `{ why, ... }`. */
+export function chooseDuo(pick, all = simulators(), { app, dir, phoneUdid, hasApp = defaultHasApp, rememberedUdid } = {}) {
+  const duos = all.filter(isDuoCandidate), booted = duos.filter((d) => d.state === 'Booted');
+  const several = (some, why) => ({
+    why: `${some.length} iPhone Duo simulators are ${why} (${some.map(describeDuo).join(', ')}): name one with --duo <udid> or EXACT_DUO, or skip with --duo none`,
+  });
+  if (pick) {
+    const byUdid = duos.find((d) => d.udid === pick);
+    if (byUdid) return { dev: byUdid, explicit: true };
+    const named = duos.filter((d) => d.name === pick);
+    if (named.length > 1) return several(named, `named ${pick}`);
+    return named[0] ? { dev: named[0], explicit: true } : { why: `no iPhone Duo simulator ${pick}` };
+  }
+  let staleNote = null;
+  const saved = rememberedUdid ?? (dir ? readRememberedDuo(dir) : null);
+  if (saved) {
+    const found = duos.find((d) => d.udid === saved);
+    if (found) return { dev: found, reason: 'remembered' };
+    staleNote = `remembered iPhone Duo ${saved} (.exact/duo) is no longer available`;
+  }
+  const withNote = (res) => (staleNote ? { ...res, note: staleNote } : res);
+  if (phoneUdid) {
+    const found = duos.find((d) => d.udid === phoneUdid);
+    if (found) return withNote({ dev: found, reason: 'same as phone leg' });
+  }
+  if (!duos.length) return withNote({ why: 'no iPhone Duo simulator here (with the iOS 27.1 runtime: xcrun simctl create "iPhone Duo" "iPhone Duo")' });
+  if (booted.length === 1) return withNote({ dev: booted[0] });
+  if (booted.length > 1) {
+    const installed = app ? booted.filter((d) => hasApp(d.udid, app)) : [];
+    if (installed.length === 1) return withNote({ dev: installed[0], reason: `has ${app} installed` });
+    return withNote(several(booted, 'booted'));
+  }
+  if (duos.length === 1) return withNote({ dev: duos[0] });
+  return withNote(several(duos, 'available'));
 }
 
 /** Whether `rot` (`layout simulatorRotation`) already confirms the Duo is closed, upright, and settled. */
@@ -102,40 +153,76 @@ export async function readPoses(s, check, { runs, notes }) {
   return { atClosed: true };
 }
 
-const remembers = (path) => (existsSync(path) ? readFileSync(path, 'utf8') : null);
+/** Resolve the Duo once per `verify ios` run: logs any stale `.exact/duo` note once and persists `.exact/duo`
+ *  only when `remember` (`--duo` flag) was explicitly given. */
+export function resolveDuoChoice({ pick, app, dir, phoneUdid, remember = false, all, hasApp } = {}) {
+  let chosen;
+  try { chosen = chooseDuo(pick, all, { app, dir, phoneUdid, hasApp }); } catch (e) { return { why: firstLine(e) }; }
+  if (chosen.note) console.error(`verify ios: ${chosen.note}`);
+  if (chosen.dev && remember && dir && chosen.explicit) rememberDuo(dir, chosen.dev.udid);
+  return chosen;
+}
+
+const diagnosticTail = (stderr, maxLines = 8, maxChars = 800) => {
+  const lines = String(stderr ?? '').trim().split('\n').filter(Boolean);
+  if (!lines.length) return null;
+  const tail = lines.slice(-maxLines).join(' | ');
+  return tail.length > maxChars ? tail.slice(tail.length - maxChars) : tail;
+};
 
 /** The leg: `{ device, runs, failed, notes }`, with `error` where it ended early, or `{ why }` there is no Duo to read. `drive`
  *  opens the first screen, then runs the tests: it calls `atScreen(s, name, skip)` on each screen (`skip`: why it is not read, if
  *  it is not), and `atResult` with each test that failed only here, or null. */
-export async function duoLeg({ pick, check, drive, remembered }) {
-  let chosen;
-  try { chosen = chooseDuo(pick); } catch (e) { return { why: firstLine(e) }; }
+export async function duoLeg({
+  pick, app, dir, phoneUdid, remember = false, chosen: preChosen = null,
+  check, drive, announce = true,
+  boot = simulatorAsync, keyboardHelper = withSoftwareKeyboard, hingeFactory = hingeHelper, shutdown = defaultShutdown,
+}) {
+  const chosen = preChosen ?? resolveDuoChoice({ pick, app, dir, phoneUdid, remember });
   if (!chosen.dev) return chosen;
-  const { udid, name: device } = chosen.dev, out = { device, runs: [], failed: [], notes: [] }, said = process.env.EXACT_SIM, prevNoRemember = process.env.EXACT_SIM_NO_REMEMBER;
+  const { udid, name: device } = chosen.dev, out = { device, runs: [], failed: [], notes: [] };
+  const said = process.env.EXACT_SIM, prevNoRemember = process.env.EXACT_SIM_NO_REMEMBER, prevShow = process.env.EXACT_SHOW_SIMULATOR;
+  if (announce) {
+    const action = chosen.dev.state === 'Booted' ? 'already booted' : 'booting and shutting down after';
+    const why = chosen.reason ? `, ${chosen.reason}` : '';
+    console.error(`verify ios: driving iPhone Duo ${device} (${udid}; ${action}${why}; --duo none skips)`);
+  }
   const attempt = async (what, fn) => { try { await fn(); } catch (e) { out.notes.push(`${what}: ${firstLine(e)}`); } };
-  let used, dir, dev, keyboard, hinge;
-  let unfolded = false, restoredKeyboard = false, shutDown = false, restoredChoice = false, removedDir = false;
+  let dirTmp, dev, keyboard, hinge;
+  let bootAttempted = false, ownedBoot = false, unfolded = false, restoredKeyboard = false, shutDown = false, removedDir = false;
+  const bootAbort = new AbortController();
   // Closed and upright, as each test starts
   const start = () => simulatorDisplay(udid, () => { hinge('orient', 'portrait'); hinge('fold', 0); });
   // Best-effort synchronous cleanup if the process receives SIGINT/SIGTERM before async teardown finishes.
   const forgetEnd = whenEnded(() => {
+    try { bootAbort.abort('exit'); } catch {}
     try { if (!unfolded && hinge) { unfolded = true; hinge('fold', 180); } } catch {}
     // Restore the software-keyboard preference while the simulator is still booted.
     try { if (!restoredKeyboard && keyboard?.restoreSync) { restoredKeyboard = true; keyboard.restoreSync(); } } catch {}
-    try { if (!shutDown && dev?.bootedHere) { shutDown = true; execFileSync('xcrun', ['simctl', 'shutdown', udid], { stdio: 'pipe' }); } } catch {}
-    try { if (!restoredChoice && dev && remembers(remembered)?.trim() === udid) { restoredChoice = true; if (used == null) rmSync(remembered); else writeFileSync(remembered, used); } } catch {}
-    try { if (!removedDir && dir) { removedDir = true; rmSync(dir, { recursive: true, force: true }); } } catch {}
+    try { if (!shutDown && (dev?.bootedHere || ownedBoot || bootAttempted)) { shutDown = true; shutdown(udid); } } catch {}
+    try { if (!removedDir && dirTmp) { removedDir = true; rmSync(dirTmp, { recursive: true, force: true }); } } catch {}
   });
   try {
     try {
-      used = remembers(remembered);
-      dir = mkdtempSync(resolve(tmpdir(), 'exact-duo-'));
-      dev = simulator(udid, { rememberChoice: false });
+      dirTmp = mkdtempSync(resolve(tmpdir(), 'exact-duo-'));
+      dev = await boot(udid, {
+        rememberChoice: false,
+        exactUdid: true,
+        signal: bootAbort.signal,
+        onBootStart: () => { bootAttempted = true; },
+        onBootCleared: () => { bootAttempted = false; },
+        onBooted: () => { ownedBoot = true; bootAttempted = false; },
+        onShutdown: () => { ownedBoot = false; bootAttempted = false; shutDown = true; },
+      });
+      if (dev?.bootedHere) ownedBoot = true;
+      // Use the actual boot outcome (not the earlier discovery snapshot) so a Duo booted here stays headless by default,
+      // while preserving any explicit `EXACT_SHOW_SIMULATOR` setting from the caller.
+      if (ownedBoot && prevShow === undefined) process.env.EXACT_SHOW_SIMULATOR = '0';
       process.env.EXACT_SIM = udid;
       process.env.EXACT_SIM_NO_REMEMBER = '1';
       // Booted here, so its keyboard is the leg's to show, as a drive's that booted it is
-      keyboard = await withSoftwareKeyboard(dev, async () => ({ close() {} }));
-      hinge = hingeHelper(udid, dir);
+      keyboard = await keyboardHelper(dev, async () => ({ close() {} }), { strictRestore: true });
+      hinge = hingeFactory(udid, dirTmp);
       await start();
       await drive({
         atScreen: async (s, name, skip) => {
@@ -155,56 +242,76 @@ export async function duoLeg({ pick, check, drive, remembered }) {
     } catch (e) { out.error ??= firstLine(e); }
     if (said === undefined) delete process.env.EXACT_SIM; else process.env.EXACT_SIM = said;
     if (prevNoRemember === undefined) delete process.env.EXACT_SIM_NO_REMEMBER; else process.env.EXACT_SIM_NO_REMEMBER = prevNoRemember;
-    // As they were: flat, not running, and the app's own choice of simulator (devices.mjs `chooseSimulator`), or what another
-    // run has made it. Keep `forgetEnd` registered until every step completes.
+    if (prevShow === undefined) delete process.env.EXACT_SHOW_SIMULATOR; else process.env.EXACT_SHOW_SIMULATOR = prevShow;
+    // As they were: flat, keyboard setting restored, and shut down if this run booted it.
+    // `.exact/simulator` was never written (EXACT_SIM_NO_REMEMBER=1 + rememberChoice:false), so another drive's selection is untouched.
     await attempt(`${device} was left folded`, async () => { if (!unfolded && hinge) { await simulatorDisplay(udid, () => hinge('fold', 180)); unfolded = true; } });
     await attempt(`${device}'s keyboard setting was not put back`, async () => { if (!restoredKeyboard && keyboard) { await keyboard.close(); restoredKeyboard = true; } });
-    await attempt(`${device} was left running`, () => { if (!shutDown && dev?.bootedHere) { execFileSync('xcrun', ['simctl', 'shutdown', udid], { stdio: 'pipe' }); shutDown = true; } });
-    await attempt('the app\'s simulator was not put back', () => {
-      if (!restoredChoice && dev && remembers(remembered)?.trim() === udid) { if (used == null) rmSync(remembered); else writeFileSync(remembered, used); }
-      restoredChoice = true;
+    await attempt(`${device} was left running`, () => { if (!shutDown && (dev?.bootedHere || ownedBoot)) { shutdown(udid); shutDown = true; } });
+    await attempt('the Duo scratch directory could not be removed', () => {
+      if (!removedDir && dirTmp) { rmSync(dirTmp, { recursive: true, force: true }); removedDir = true; }
     });
-    if (!removedDir && dir) { rmSync(dir, { recursive: true, force: true }); removedDir = true; }
   } finally { forgetEnd(); }
   return out;
 }
 
 /** Run the iPhone Duo leg in a separate child process in parallel with the Phone leg when no owned server is running
  *  and Phone and Duo are distinct simulators. Returns `null` when the caller should fall back to sequential `onDuo`,
- *  or `{ device, promise, stop }`. */
-export function startParallelDuo({ app, pick, shots, selectedFiles = null, accept = [], phoneUdid = null }) {
-  let chosen;
-  try { chosen = chooseDuo(pick); } catch (e) { return { device: null, promise: Promise.resolve({ why: firstLine(e) }), stop() {} }; }
+ *  or `{ device, udid, promise, stop }`. */
+export function startParallelDuo({ app, pick, remember = false, chosen: preChosen = null, shots, selectedFiles = null, accept = [], phoneUdid = null }) {
+  const chosen = preChosen ?? resolveDuoChoice({ pick, app: app.id, dir: app.dir, phoneUdid, remember });
   if (!chosen.dev) return { device: null, promise: Promise.resolve(chosen), stop() {} };
   if (!phoneUdid || chosen.dev.udid === phoneUdid) return null;
+  const action = chosen.dev.state === 'Booted' ? 'already booted' : 'booting and shutting down after';
+  const why = chosen.reason ? `, ${chosen.reason}` : '';
+  console.error(`verify ios: running iPhone Duo leg in parallel on ${chosen.dev.name} (${chosen.dev.udid}; ${action}${why}; --duo none skips)`);
   const work = mkdtempSync(resolve(tmpdir(), 'exact-duo-worker-'));
+  let cleaned = false;
+  const cleanWork = () => {
+    if (cleaned) return;
+    try { rmSync(work, { recursive: true, force: true }); cleaned = true; } catch {}
+  };
+  let child;
   const cfgPath = resolve(work, 'config.json'), outPath = resolve(work, 'result.json');
-  mkdirSync(shots, { recursive: true });
-  writeFileSync(cfgPath, JSON.stringify({ appSelector: app.selector, appDir: app.dir, pick: chosen.dev.udid, shots, selectedFiles, accept }));
-  const workerScript = fileURLToPath(import.meta.url);
-  const child = spawn(process.execPath, [workerScript, '--worker', cfgPath, '--out', outPath], {
-    env: { ...process.env, EXACT_SIM: chosen.dev.udid, EXACT_SIM_NO_REMEMBER: '1', EXACT_APP_DIR: app.dir },
-    stdio: ['ignore', 'ignore', 'pipe'],
-  });
+  try {
+    mkdirSync(shots, { recursive: true });
+    // Pass the resolved device directly so the worker never re-resolves the UDID as a name query.
+    const pinned = { dev: { udid: chosen.dev.udid, name: chosen.dev.name, state: chosen.dev.state } };
+    writeFileSync(cfgPath, JSON.stringify({ appSelector: app.selector, appDir: app.dir, chosen: pinned, shots, selectedFiles, accept }));
+    const workerScript = fileURLToPath(import.meta.url);
+    const env = { ...process.env, EXACT_SIM: chosen.dev.udid, EXACT_SIM_NO_REMEMBER: '1', EXACT_APP_DIR: app.dir };
+    child = spawn(process.execPath, [workerScript, '--worker', cfgPath, '--out', outPath], {
+      env,
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+  } catch (e) {
+    cleanWork();
+    throw e;
+  }
   let stderr = '';
   child.stderr.on('data', (chunk) => { stderr += String(chunk); });
   const stop = () => {
     try { if (child.exitCode == null && child.signalCode == null) child.kill('SIGTERM'); } catch {}
+    cleanWork();
   };
   const forget = whenEnded(stop);
   const promise = new Promise((done) => {
     child.on('error', (e) => {
       forget();
-      rmSync(work, { recursive: true, force: true });
+      cleanWork();
       done({ device: chosen.dev.name, runs: [], failed: [], notes: [], error: firstLine(e) });
     });
     child.on('close', (code, signal) => {
       forget();
       let duo = null;
       try { if (existsSync(outPath)) duo = JSON.parse(readFileSync(outPath, 'utf8')).duo; } catch {}
-      rmSync(work, { recursive: true, force: true });
-      if (duo) return done(duo);
-      const why = stderr.trim().split('\n').filter(Boolean).at(-1) ?? (signal ? `worker killed (${signal})` : `worker exited ${code}`);
+      cleanWork();
+      if (duo) {
+        const lines = stderr.trim().split('\n').filter(Boolean);
+        if (lines.length) process.stderr.write(`${lines.slice(-20).join('\n')}\n`);
+        return done(duo);
+      }
+      const why = diagnosticTail(stderr) ?? (signal ? `worker killed (${signal})` : `worker exited ${code}`);
       done({ device: chosen.dev.name, runs: [], failed: [], notes: [], error: why });
     });
   });
@@ -240,7 +347,7 @@ async function workerMain(argv) {
         atResult: (t) => atResult(t.failures.length ? { name: t.name, file: label, index: t.index, failures: t.failures } : null) });
     }
   };
-  const duo = await duoLeg({ pick: cfg.pick, check, drive, remembered: resolve(cfg.appDir, '.exact', 'simulator') });
+  const duo = await duoLeg({ chosen: cfg.chosen, check, drive, announce: false });
   const tmp = `${outPath}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify({ duo }));
   renameSync(tmp, outPath);
