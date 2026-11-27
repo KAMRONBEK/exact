@@ -1,5 +1,25 @@
 //! Sheet detent parsing and content-height ceiling resolution (LLP 1075.003 §9.11, §9.13).
 
+use exact_kernel::PropId;
+
+/// The room a sheet's drag handle takes at its top, points: Material's
+/// handle, 4 tall with 22 above and below.
+pub const SHEET_HANDLE: f32 = 48.0;
+pub(crate) fn sheet_handle(route: &exact_kernel::NodeRef<'_>) -> f32 {
+    if route.props.str(PropId::NavigationGrabber) == Some("hidden") {
+        0.0
+    } else {
+        SHEET_HANDLE
+    }
+}
+/// Material 3's widest sheet.
+const SHEET_MAX_WIDTH: f32 = 640.0;
+/// A centered Material sheet's left margin and width in the page.
+pub(crate) fn sheet_span(page_width: f32) -> (f32, f32) {
+    let width = page_width.min(SHEET_MAX_WIDTH);
+    ((page_width - width) / 2.0, width)
+}
+
 /// Whether `detent` names `fit-content`.
 pub(super) fn fits(detent: Option<&str>) -> bool {
     detent.is_some_and(|d| d.split_whitespace().any(|w| w == "fit-content"))
@@ -115,4 +135,162 @@ pub(super) fn resolve_stops(
         out.push((vec!["large".to_string()], cap));
     }
     (out, dropped)
+}
+
+/// Unobscured natural and displayed `fit-content` heights for a sheet.
+pub(super) struct FitBounds {
+    pub(super) natural_tallest: f32,
+    pub(super) natural_foot: f32,
+    pub(super) natural_fit: Option<f32>,
+    pub(super) display_fit: Option<f32>,
+}
+
+/// Compute natural (unobscured) and displayed `fit-content` bounds, excluding
+/// both `resizes-content` shrinkage and `overlays-content` IME lift when
+/// comparing preceding stops against a terminal `fit-content` ceiling
+/// (LLP 1075.003 §9.11).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn fit_bounds(
+    h: f32,
+    tallest: f32,
+    status: f32,
+    foot: f32,
+    lift: f32,
+    keyboard_height: f32,
+    window_bottom: Option<(f32, f32)>,
+    measured: Option<f32>,
+) -> FitBounds {
+    let unobscured_h = h + (keyboard_height - lift).max(0.0);
+    let natural_tallest = (unobscured_h - status).max(1.0);
+    let natural_foot = match window_bottom {
+        Some((frame_top, bottom)) => (frame_top + unobscured_h - bottom)
+            .max(0.0)
+            .min(unobscured_h),
+        None => foot,
+    };
+    FitBounds {
+        natural_tallest,
+        natural_foot,
+        natural_fit: measured.map(|c| (c + natural_foot).clamp(1.0, natural_tallest)),
+        display_fit: measured.map(|c| (c + foot.max(lift)).clamp(1.0, tallest)),
+    }
+}
+
+/// Resolved sheet stops plus word tables and `fit-content` index for `sync_stage`.
+pub(super) struct SheetStops {
+    pub(super) heights: Vec<f32>,
+    pub(super) words: Vec<Vec<String>>,
+    pub(super) dropped: Vec<String>,
+    pub(super) fit_idx: Option<usize>,
+    pub(super) fit_pair: Option<(f32, f32)>,
+}
+
+/// Resolve a sheet's stops and `fit-content` bookkeeping for one layout pass.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn resolve_sheet_stops(
+    presents: bool,
+    detent: Option<&str>,
+    h: f32,
+    tallest: f32,
+    status: f32,
+    foot: f32,
+    lift: f32,
+    keyboard_height: f32,
+    window_bottom: Option<(f32, f32)>,
+    measured: Option<f32>,
+) -> SheetStops {
+    let bounds = fit_bounds(
+        h,
+        tallest,
+        status,
+        foot,
+        lift,
+        keyboard_height,
+        window_bottom,
+        measured,
+    );
+    let (stops, dropped) = if presents {
+        resolve_stops(
+            detent,
+            tallest,
+            foot,
+            bounds.natural_tallest,
+            bounds.natural_foot,
+            bounds.natural_fit.unwrap_or(bounds.natural_tallest),
+            bounds.display_fit.unwrap_or(tallest),
+        )
+    } else {
+        (vec![(vec!["large".to_string()], h)], Vec::new())
+    };
+    let words: Vec<Vec<String>> = stops.iter().map(|(w, _)| w.clone()).collect();
+    let heights: Vec<f32> = stops.iter().map(|(_, v)| *v).collect();
+    let fit_idx = words
+        .iter()
+        .position(|ws| ws.iter().any(|w| w == "fit-content"));
+    SheetStops {
+        heights,
+        words,
+        dropped,
+        fit_idx,
+        fit_pair: bounds.natural_fit.zip(bounds.display_fit),
+    }
+}
+
+/// Choose the initial resting detent index for a newly presented sheet.
+pub(super) fn initial_rest(
+    initial: Option<&str>,
+    words: &[Vec<String>],
+    dropped: &[String],
+    fit_idx: Option<usize>,
+    keyboard: bool,
+) -> usize {
+    let at = match initial.filter(|s| !s.is_empty()) {
+        Some(word) => words
+            .iter()
+            .position(|ws| ws.iter().any(|w| w == word))
+            .or_else(|| {
+                dropped
+                    .iter()
+                    .any(|w| w == word)
+                    .then_some(fit_idx)
+                    .flatten()
+            })
+            .unwrap_or(0),
+        None => 0,
+    };
+    match keyboard && fit_idx != Some(at) {
+        true => words.len() - 1,
+        false => at,
+    }
+}
+
+/// Reconcile an existing sheet's active detent index when its stops, keyboard
+/// state, or measured `fit-content` height changes.
+pub(super) fn reconcile_index(
+    current_at: usize,
+    prev_words: Option<&Vec<String>>,
+    words: &[Vec<String>],
+    dropped: &[String],
+    fit_idx: Option<usize>,
+    keyboard: bool,
+) -> usize {
+    let was_fit = prev_words.is_some_and(|ws| ws.iter().any(|w| w == "fit-content"));
+    if keyboard && !was_fit {
+        words.len() - 1
+    } else if was_fit {
+        fit_idx.unwrap_or_else(|| current_at.min(words.len() - 1))
+    } else if let Some(pws) = prev_words {
+        words
+            .iter()
+            .position(|ws| ws.iter().any(|w| pws.iter().any(|p| p == w)))
+            .or_else(|| {
+                pws.iter()
+                    .any(|p| dropped.iter().any(|d| d == p))
+                    .then_some(fit_idx)
+                    .flatten()
+            })
+            .unwrap_or_else(|| current_at.min(words.len() - 1))
+    } else {
+        current_at.min(words.len() - 1)
+    }
 }

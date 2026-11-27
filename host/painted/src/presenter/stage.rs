@@ -54,28 +54,14 @@ mod touch;
 mod zoom;
 
 use authored::{Authored, Top};
-use detents::{fits, resolve_stops};
+pub use detents::SHEET_HANDLE;
+use detents::{fits, initial_rest, reconcile_index, resolve_sheet_stops};
+pub(crate) use detents::{sheet_handle, sheet_span};
 use exact_kernel::StyleId;
 
-/// The room a sheet's drag handle takes at its top, points: Material's
-/// handle, 4 tall with 22 above and below.
-pub const SHEET_HANDLE: f32 = 48.0;
-pub(crate) fn sheet_handle(route: &exact_kernel::NodeRef<'_>) -> f32 {
-    if route.props.str(PropId::NavigationGrabber) == Some("hidden") {
-        0.0
-    } else {
-        SHEET_HANDLE
-    }
-}
-/// Material 3's sheet: its widest, its top corners, and its scrim.
-const SHEET_MAX_WIDTH: f32 = 640.0;
+/// Material 3's sheet top corners and scrim.
 const SHEET_CORNER: f32 = 28.0;
 const SCRIM: f32 = 0.32;
-/// A centered Material sheet's left margin and width in the page.
-pub(crate) fn sheet_span(page_width: f32) -> (f32, f32) {
-    let width = page_width.min(SHEET_MAX_WIDTH);
-    ((page_width - width) / 2.0, width)
-}
 
 /// Material's motion: a sheet's entrance (emphasized decelerate), its exit
 /// (emphasized accelerate), a settle between detents, and the shared axis.
@@ -536,72 +522,31 @@ impl<D: DataSource> Presenter<D> {
                 (true, Some(m)) if m.0 == stamp => Some(m),
                 (true, _) => self.fit_content(keys[i]),
             };
-            // Compare preceding stops against unobscured natural height (excluding
-            // both `resizes-content` shrinkage and `overlays-content` IME lift)
-            // while resting `fit-content` above the keyboard (LLP 1075.003 §9.11).
-            let unobscured_h = h + (self.window.keyboard - lift).max(0.0);
-            let natural_tallest = (unobscured_h - status).max(1.0);
-            let natural_foot = match self.window() {
-                Some(w) => {
-                    let frame = self.chrome().frame;
-                    let bottom = w.size.1 - w.bars[2].max(w.cutout[2]);
-                    (frame[1] + unobscured_h - bottom)
-                        .max(0.0)
-                        .min(unobscured_h)
-                }
-                None => foot,
-            };
-            let natural_fit =
-                measured.map(|(_, content)| (content + natural_foot).clamp(1.0, natural_tallest));
-            let display_fit =
-                measured.map(|(_, content)| (content + foot.max(lift)).clamp(1.0, tallest));
-            let said = (
-                detent.clone(),
-                (h, tallest),
-                keyboard,
-                natural_fit.zip(display_fit),
-            );
-            let (stops, dropped) = if presents {
-                resolve_stops(
-                    detent.as_deref(),
-                    tallest,
-                    foot,
-                    natural_tallest,
-                    natural_foot,
-                    natural_fit.unwrap_or(natural_tallest),
-                    display_fit.unwrap_or(tallest),
+            let window_bottom = self.window().map(|w| {
+                (
+                    self.chrome().frame[1],
+                    w.size.1 - w.bars[2].max(w.cutout[2]),
                 )
-            } else {
-                (vec![(vec!["large".to_string()], h)], Vec::new())
-            };
-            let words: Vec<Vec<String>> = stops.iter().map(|(w, _)| w.clone()).collect();
-            let found: Vec<f32> = stops.iter().map(|(_, v)| *v).collect();
-            let fit_idx = words
-                .iter()
-                .position(|ws| ws.iter().any(|w| w == "fit-content"));
-            // While the keyboard is up a sheet rests at its tallest, but
-            // for one resting at `fit-content`, which keeps that height
-            // above the keys (the tallest, where it does not fit there).
-            let rest = || -> usize {
-                let at = match initial.as_deref().filter(|s| !s.is_empty()) {
-                    Some(word) => words
-                        .iter()
-                        .position(|ws| ws.iter().any(|w| w == word))
-                        .or_else(|| {
-                            dropped
-                                .iter()
-                                .any(|w| w == word)
-                                .then_some(fit_idx)
-                                .flatten()
-                        })
-                        .unwrap_or(0),
-                    None => 0,
-                };
-                match keyboard && fit_idx != Some(at) {
-                    true => found.len() - 1,
-                    false => at,
-                }
-            };
+            });
+            let resolved = resolve_sheet_stops(
+                presents,
+                detent.as_deref(),
+                h,
+                tallest,
+                status,
+                foot,
+                lift,
+                self.window.keyboard,
+                window_bottom,
+                measured.map(|(_, content)| content),
+            );
+            let said = (detent.clone(), (h, tallest), keyboard, resolved.fit_pair);
+            let (words, found, dropped, fit_idx) = (
+                resolved.words,
+                resolved.heights,
+                resolved.dropped,
+                resolved.fit_idx,
+            );
             let covered = kinds[i..]
                 .iter()
                 .any(|k| matches!(k, Presented::Over | Presented::Full));
@@ -620,27 +565,14 @@ impl<D: DataSource> Presenter<D> {
                         sheet.top = Glide::still(h - sheet.heights[sheet.at]);
                     }
                     if sheet.said != said {
-                        let prev_words = sheet.words.get(sheet.at);
-                        let was_fit =
-                            prev_words.is_some_and(|ws| ws.iter().any(|w| w == "fit-content"));
-                        sheet.at = if keyboard && !was_fit {
-                            found.len() - 1
-                        } else if was_fit {
-                            fit_idx.unwrap_or_else(|| sheet.at.min(found.len() - 1))
-                        } else if let Some(pws) = prev_words {
-                            words
-                                .iter()
-                                .position(|ws| ws.iter().any(|w| pws.iter().any(|p| p == w)))
-                                .or_else(|| {
-                                    pws.iter()
-                                        .any(|p| dropped.iter().any(|d| d == p))
-                                        .then_some(fit_idx)
-                                        .flatten()
-                                })
-                                .unwrap_or_else(|| sheet.at.min(found.len() - 1))
-                        } else {
-                            sheet.at.min(found.len() - 1)
-                        };
+                        sheet.at = reconcile_index(
+                            sheet.at,
+                            sheet.words.get(sheet.at),
+                            &words,
+                            &dropped,
+                            fit_idx,
+                            keyboard,
+                        );
                         sheet.top = Glide::still(h - found[sheet.at]);
                         sheet.heights = found;
                         sheet.words = words;
@@ -648,7 +580,7 @@ impl<D: DataSource> Presenter<D> {
                     }
                 }
                 None => {
-                    let at = rest();
+                    let at = initial_rest(initial.as_deref(), &words, &dropped, fit_idx, keyboard);
                     let to = h - found[at];
                     let top = match still {
                         true => Glide::still(to),
