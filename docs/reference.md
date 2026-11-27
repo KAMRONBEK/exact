@@ -3135,27 +3135,38 @@ The globals beyond the language are the browser's on the web and these on Hermes
 | `console` | To the runner's logs after each answer and reply, including refused calls; available through the agent's `logs` on native hosts. Each line the app's code logs also goes to the system's log: on Apple the unified log, subsystem the app's bundle identifier, category `console` (`console.debug` at debug level, `console.error` at error, the rest at the default level); on Android logcat, tagged with the app's package name (`adb logcat -s com.example.app`), at the method's priority; and on Linux and Windows standard error, as `console: …`. Every build writes them, where anyone with the device can read them. Outside a drive the web writes it to the browser's console too |
 
 A `net.fetch` line names one origin (`https://api.example.com`), every host
-under one domain (`https://*.example.com`), or a whole scheme, written as CSP
-writes a scheme source: `net.fetch https:` or `net.fetch http:` admits any host
-at any port of that scheme, for a server the person names at run time (a URL
-they type, a local server on a port chosen at launch). `net.websocket` takes an
-origin, a subdomain wildcard (`wss://*.example.com` or `ws://*.example.com`),
-or `wss:`/`ws:` the same way; its scheme is `wss` or `ws`, and a line with
-another (`net.websocket https://example.com`) fails the build. In either family's subdomain wildcard, `*` must
-be the whole leftmost label, the suffix must have at least two labels and
-must not be an IP address, and userinfo, paths, queries and fragments are
-refused (a trailing `/` is allowed). Only hosts strictly under the suffix
-match, at the grant's scheme and port (explicit or the scheme's default);
-the bare suffix and sibling domains do not. A scheme no line names is refused (`wss:`
-does not admit `ws:`). The platform's own refusals still apply: App Transport
+under one domain (`https://*.example.com`), `loopback`, `local-network`, or a
+whole scheme, written as CSP writes a scheme source: `net.fetch https:` or
+`net.fetch http:` admits any host at any port of that scheme, for a server the
+person names at run time. `net.fetch loopback` admits `http:` and `https:` to a
+loopback host (`127.0.0.0/8`, `[::1]`, an IPv4-mapped IPv6 address carrying
+`127.0.0.0/8`, or exact ASCII case-insensitive `localhost` with at most one
+trailing dot) at any port, with no trailing modifier, for a local helper process
+on an ephemeral port (LLP 1016 D6); it requires no `device.local-network` grant
+and sets no Apple Local Network or ATS keys. `net.websocket` takes an origin, a
+subdomain wildcard (`wss://*.example.com` or `ws://*.example.com`), `loopback`
+(`ws:` and `wss:` to the same loopback hosts at any port), `local-network`, or
+`wss:`/`ws:` the same way; its scheme is `wss` or `ws`, and a line with another
+(`net.websocket https://example.com`) fails the build. In either family's
+subdomain wildcard, `*` must be the whole leftmost label, the suffix must have
+at least two labels and must not be an IP address, and userinfo, paths, queries
+and fragments are refused (a trailing `/` is allowed). Only hosts strictly under
+the suffix match, at the grant's scheme and port (explicit or the scheme's
+default); the bare suffix and sibling domains do not. A scheme no line names is
+refused (`wss:` does not admit `ws:`), and `net.fetch loopback` does not admit
+WebSockets or vice versa. The platform's own refusals still apply: App Transport
 Security refuses `http:` beyond the local network unless the platform's
 `appTransportSecurity` in `app.json` (`host.macos`, `host.ios`) sets
 `allowsArbitraryLoads`, which turns it off for every connection the app makes
 and which App Store review asks the app to justify (LLP 1030); a browser
 refuses `ws:` from an `https:` page except to loopback. A render-server page's
-`connect-src` carries the scheme source as written. The render server itself
-doesn't hold a scheme-wide `net.fetch` line: a source that needs one keeps its
-placeholder in the rendered page, and the client fetches it after adoption.
+`connect-src` carries a scheme source as written and expands `loopback` to its
+CSP3-spellable subset (`127.0.0.1:*`, `localhost:*`, and `localhost.:*`) for
+that family's schemes (narrower than the grant, since CSP3 cannot express CIDR
+ranges or bracketed IPv6 literals). The render server itself holds only named
+`net.fetch` origins and subdomains (not `self`, scheme-wide, `local-network`, or
+`loopback` lines): a source that needs one keeps its placeholder in the rendered
+page, and the client fetches it after adoption.
 
 In the browser, a website's `fetch('/_data/page.json')` starts at the base URL's origin root and
 `fetch('data/page.json')` starts at the document base, including a `<base href>`.

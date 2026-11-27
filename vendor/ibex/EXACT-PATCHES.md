@@ -464,18 +464,23 @@ is not a regular file, and creates `.exact-<hex>.partial` beside the target thro
 pinned parent. `publish` syncs it and renames it over the target; a `Staged` dropped
 unpublished removes it. The stub for other platforms refuses. Replay on a refresh.
 
-## Local patch 20, the `local-network` grant source
+## Local patch 20, the `local-network` and `loopback` grant sources
 
-`grant.rs` adds `fetch.local-network` and `websocket.local-network` (exact2 LLP
+`grant.rs` adds `FetchLocalNetwork` / `WebSocketLocalNetwork` (exact2 LLP
 1133.036 D5, ruled 2026-10-26), written `net.fetch local-network` and
-`net.websocket local-network`, with the word `development` for loopback too. It
-admits a host the URL writes as an RFC 1918, link-local or unique-local
-address (an IPv4-mapped IPv6 address by its IPv4), a link-local IPv6 address,
-or a `.local` name; never a name that merely resolves to one, and never the
-cloud metadata service, 169.254.169.254 (its IPv4-mapped spelling included)
-or `fd00:ec2::254`. exact2's `grants` crate holds the same rule, and its
-`tests/parity.rs` holds the two to `host/web/tests/fixtures/grants.json`.
-Replay on a refresh.
+`net.websocket local-network`, with the word `development` for loopback too,
+and `FetchLoopback` / `WebSocketLoopback` (exact2 LLP 1016 D6, 2026-11-27,
+expo/exact#1988), written `net.fetch loopback` and `net.websocket loopback`
+with no trailing modifier. `local-network` admits a host the URL writes as an
+RFC 1918, link-local or unique-local address (an IPv4-mapped IPv6 address by
+its IPv4), a link-local IPv6 address, or a `.local` name; never a name that
+merely resolves to one, and never the cloud metadata service, 169.254.169.254
+(its IPv4-mapped spelling included) or `fd00:ec2::254`. `loopback` admits
+`http:`/`https:` or `ws:`/`wss:` at any port on `is_loopback`: `127.0.0.0/8`,
+`[::1]`, IPv4-mapped IPv6 carrying `127.0.0.0/8`, or exact `localhost`
+(case-insensitive, at most one trailing dot). exact2's `grants` crate holds the
+same rules, and its `tests/parity.rs` holds both to
+`host/web/tests/fixtures/grants.json`. Replay on a refresh.
 
 ## Local patch 21, a host's check at every fetch hop and WebSocket open
 

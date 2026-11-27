@@ -496,6 +496,8 @@ test('the web matcher consumes the Rust grammar corpus', () => {
     const set = normalized(item.spec);
     expect(!grantError(set), item.spec).toBe(item.ok);
     for (const [url, admitted] of item.fetch ?? []) expect(admitsNetwork(set, url, 'fetch'), `${item.spec}: ${url}`).toBe(admitted);
+    if (item.spec === 'net.fetch loopback')
+      for (const [url] of item.fetch ?? []) expect(admitsNetwork(set, url, 'fetch', true), `${item.spec} render: ${url}`).toBe(false);
     for (const [url, admitted] of item.websocket ?? []) expect(admitsNetwork(set, url, 'websocket'), `${item.spec}: socket ${url}`).toBe(admitted);
     if (item.spec.startsWith('net.websocket ') && item.spec.includes('://*.'))
       for (const [url, admitted] of item.websocket ?? []) expect(admittingGrant(set, url, 'websocket'), `${item.spec}: socket line ${url}`).toBe(admitted ? item.spec : null);

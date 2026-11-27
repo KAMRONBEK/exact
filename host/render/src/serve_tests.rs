@@ -78,6 +78,31 @@ fn a_local_network_line_admits_local_names_and_no_address_range() {
 }
 
 #[test]
+fn a_loopback_line_admits_csp3_loopback_hosts_at_any_port() {
+    // LLP 1016 D6: emit the CSP3-valid host-source subset (`127.0.0.1:*`,
+    // `localhost:*`, `localhost.:*`) without CIDR or invalid bracketed IPv6
+    // tokens, and ignore malformed or non-CSP3-host declarations.
+    let policy = csp(
+        "net.fetch loopback\nnet.websocket loopback\nnet.fetch loopback development\n\
+         net.fetch local-network bogus\nnet.fetch https: extra\n\
+         net.fetch http://[::1]:8080\nnet.fetch https://a.test%3Bsample-marker",
+        Path::new("/nonexistent"),
+    );
+    assert!(
+        policy.contains(
+            "connect-src 'self' http://127.0.0.1:* https://127.0.0.1:* http://localhost:* \
+             https://localhost:* http://localhost.:* https://localhost.:* \
+             ws://127.0.0.1:* wss://127.0.0.1:* ws://localhost:* wss://localhost:* \
+             ws://localhost.:* wss://localhost.:*;"
+        ),
+        "{policy}"
+    );
+    assert!(!policy.contains("*.local"), "{policy}");
+    assert!(!policy.contains("sample-marker"), "{policy}");
+    assert!(!policy.contains("[::1]"), "{policy}");
+}
+
+#[test]
 fn connect_sources_use_app_grants_even_when_a_request_has_a_narrower_source_scope() {
     let policy = csp(
         "net.fetch https://a.test\nnet.fetch https://b.test\nnet.fetch https://c.test",
