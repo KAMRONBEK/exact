@@ -1007,6 +1007,9 @@ extension Agent {
         // A child lifted over the tab container is still the target's (LLP 1083.000 D4)
         let inside = sequence(first: hit, next: { self.presenter.layoutParent(of: $0) }).contains { $0 === v }
         if hit === v || inside || (hit is NodeView && v.isDescendant(of: hit)) { return nil }
+        if presenter.flightHost.hasFlyingAncestor(v) {
+            return "it is in an active sharedElement flight (flight views take no touches until they land; run `clock settle` first)"
+        }
         return Agent.covers(hit, at: location)
     }
 

@@ -32,6 +32,7 @@
 import AVFoundation
 import ExactPackage
 import Foundation
+import MediaCaptureObjC
 #if os(iOS)
 import UIKit
 #else
@@ -590,34 +591,83 @@ protocol CaptureAudioEngine: AnyObject {
     var notificationObject: AnyObject? { get }
     var hatchFormat: AVAudioFormat? { get }
     var voiceProcessingEnabled: Bool { get }
+    var needsRebuild: Bool { get }
     func setVoiceProcessing(_ enabled: Bool) throws
-    func inputFormat() -> AVAudioFormat
-    func installInputTap(format: AVAudioFormat, block: @escaping (AVAudioPCMBuffer, AVAudioTime) -> Void)
-    func removeInputTap()
+    func inputFormat() throws -> AVAudioFormat
+    func installInputTap(format: AVAudioFormat, block: @escaping (AVAudioPCMBuffer, AVAudioTime) -> Void) throws
+    func removeInputTap() throws
     func start() throws
     func stop()
+}
+
+extension CaptureAudioEngine {
+    var needsRebuild: Bool { false }
 }
 
 private final class LiveCaptureEngine: CaptureAudioEngine {
     let engine: AVAudioEngine
     var hatchFormat: AVAudioFormat?
+    private(set) var needsRebuild = false
 
     init(_ engine: AVAudioEngine) { self.engine = engine }
     var notificationObject: AnyObject? { engine }
-    var voiceProcessingEnabled: Bool { engine.inputNode.isVoiceProcessingEnabled }
-    func setVoiceProcessing(_ enabled: Bool) throws { try engine.inputNode.setVoiceProcessingEnabled(enabled) }
-    func inputFormat() -> AVAudioFormat { engine.inputNode.outputFormat(forBus: 0) }
-    func installInputTap(format: AVAudioFormat, block: @escaping (AVAudioPCMBuffer, AVAudioTime) -> Void) {
-        engine.inputNode.installTap(onBus: 0, bufferSize: 4096, format: format, block: block)
+
+    private func recordIfException(_ error: Error) -> Error {
+        if (error as NSError).domain == ExactMediaCaptureExceptionDomain { needsRebuild = true }
+        return error
     }
-    func removeInputTap() { engine.inputNode.removeTap(onBus: 0) }
+
+    var voiceProcessingEnabled: Bool {
+        do {
+            return try ExactMediaCaptureBridge.voiceProcessingEnabled(for: engine).boolValue
+        } catch {
+            _ = recordIfException(error)
+            return false
+        }
+    }
+
+    func setVoiceProcessing(_ enabled: Bool) throws {
+        do {
+            try ExactMediaCaptureBridge.setVoiceProcessing(enabled, for: engine)
+        } catch {
+            throw recordIfException(error)
+        }
+    }
+
+    func inputFormat() throws -> AVAudioFormat {
+        do {
+            return try ExactMediaCaptureBridge.outputFormat(for: engine, bus: 0)
+        } catch {
+            throw recordIfException(error)
+        }
+    }
+
+    func installInputTap(format: AVAudioFormat, block: @escaping (AVAudioPCMBuffer, AVAudioTime) -> Void) throws {
+        do {
+            try ExactMediaCaptureBridge.installTap(on: engine, bus: 0, bufferSize: 4096, format: format, block: block)
+        } catch {
+            throw recordIfException(error)
+        }
+    }
+
+    func removeInputTap() throws {
+        do {
+            try ExactMediaCaptureBridge.removeTap(on: engine, bus: 0)
+        } catch {
+            throw recordIfException(error)
+        }
+    }
+
     func start() throws {
-        engine.prepare()
-        try engine.start()
+        do {
+            try ExactMediaCaptureBridge.prepareAndStart(engine)
+        } catch {
+            throw recordIfException(error)
+        }
     }
+
     func stop() {
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
+        ExactMediaCaptureBridge.stop(engine)
     }
 }
 
@@ -705,8 +755,8 @@ final class ProcessCapture: ExactAudioSource {
         claim = nil
     }
 
-    private func installInputTap(on engine: CaptureAudioEngine, format: AVAudioFormat) {
-        engine.installInputTap(format: format) { [weak self] buffer, time in
+    private func installInputTap(on engine: CaptureAudioEngine, format: AVAudioFormat) throws {
+        try engine.installInputTap(format: format) { [weak self] buffer, time in
             guard let self else { return }
             self.lock.lock(); let taps = Array(self.taps.values); self.lock.unlock()
             for tap in taps { tap(buffer, time) }
@@ -715,8 +765,10 @@ final class ProcessCapture: ExactAudioSource {
 
     private func buildLiveEngine(_ options: CaptureOptions) throws -> LiveCaptureEngine {
         let engine = AVAudioEngine()
-        let input = engine.inputNode
-        if Self.wantsVoiceProcessing(options, inCall: isInCall()) { try input.setVoiceProcessingEnabled(true) }
+        let input = try ExactMediaCaptureBridge.inputNode(for: engine)
+        if Self.wantsVoiceProcessing(options, inCall: isInCall()) {
+            try ExactMediaCaptureBridge.setVoiceProcessing(true, for: engine)
+        }
         #if os(iOS)
         let s = AVAudioSession.sharedInstance()
         if let d = options.preferredIOBufferDuration { try? s.setPreferredIOBufferDuration(d) }
@@ -731,16 +783,14 @@ final class ProcessCapture: ExactAudioSource {
         }
         #endif
         let live = LiveCaptureEngine(engine)
-        let format = live.inputFormat()
+        let format = try live.inputFormat()
         // No input: a tap on a 0 Hz format raises an exception that ends the app, so refuse first.
         guard format.sampleRate > 0, format.channelCount > 0 else { throw CaptureError("NotFoundError: no microphone is available") }
         if let hatch = MediaCaptureModule.hatch {
             let mixer = AVAudioMixerNode()
-            engine.attach(mixer)
-            engine.connect(input, to: mixer, format: format)
             // The engine renders what reaches its output: the mixer feeds the main mixer at no volume,
             // which keeps its own output whole for a tap and never plays the input (§13's monitoring).
-            engine.connect(mixer, to: engine.mainMixerNode, format: format)
+            try ExactMediaCaptureBridge.attachAndConnectMixer(mixer, on: engine, input: input, format: format)
             mixer.volume = 0
             live.hatchFormat = format
             hatch(engine, mixer)
@@ -753,11 +803,11 @@ final class ProcessCapture: ExactAudioSource {
         let engine: CaptureAudioEngine = if let makeEngine { try makeEngine(options) } else { try buildLiveEngine(options) }
         let wantVP = Self.wantsVoiceProcessing(options, inCall: isInCall())
         if engine.voiceProcessingEnabled != wantVP { try engine.setVoiceProcessing(wantVP) }
-        let format = engine.inputFormat()
+        let format = try engine.inputFormat()
         // No input: a tap on a 0 Hz format raises an exception that ends the app, so refuse first.
         guard format.sampleRate > 0, format.channelCount > 0 else { throw CaptureError("NotFoundError: no microphone is available") }
         self.format = format
-        installInputTap(on: engine, format: format)
+        try installInputTap(on: engine, format: format)
         // Establish the generation and observer before `start()` so a configuration change
         // posted during startup cannot be missed; roll both back if `start()` throws.
         nextGeneration += 1
@@ -839,24 +889,20 @@ final class ProcessCapture: ExactAudioSource {
 
     /// Restart the existing engine on its current input format when it can keep running.
     /// Rebuilding a fresh engine re-selects a non-default device and can loop configuration changes.
+    /// An engine that previously raised an Obj-C exception (`needsRebuild`) is always discarded.
     private func tryRestartInPlace(_ options: CaptureOptions) -> Bool {
-        guard openEngine == nil, let engine else { return false }
-        engine.removeInputTap()
-        let wantVP = Self.wantsVoiceProcessing(options, inCall: isInCall())
-        if engine.voiceProcessingEnabled != wantVP {
-            do {
-                try engine.setVoiceProcessing(wantVP)
-            } catch {
-                log("media-capture: voice-processing update failed, rebuilding engine: \(error)")
-                return false
-            }
-        }
-        let format = engine.inputFormat()
-        guard format.sampleRate > 0, format.channelCount > 0 else { return false }
-        if let hatchFormat = engine.hatchFormat, hatchFormat != format { return false }
-        self.format = format
-        installInputTap(on: engine, format: format)
+        guard openEngine == nil, let engine, !engine.needsRebuild else { return false }
         do {
+            try engine.removeInputTap()
+            let wantVP = Self.wantsVoiceProcessing(options, inCall: isInCall())
+            if engine.voiceProcessingEnabled != wantVP {
+                try engine.setVoiceProcessing(wantVP)
+            }
+            let format = try engine.inputFormat()
+            guard format.sampleRate > 0, format.channelCount > 0 else { return false }
+            if let hatchFormat = engine.hatchFormat, hatchFormat != format { return false }
+            self.format = format
+            try installInputTap(on: engine, format: format)
             try engine.start()
             return true
         } catch {

@@ -1281,11 +1281,16 @@ export function appleImplementations(app, target, extensions, contractSources = 
       return [tag, Object.entries(view?.props ?? {}).filter(([, prop]) =>
         prop?.binds === true && ['handle<track>', 'option<handle<track>>'].includes(prop.type)).map(([name]) => name)];
     }));
+    const objc = (impl.json.sources?.objc ?? []).map(f => resolve(impl.dir, f));
+    const objcModule = impl.json.sources?.objcModule ? {
+      name: impl.json.sources.objcModule.name,
+      header: resolve(impl.dir, impl.json.sources.objcModule.header),
+    } : null;
     return [{
       swiftPackages: impl.json.swiftPackages, swiftPackagesSource: resolve(impl.dir, 'exact.json'), swiftPackageRoot: impl.root, swiftPackageInterface: i.name, swiftPackageTarget: target,
       privacyManifest: resolve(impl.dir, 'PrivacyInfo.xcprivacy'), extension,
       module: 'ExactPkg_' + extension.replace(/\W/g, '_'), className: impl.json.class,
-      sources: files.map(f => resolve(impl.dir, f)), plist, plistKeys: impl.json.plistKeys ?? null,
+      sources: files.map(f => resolve(impl.dir, f)), objc, objcModule, plist, plistKeys: impl.json.plistKeys ?? null,
       hostEvents: impl.json.hostEvents ?? null, views, trackProps, authenticator,
       start: i.declaration?.start === 'load', credentialMembers, frameworks: impl.json.frameworks ?? {},
       activity: impl.json.apple?.activity ?? null,

@@ -216,15 +216,42 @@ export function packageCompiler({ packages, packageDir, packageTargets, packageC
       const adapter = resolve(dir, `adapter-${p.module}.swift`);
       writeFileSync(adapter, packageAdapter(p));
       const sources = [...packageCopies[i], adapter];
+      // Compile package Objective-C sources via Clang module.modulemap + -I (LLP 1156.008.001 A3).
+      const objcImports = [], objcObjects = [], objcInputs = [];
+      if (p.objc?.length && p.objcModule) {
+        const objcDir = resolve(dir, `objc-${p.module}`);
+        mkdirSync(objcDir, { recursive: true });
+        const headerPath = realpathSync(p.objcModule.header);
+        const headerBytes = readFileSync(headerPath, 'utf8');
+        writeFileSync(resolve(objcDir, 'module.modulemap'), `module ${p.objcModule.name} {\n  header ${JSON.stringify(headerPath)}\n  export *\n}\n`);
+        objcImports.push('-I', objcDir);
+        objcInputs.push(headerBytes);
+        const [sdkName, targetFlags] = packageTargets.get(dir);
+        const targetAt = targetFlags.indexOf('-target'), sdkAt = targetFlags.indexOf('-sdk');
+        const clangTarget = targetAt >= 0 ? ['-target', targetFlags[targetAt + 1]] : [];
+        const clangSdk = sdkAt >= 0 ? ['-isysroot', targetFlags[sdkAt + 1]] : [];
+        const clangFsys = [];
+        for (let k = 0; k < targetFlags.length; k++) if (targetFlags[k] === '-Fsystem') clangFsys.push('-iframework', targetFlags[k + 1]);
+        const clangCache = resolve(packagesRoot, 'modules-module-cache');
+        p.objc.forEach((src, j) => {
+          const objName = `${p.module}_objc_${j}`;
+          const objPath = resolve(dir, `${objName}.o`);
+          const clangArgs = ['--sdk', sdkName, 'clang', '-O2', '-fobjc-arc', '-fobjc-arc-exceptions', '-fmodules',
+            `-fmodules-cache-path=${clangCache}`, ...clangTarget, ...clangSdk, ...clangFsys, '-I', dirname(headerPath), '-c', src, '-o', objPath];
+          const objKey = kept(objName, clangArgs, [src], [headerBytes], dir, () => run(clangArgs));
+          objcObjects.push(objPath);
+          objcInputs.push(objKey);
+        });
+      }
       const sdkImports = p.swiftPackages?.length ? ['-D', 'SWIFT_PACKAGE', ...product.imports] : [];
-      const object = [...objectArgs(p.module, sources, dir), ...sdkImports, ...buildCondition];
+      const object = [...objectArgs(p.module, sources, dir), ...objcImports, ...sdkImports, ...buildCondition];
       const os = dir === packageDir ? (ios ? tv ? 'tvos' : 'ios' : 'macos')
         : packageTargets.get(dir)[1].some(arg => arg.includes('-apple-ios')) ? 'ios' : 'macos';
       const floor = minimum && typeof minimum === 'object' ? minimum[os] : minimum;
-      const link = [...flags(dir), '-emit-library', resolve(dir, `${p.module}.o`),
+      const link = [...flags(dir), '-emit-library', resolve(dir, `${p.module}.o`), ...objcObjects,
         '-L', dir, '-lexact_modules', ...systemFrameworks([p], os, floor),
         ...moduleLibraryLinkArgs({ wrapped, module: p.module }), ...(p.swiftPackages?.length ? product.link : []), '-o', resolve(dir, `${p.module}.dylib`)];
-      kept(p.module, [...object, ...link], sources, [seamKey, product?.digest], dir, () => {
+      kept(p.module, [...object, ...link], sources, [seamKey, product?.digest, ...objcInputs], dir, () => {
         run(object);
         run(link);
       });

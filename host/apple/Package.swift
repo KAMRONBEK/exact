@@ -215,7 +215,8 @@ let tests: [Target] = [
     .target(name: "ExactPackage", path: "modules", exclude: ["ExactExtensions.swift", "ExactNativeModule.swift", "ExactNativeViews.swift", "ExactNativeTabs.swift", "ExactServices.swift", "ExactForma.swift"], sources: ["ExactPackage.swift"]),
     .target(name: "CameraImplementation", dependencies: ["ExactPackage"], path: "tests/CameraImplementation", exclude: ["exact.json"]),
     .target(name: "RecordingImplementation", dependencies: ["ExactPackage"], path: "tests/RecordingImplementation", exclude: ["exact.json"]),
-    .target(name: "MediaCaptureImplementation", dependencies: ["ExactPackage"], path: "tests/MediaCaptureImplementation"),
+    .target(name: "MediaCaptureObjC", path: "tests/MediaCaptureObjC", publicHeadersPath: ".", cSettings: [.unsafeFlags(["-fobjc-arc", "-fobjc-arc-exceptions"])]),
+    .target(name: "MediaCaptureImplementation", dependencies: ["ExactPackage", "MediaCaptureObjC"], path: "tests/MediaCaptureImplementation"),
     .target(name: "SignInImplementation", dependencies: ["ExactPackage"], path: "tests/SignInImplementation"),
     .target(name: "PasskeysImplementation", dependencies: ["ExactPackage"], path: "tests/PasskeysImplementation"),
     .target(name: "ExactWidgetTimeline", dependencies: ["ExactCore", "ExactSnapshot"], path: "widget", exclude: ["Timeline.swift"], sources: ["WidgetTimelineWaiters.swift"]),
@@ -234,7 +235,7 @@ let tests: [Target] = [
     // The test bundle installs the composition as it loads, before any test
     // (`ExactTestsInstall`, `TestsInstall.swift`).
     .target(name: "ExactTestsInstall", path: "tests/ExactTestsInstall"),
-    .testTarget(name: "ExactKitTests", dependencies: ["ExactWatchSync", "ExactPackage", "CameraImplementation", "RecordingImplementation", "MediaCaptureImplementation", "SignInImplementation", "PasskeysImplementation", "ExactWidgetTimeline", "ExactCore", "ExactSnapshot", "ExactKit", "ExactUpdates", "ExactComposition", "ExactTestsInstall"]
+    .testTarget(name: "ExactKitTests", dependencies: ["ExactWatchSync", "ExactPackage", "CameraImplementation", "RecordingImplementation", "MediaCaptureObjC", "MediaCaptureImplementation", "SignInImplementation", "PasskeysImplementation", "ExactWidgetTimeline", "ExactCore", "ExactSnapshot", "ExactKit", "ExactUpdates", "ExactComposition", "ExactTestsInstall"]
                 + allCapabilities.map { .target(name: $0.target) } + ["ExactFormaBinding", "ExactHeavyLeaves", "ExactSoundRender", "ExactNowPlaying", "ExactShare", "ExactSharePlain"], path: "tests/ExactKitTests",
                 resources: [.copy("ColorFixtures"), .copy("SnapshotFixtures")], swiftSettings: devTools + gallerySettings + caltrainSettings),
 ]
