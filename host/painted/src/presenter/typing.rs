@@ -7,7 +7,10 @@ impl<D: DataSource> Presenter<D> {
     /// Type into a focused field. `input` edits it now; `change` waits
     /// for Enter or blur, as for hardware typing (LLP 1069.001 D4).
     pub fn type_text(&mut self, id: ViewId, text: &str) -> Result<String, String> {
-        if !self.alert_allows(id) || self.host.route_visibility(id).1 {
+        if !self.alert_allows(id)
+            || self.host.route_visibility(id).1
+            || events::css_hidden(self.host.kernel(), id, self.alert_root())
+        {
             return Err(format!("view {id} is hidden or inert"));
         }
         let kernel = self.host.kernel();
@@ -82,7 +85,11 @@ impl<D: DataSource> Presenter<D> {
         // `TextControlElement::select`): one a focus handler sent the focus
         // away from takes it back, its handler hearing `focus` again, unless
         // that handler left it unable to take the focus.
-        if self.focus() != Some(id) && self.focusable(id) && !self.host.route_visibility(id).1 {
+        if self.focus() != Some(id)
+            && self.focusable(id)
+            && !self.host.route_visibility(id).1
+            && !events::css_hidden(self.host.kernel(), id, self.alert_root())
+        {
             if let Some(e) = self.set_focus(Some(id), now) {
                 return Err(e);
             }
@@ -781,6 +788,12 @@ impl<D: DataSource> Presenter<D> {
         // the remote's alone (LLP 1115.001.003 D4).
         if self.remote() && self.bar_node(id) {
             self.remote_key(id, (name, code, repeat), now_ms);
+            return;
+        }
+        if events::css_hidden(self.host.kernel(), id, self.alert_root()) {
+            if name == "Tab" {
+                self.key_default(name, code, repeat, now_ms);
+            }
             return;
         }
         // Nor do a flight's controls take a key, as they take no press.

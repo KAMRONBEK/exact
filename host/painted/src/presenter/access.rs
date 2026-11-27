@@ -266,10 +266,12 @@ pub struct Node {
 pub(super) struct State {
     /// What the last tree was built from: nothing is built while it stands.
     key: Option<Key>,
-    /// The last tree told, which surface it was (0: the page), and its pane.
+    /// The last tree told, which surface it was (0: the page), its pane,
+    /// and the display scale its boxes were scaled to.
     nodes: Vec<Node>,
     host: u32,
     pane: (i32, String),
+    scale: u32,
     told: bool,
     /// The page's tree and its route while a surface's is the tree told:
     /// what a live region of the page came to say meanwhile is spoken when
@@ -291,6 +293,7 @@ struct Key {
     bars: u32,
     frame: [i32; 4],
     menu: Option<(ViewId, u32)>,
+    scale: u32,
 }
 
 fn fnv(mut hash: u64, bytes: &[u8]) -> u64 {
@@ -417,7 +420,7 @@ impl<D: DataSource> Presenter<D> {
         words: impl FnOnce() -> Option<(String, String)>,
     ) -> Option<i32> {
         let kernel = self.host.kernel();
-        if !self.display.allows(kernel, node.id) {
+        if !self.display.allows(kernel, node.id) || !crate::paint::paints(kernel, node.id, None) {
             return None;
         }
         let painted = b
@@ -847,7 +850,7 @@ impl<D: DataSource> Presenter<D> {
     }
 
     /// What the tree is built from, read cheaply.
-    fn access_key(&mut self) -> Key {
+    fn access_key(&mut self, scale: u32) -> Key {
         let ten = |v: f32| (v * 10.0).round() as i32;
         let surface = self.surface().map(|s| (s.serial, s.revision));
         let bars = self.bars_revision();
@@ -862,6 +865,7 @@ impl<D: DataSource> Presenter<D> {
             bars,
             frame: self.chrome().frame.map(ten),
             menu: (self.menu).map(|id| (id, self.menu_scroll.to_bits())),
+            scale,
         }
     }
 
@@ -1115,14 +1119,16 @@ impl<D: DataSource> Presenter<D> {
     ///   ([`Node::grid`]: four words), and three strings: its name, its
     ///   value and its description.
     pub fn reader_access(&mut self, scale: f32, again: bool) -> Option<Vec<i32>> {
-        let key = self.access_key();
+        let scale_bits = scale.to_bits();
+        let key = self.access_key(scale_bits);
         if !again && self.access.told && self.access.key.as_ref() == Some(&key) {
             return None;
         }
         let (nodes, host, pane) = self.access_tree();
         self.access.key = Some(key);
         let same = self.access.told && host == self.access.host;
-        if !again && same && nodes == self.access.nodes && pane == self.access.pane {
+        let same_scale = self.access.scale == scale_bits;
+        if !again && same && same_scale && nodes == self.access.nodes && pane == self.access.pane {
             return None;
         }
         let state = &mut self.access;
@@ -1130,15 +1136,15 @@ impl<D: DataSource> Presenter<D> {
             c.into_iter().filter(|c| c.1 == change::LIVE).collect()
         };
         // Told whole: to a shell that holds nothing, when the tree is
-        // another window's, and when too much changed to tell apart. What a
-        // live region came to say is spoken even so, but to a shell that
-        // holds nothing.
+        // another window's, when the display scale changed (every pixel box
+        // moved), and when too much changed to tell apart. What a live region
+        // came to say is spoken even so, but to a shell that holds nothing.
         let (changes, whole) = match (again, same, &state.page) {
             (true, ..) => (Vec::new(), true),
             (_, true, _) => {
                 let new_pane = pane.0 != state.pane.0;
                 let all = Self::access_changes(&state.nodes, &nodes, new_pane);
-                match all.len() <= MOST_CHANGES {
+                match same_scale && all.len() <= MOST_CHANGES {
                     true => (all, false),
                     false => (spoken(all), true),
                 }
@@ -1187,7 +1193,8 @@ impl<D: DataSource> Presenter<D> {
                 string(&mut out, name);
             }
         }
-        (state.nodes, state.host, state.pane, state.told) = (nodes, host, pane, true);
+        (state.nodes, state.host, state.pane, state.scale, state.told) =
+            (nodes, host, pane, scale_bits, true);
         Some(out)
     }
 
@@ -1286,11 +1293,13 @@ impl<D: DataSource> Presenter<D> {
                 // handler may have moved it, bounded it anew, disabled it or
                 // made it inert.
                 let range = |p: &Self| {
-                    (p.host.kernel().node(view))
+                    let kernel = p.host.kernel();
+                    (kernel.node(view))
                         .filter(|n| {
                             n.node_type == NodeType::Control
                                 && n.props.bool(PropId::Disabled) != Some(true)
                                 && !p.host.route_visibility(view).1
+                                && !events::css_hidden(kernel, view, p.alert_root())
                         })
                         .map(|n| exact_kernel::Range::of(n.props))
                 };
@@ -1332,7 +1341,12 @@ impl<D: DataSource> Presenter<D> {
     /// (ARIA's keys for one) or an `aria-orientation="vertical"` slider.
     /// Whether it was such a node.
     pub(crate) fn access_step_range(&mut self, view: ViewId, up: bool, now_ms: f64) -> bool {
-        let Some(node) = self.host.kernel().node(view) else {
+        let kernel = self.host.kernel();
+        if self.host.route_visibility(view).1 || events::css_hidden(kernel, view, self.alert_root())
+        {
+            return false;
+        }
+        let Some(node) = kernel.node(view) else {
             return false;
         };
         let aria = node.props.str(PropId::AccessibilityRole);
