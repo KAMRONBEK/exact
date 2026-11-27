@@ -1078,8 +1078,9 @@ focused "picker"` passes when that node holds the keyboard focus, as every host'
 four points from the left and five from the top of the badge. Colors are
 sRGB `#rrggbb` (opaque) or `#rrggbbaa`. The optional tolerance is the
 largest allowed difference in each 8-bit channel, from 0 through 255.
-On Apple this includes the last frame of a GPU canvas, clipped and blended
-with the views around it. If the point depends on a live camera preview,
+On Apple this includes the last frame of a GPU canvas and hosted `iframe`
+snapshots, clipped and blended with the views around them: an unpartitioned
+`iframe` reads the node behind its transparent pixels. If the point depends on a live camera preview,
 a video frame the player withholds or a hosted layer without a readable
 picture, the assertion names the node and the reason.
 

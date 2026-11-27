@@ -335,6 +335,8 @@ final class WebArm: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
     var suppressLoad = false
     var recovering = false
     var invalidated = false
+    /// Whether the current web view draws a transparent background (`buildFrame`, not partitioned).
+    var transparent = false
     /// The guest is the web view's own document, not a frame in a wrapper
     /// (see `serve`).
     var direct = false
@@ -481,6 +483,7 @@ final class WebArm: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         webView.scrollView.backgroundColor = .clear
         if #available(iOS 15.0, *) { webView.underPageBackgroundColor = .clear }
         #endif
+        transparent = true
         return webView
     }
 
@@ -518,6 +521,7 @@ final class WebArm: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         #endif
         driver.seedInitialDocument(webView)
         browser.attach(webView)
+        transparent = false
         return webView
     }
 
@@ -1265,13 +1269,10 @@ final class WebArm: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
             sendReply(token: token, kind: 2, text: "iframe has no snapshot box")
             return
         }
-        let configuration = WKSnapshotConfiguration()
-        configuration.rect = webView.bounds
-        configuration.afterScreenUpdates = true
-        webView.takeSnapshot(with: configuration) { [weak self] image, error in
+        snapshotForHost(webView) { [weak self] image, error in
             guard let self else { return }
-            guard let image, let data = self.png(image) else {
-                self.sendReply(token: token, kind: 2, text: error?.localizedDescription ?? "WebKit returned no snapshot")
+            guard let image, let data = FrameCaptures.png(image) else {
+                self.sendReply(token: token, kind: 2, text: error ?? "WebKit returned no snapshot")
                 return
             }
             self.sendReply(token: token, kind: 0, data: data)
@@ -1287,15 +1288,6 @@ final class WebArm: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         case .failure(let error):
             sendReply(token: token, kind: 2, text: error.localizedDescription)
         }
-    }
-
-    func png(_ image: PlatformImage) -> Data? {
-        #if os(macOS)
-        guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
-        return NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:])
-        #else
-        return image.pngData()
-        #endif
     }
 
     func emit(kind: UInt32, text: String = "") {

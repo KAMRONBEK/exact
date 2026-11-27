@@ -2806,16 +2806,17 @@ iframe "https://example.com/wrapper.html" width=(1440 * z) height=(900 * z) appl
 ```html
 <!doctype html>
 <style>
-  html, body { margin: 0; overflow: hidden; scrollbar-width: none }
+  html, body { margin: 0; width: 1440px; height: 900px; overflow: hidden; scrollbar-width: none }
   iframe { display: block; width: 1440px; height: 900px; border: 0 }
 </style>
 <iframe src="/page.html"></iframe>
 <script>addEventListener("scroll", () => scrollTo(0, 0))</script>
 ```
 
-The wrapper hides its own legacy scrollbars and returns to the origin if focusing
-content scrolls it. The child can see `window !== window.top` and must allow
-framing. In a Mac window the child kept all four lines and their endings at 1×,
+The wrapper sizes `html` and `body` to the child's 1440 × 900 box so the document covers
+the frame at `apple.magnification` below 1, hides its own legacy scrollbars and returns to
+the origin if focusing content scrolls it. The child can see `window !== window.top` and
+must allow framing. In a Mac window the child kept all four lines and their endings at 1×,
 2× and 4×. The fixed outline went from solid to white in one device pixel at 2×
 and 4×. The reporter measured a ceiling of 8192 device pixels
 across one composited layer. On a 2× display a 1440 CSS-pixel-wide layer reaches
